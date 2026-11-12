@@ -255,12 +255,12 @@ describe("Handlers.resolveIncluded — batching is per level, not per resource",
     );
 
     expect(db.calls.length).toBe(2);
-    expect(db.calls[0]!.type).toBe("people");
+    expect(db.calls[0].type).toBe("people");
     // 50 articles, 25 distinct authors: the level is deduplicated before loading
-    expect(db.calls[0]!.ids.length).toBe(25);
-    expect(new Set(db.calls[0]!.ids).size).toBe(25);
-    expect(db.calls[1]!.type).toBe("companies");
-    expect(db.calls[1]!.ids.length).toBe(5);
+    expect(db.calls[0].ids.length).toBe(25);
+    expect(new Set(db.calls[0].ids).size).toBe(25);
+    expect(db.calls[1].type).toBe("companies");
+    expect(db.calls[1].ids.length).toBe(5);
 
     expect(included).toHaveLength(30);
   });
@@ -396,7 +396,7 @@ describe("Handlers.resolveIncluded — cycles", () => {
     { type: "comments", id: "200", relationships: { article: one("articles", "101") } },
     { type: "comments", id: "201", relationships: { article: one("articles", "100") } },
   ];
-  const primary = cyclic[0]!;
+  const primary = cyclic[0];
 
   it("terminates on a genuinely cyclic graph without duplicating anything", async () => {
     const db = store(cyclic);
@@ -424,7 +424,7 @@ describe("Handlers.resolveIncluded — cycles", () => {
     const db = store(selfReferential);
     const included = await run(
       Handlers.resolveIncluded(
-        selfReferential[1]!,
+        selfReferential[1],
         ["comments.article.comments.article.comments"],
         db.targets("comments", "articles"),
         { depth: 12 },

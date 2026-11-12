@@ -518,7 +518,7 @@ export const RemoveOperation = <R extends Any>(resource: R): RemoveOperation<R> 
     op: Schema.tag("remove"),
     ref: ResourceRef(resource),
     meta: Schema.optionalKey(AnyMeta),
-  }) as unknown as RemoveOperation<R>;
+  });
 
 // ---------------------------------------------------------------------------
 // Relationship operations
@@ -880,7 +880,7 @@ export const RequestDocument = <const Resources extends ReadonlyArray<Any>>(
     "atomic:operations": Schema.Array(Operations(resources)).check(Schema.isMinLength(1)),
     meta: Schema.optionalKey(AnyMeta),
     jsonapi: Schema.optionalKey(JsonApiObject),
-  }) as unknown as RequestDocument<Resources[number]>;
+  });
 
 // ---------------------------------------------------------------------------
 // The result document
@@ -911,7 +911,7 @@ export const Result = <const Resources extends ReadonlyArray<Any>>(
   Schema.Struct({
     data: Schema.optionalKey(Schema.NullOr(Schema.Union(resources))),
     meta: Schema.optionalKey(AnyMeta),
-  }) as unknown as Result<Resources[number]>;
+  });
 
 /**
  * The `atomic:results` response document schema: one result object per
@@ -978,7 +978,7 @@ export const ResultDocument = <
     links: Schema.optionalKey(TopLevelLinks),
     meta: Schema.optionalKey((options?.meta ?? AnyMeta) as M),
     jsonapi: Schema.optionalKey(JsonApiObject),
-  }) as unknown as ResultDocument<Resources[number], M>;
+  });
 
 // ---------------------------------------------------------------------------
 // Operation value constructors (client side)
@@ -1264,13 +1264,12 @@ export const addToRelationship = <R extends Any, const K extends ToManyName<R>>(
   relationship: K,
   data: ReadonlyArray<RefValueFor<ToManyTarget<R, K>>>,
   options?: { readonly meta?: MetaValue },
-): ToManyRelationshipOperation<"add", R, K, ToManyTarget<R, K>>["Type"] =>
-  ({
-    op: "add",
-    ref: { ...targetRef(resource.type, target), relationship },
-    data,
-    ...definedMember("meta", options?.meta),
-  }) as ToManyRelationshipOperation<"add", R, K, ToManyTarget<R, K>>["Type"];
+): ToManyRelationshipOperation<"add", R, K, ToManyTarget<R, K>>["Type"] => ({
+  op: "add",
+  ref: { ...targetRef(resource.type, target), relationship },
+  data,
+  ...definedMember("meta", options?.meta),
+});
 
 /**
  * Builds a `remove` operation on a to-many relationship (`many` or
@@ -1311,13 +1310,12 @@ export const removeFromRelationship = <R extends Any, const K extends ToManyName
   relationship: K,
   data: ReadonlyArray<RefValueFor<ToManyTarget<R, K>>>,
   options?: { readonly meta?: MetaValue },
-): ToManyRelationshipOperation<"remove", R, K, ToManyTarget<R, K>>["Type"] =>
-  ({
-    op: "remove",
-    ref: { ...targetRef(resource.type, target), relationship },
-    data,
-    ...definedMember("meta", options?.meta),
-  }) as ToManyRelationshipOperation<"remove", R, K, ToManyTarget<R, K>>["Type"];
+): ToManyRelationshipOperation<"remove", R, K, ToManyTarget<R, K>>["Type"] => ({
+  op: "remove",
+  ref: { ...targetRef(resource.type, target), relationship },
+  data,
+  ...definedMember("meta", options?.meta),
+});
 
 /**
  * The value {@link request} builds: an `atomic:operations` document holding
@@ -1437,11 +1435,10 @@ export interface ResultEntry<R, M extends MetaValue = never> {
 export const result = <const R extends ResourceValue | null, const M extends MetaValue = never>(
   data: R,
   meta?: M,
-): ResultEntry<R, M> =>
-  ({
-    data,
-    ...definedMember("meta", meta),
-  }) as ResultEntry<R, M>;
+): ResultEntry<R, M> => ({
+  data,
+  ...definedMember("meta", meta),
+});
 
 /**
  * The value {@link results} builds: an `atomic:results` document holding one
@@ -1508,12 +1505,11 @@ export const results = <const Entries extends ReadonlyArray<ResultValue>>(
     readonly meta?: MetaValue;
     readonly links?: LinksValue;
   },
-): ResultsValue<Entries> =>
-  ({
-    "atomic:results": entries,
-    ...definedMember("meta", options?.meta),
-    ...definedMember("links", options?.links),
-  }) as ResultsValue<Entries>;
+): ResultsValue<Entries> => ({
+  "atomic:results": entries,
+  ...definedMember("meta", options?.meta),
+  ...definedMember("links", options?.links),
+});
 
 /**
  * The JSON Pointer to the operation at `index` in a request document — for

@@ -730,10 +730,9 @@ export const Include = <
   resource: R | ReadonlyArray<R>,
   options?: O,
 ): Include<R, IncludePathsOf<R, O>> => {
-  const paths = includePathsFor(
-    toResources(resource),
-    options as IncludeOptions<Any> | AnySurface | undefined,
-  ) as ReadonlyArray<IncludePathsOf<R, O>>;
+  const paths = includePathsFor(toResources(resource), options) as ReadonlyArray<
+    IncludePathsOf<R, O>
+  >;
   return repeatable(
     CommaSeparated(
       // The whitelist rides on the literal schema as the `include`
@@ -750,7 +749,7 @@ export const Include = <
         ),
       ),
     ),
-  ) as Include<R, IncludePathsOf<R, O>>;
+  );
 };
 
 /**
@@ -1124,7 +1123,7 @@ const fieldsetOf = <Field extends string>(
         ),
       ),
     ),
-  ) as Fieldset<Field>;
+  );
 
 /**
  * The decoded `sort` schema: a list of `{ field, direction }` terms. Accepts
@@ -1159,7 +1158,7 @@ export interface Sort<Field extends string> extends Schema.decodeTo<SortCodec<Fi
  * @category constructors
  */
 export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): Sort<Field> =>
-  repeatable(SortCodec(fields)) as Sort<Field>;
+  repeatable(SortCodec(fields));
 
 // ---------------------------------------------------------------------------
 // The filter codec (docs/filter-grammar.md)
@@ -1306,7 +1305,7 @@ const filterIssues = (
   options: SchemaAST.ParseOptions,
 ): SchemaIssue.Issue =>
   issues.length === 1
-    ? issues[0]!
+    ? issues[0]
     : new SchemaIssue.Composite(
         ast,
         issues as [SchemaIssue.Issue, ...Array<SchemaIssue.Issue>],
@@ -1827,7 +1826,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
           "a heterogeneous endpoint (several resources) must use the per-key `filter: { … }` map instead",
       );
     }
-    filterFields = filterable(resources[0]!) as FieldCodecs;
+    filterFields = filterable(resources[0]);
     // The grammar's filterable fields ride on the decoded tree's schema as
     // the `filter` vocabulary, so `Middleware`'s support check treats
     // `filter: true` over a resource with no filterable field as unsupported

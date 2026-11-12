@@ -485,7 +485,7 @@ const walk = (
       );
     }
     const branch = isBranch(value);
-    const target = branch ? value.target : (value as Any);
+    const target = branch ? value.target : value;
     if (owner !== undefined) checkHop(owner, key, target, path);
     out.push({ path, target });
     if (branch) walk(target, value.children, path, depth + 1, out);

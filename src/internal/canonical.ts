@@ -111,7 +111,7 @@ export const orderPairs = (
 ): ReadonlyArray<Pair> => {
   const families: Array<Array<Pair>> = [[], [], [], [], [], []];
   for (const [key, value] of Object.entries(flat)) {
-    families[rank(key)]!.push(...pairsOf(key, Option.fromUndefinedOr(value)));
+    families[rank(key)].push(...pairsOf(key, Option.fromUndefinedOr(value)));
   }
   const [include, fields, filter, sort, page, other] = families as [
     Array<Pair>,

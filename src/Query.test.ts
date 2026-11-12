@@ -691,7 +691,7 @@ describe("Query.bracketKeys", () => {
     it("keys pass through Query.canonical in the fixed family order, whichever call bracketed them", () => {
       const flat = Query.canonical(wire);
       const keysOf = (s: string): ReadonlyArray<string> =>
-        s.split("&").map((pair) => pair.split("=")[0]!);
+        s.split("&").map((pair) => pair.split("=")[0]);
       expect(keysOf(flat({ offset: 20, limit: 10, authorId: "9", status: "open" }))).toEqual([
         "filter[authorId]",
         "filter[status]",
@@ -983,8 +983,8 @@ describe("Query.canonical", () => {
     expect(new Set(strings).size).toBe(1);
     expect(strings[0]).toBe(expected);
     // and the ordered pairs behind the string are the same list
-    expect(pairs(decode(spellings[2]!))).toEqual(pairs(decode(spellings[0]!)));
-    expect(pairs(decode(spellings[3]!))).toEqual(pairs(decode(spellings[0]!)));
+    expect(pairs(decode(spellings[2]))).toEqual(pairs(decode(spellings[0])));
+    expect(pairs(decode(spellings[3]))).toEqual(pairs(decode(spellings[0])));
   });
 
   it("decodes back to the same query through URLSearchParams and the same schema", () => {

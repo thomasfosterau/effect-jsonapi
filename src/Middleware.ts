@@ -380,7 +380,7 @@ const sourceOf = (
       if (Arr.isReadonlyArrayEmpty(keys)) return undefined;
       return {
         parameter:
-          keys[0]! +
+          keys[0] +
           keys
             .slice(1)
             .map((key) => `[${key}]`)

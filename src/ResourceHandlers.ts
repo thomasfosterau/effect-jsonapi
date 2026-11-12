@@ -572,17 +572,7 @@ export const readOnly = <
     });
   });
 
-  return { list, get } as unknown as ReadOnlyHandlers<
-    TResource,
-    TId,
-    TQuery,
-    E,
-    R,
-    RV,
-    RL,
-    RC,
-    Targets
-  >;
+  return { list, get };
 };
 
 /**
@@ -961,11 +951,7 @@ const loadRefs = <Targets extends Handlers.IncludeTargets>(
         return resource === undefined ? [] : [resource];
       });
     }),
-  ) as Effect.Effect<
-    ReadonlyArray<Assemble.ResourceLike>,
-    Handlers.IncludeTargetError<Targets>,
-    Handlers.IncludeTargetServices<Targets>
-  >;
+  );
 };
 
 /**
@@ -1064,17 +1050,5 @@ export const related = <
     });
   });
 
-  return (config.cardinality === "many" ? many : one) as unknown as (
-    request: RelatedRequest<TId>,
-  ) => Effect.Effect<
-    | Assemble.CollectionDocument<Assemble.ResourceLike>
-    | Assemble.ResourceDocument<Assemble.ResourceLike>
-    | {
-        readonly data: null;
-        readonly included?: readonly [];
-        readonly jsonapi: typeof Assemble.JSONAPI_MEMBER;
-      },
-    E | Assemble.IncludeError | Handlers.IncludeTargetError<Targets>,
-    R | RV | RL | Handlers.IncludeTargetServices<Targets>
-  >;
+  return config.cardinality === "many" ? many : one;
 };

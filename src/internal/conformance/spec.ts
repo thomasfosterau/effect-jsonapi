@@ -1073,7 +1073,7 @@ const errorStatusMatches: RuleImpl = {
         return skip(errorStatusMatches.rule, "no single-error document could be provoked");
       const findings: Array<Finding> = [];
       for (const observation of observations) {
-        const error = errorObjectsOf(observation.body)[0]!;
+        const error = errorObjectsOf(observation.body)[0];
         const status = error["status"];
         if (typeof status === "string" && status !== String(observation.status)) {
           findings.push(
@@ -1218,7 +1218,7 @@ const sparseFieldsets = (where: Slot): RuleImpl => {
                 Effect.gen(function* () {
                   const fields = byType.get(type);
                   if (fields === undefined || fields.length < 2) return;
-                  const requested = fields[0]!;
+                  const requested = fields[0];
                   const url = withQuery(base, [[`fields[${type}]`, requested]]);
                   const observation = yield* ctx.request({ url, headers: jsonApiAccept });
                   tally.probes += 1;

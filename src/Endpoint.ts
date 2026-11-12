@@ -1619,7 +1619,7 @@ export const collection = <
     readonly meta?: DocMeta;
   },
 ) =>
-  HttpApiEndpoint.get(options.name as Name, options.path as Path, {
+  HttpApiEndpoint.get(options.name, options.path, {
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
     query: Query.schema(
       resources as ReadonlyArray<Resources[number]>,
@@ -4369,7 +4369,7 @@ export const resource = <
         ...successOpt(deleteOp.config),
         ...statusOpt(deleteOp.config),
         ...idempotencyOpt(deleteOp.config),
-      } as never),
+      }),
     );
   }
 
@@ -4385,7 +4385,7 @@ export const resource = <
       const captured = relationshipConfig(relMap, name);
       if (Option.isNone(captured)) continue;
       const relConfig = captured.value;
-      const toMany = Relationship.isToMany(relationships[name]!);
+      const toMany = Relationship.isToMany(relationships[name]);
       // A constrained `include` names this resource's paths, not the target's:
       // a relationship endpoint only inherits that the parameter is on.
       const inheritedInclude = pick(relConfig, "include", gInclude);
@@ -4520,7 +4520,7 @@ export const ResourceDocument = <
         ? undefined
         : { included: wire(options.included, { toManyMeta: options.toManyMeta }) },
     ),
-  ) as DataDocument<WireSchema<S, TM>, WireSchema<Included, TM>>;
+  );
 
 /**
  * The `success:` document of a committed flat `create` / `update` whose
@@ -4653,7 +4653,7 @@ export const RelatedDocument = <
       Schema.NullOr(wire(resource)),
       options?.included === undefined ? undefined : { included: wire(options.included) },
     ),
-  ) as DataDocument<Schema.NullOr<WireSchema<S>>, WireSchema<Included>>;
+  );
 
 /**
  * The `success:` document of a flat `list` (or a to-many related fetch): a
@@ -4679,7 +4679,7 @@ export const FlatCollectionDocument = <
         ? undefined
         : { included: wire(options.included, { toManyMeta: options.toManyMeta }) },
     ),
-  ) as CollectionDocument<WireSchema<S, TM>, WireSchema<Included, TM>>;
+  );
 
 /**
  * The endpoint (and handler) name of a flat §7.4 related-resource fetch —
@@ -4786,8 +4786,7 @@ export const flatRelated = <const Key extends string>(options: FlatRelatedOption
     return HttpApiEndpoint.get(name, path, {
       params,
       query: Query.flatList(
-        (options.query ??
-          Schema.Struct(FlatQuery.pagination({ maxLimit: 100 }))) as Query.FlatListStruct,
+        options.query ?? Schema.Struct(FlatQuery.pagination({ maxLimit: 100 })),
         { include: false },
       ),
       success: FlatCollectionDocument(options.target),

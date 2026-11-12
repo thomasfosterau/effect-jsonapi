@@ -365,7 +365,7 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
   });
 
   it("skips, never passes, a collection that cannot show an order", async () => {
-    const { outcome } = await run(serve(profileSorter, [TASKS[0]!]));
+    const { outcome } = await run(serve(profileSorter, [TASKS[0]]));
     expect(outcome).toEqual({
       _tag: "Skipped",
       rule: expect.objectContaining({ id: RULE }),

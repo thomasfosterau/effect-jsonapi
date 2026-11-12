@@ -46,17 +46,17 @@ const Operations = Atomic.Operations([Article, Comment]);
 const Request = Atomic.RequestDocument([Article, Comment]);
 const Results = Atomic.ResultDocument([Article, Comment]);
 
-const decodeOperation = Schema.decodeUnknownSync(Operations as Schema.Codec<unknown, unknown>);
+const decodeOperation = Schema.decodeUnknownSync(Operations);
 // The issues a failed decode reports, each with its path, or `[]` on success.
 const issuesOf = (result: Result.Result<unknown, Schema.SchemaError>) =>
   Result.match(result, {
     onFailure: (error) => SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues,
     onSuccess: () => [],
   });
-const decodeRequest = Schema.decodeUnknownSync(Request as Schema.Codec<unknown, unknown>);
-const encodeRequest = Schema.encodeUnknownSync(Request as Schema.Codec<unknown, unknown>);
-const decodeResults = Schema.decodeUnknownSync(Results as Schema.Codec<unknown, unknown>);
-const encodeResults = Schema.encodeUnknownSync(Results as Schema.Codec<unknown, unknown>);
+const decodeRequest = Schema.decodeUnknownSync(Request);
+const encodeRequest = Schema.encodeUnknownSync(Request);
+const decodeResults = Schema.decodeUnknownSync(Results);
+const encodeResults = Schema.encodeUnknownSync(Results);
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -79,7 +79,7 @@ describe("extension constants", () => {
 
 describe("refs", () => {
   it("Ref decodes id-based identifiers", () => {
-    const ref = Schema.decodeUnknownSync(Ref(Article) as Schema.Codec<unknown, unknown>)({
+    const ref = Schema.decodeUnknownSync(Ref(Article))({
       type: "articles",
       id: "1",
     });
@@ -87,7 +87,7 @@ describe("refs", () => {
   });
 
   it("Ref decodes lid-based local identifiers", () => {
-    const ref = Schema.decodeUnknownSync(Ref(Article) as Schema.Codec<unknown, unknown>)({
+    const ref = Schema.decodeUnknownSync(Ref(Article))({
       type: "articles",
       lid: "a1",
     });
@@ -225,7 +225,7 @@ describe("operation schemas", () => {
       Schema.decodeUnknownSync(Op)({
         op: "update",
         data: { type: "widgets", id: "1", attributes },
-      }) as any;
+      });
     // present `undefined` is accepted (the runtime now matches the widened type)
     expect("note" in decode({ note: undefined }).data.attributes).toBe(true);
     // null clears, value sets, absent leaves unchanged
@@ -511,18 +511,16 @@ describe("ResultDocument", () => {
 // ---------------------------------------------------------------------------
 
 describe("isRelationshipOperation", () => {
-  type Op = Atomic.Operation<typeof Article | typeof Comment>["Type"];
-
   it("discriminates relationship operations from resource operations", () => {
     const relationshipOp = decodeOperation({
       op: "update",
       ref: { type: "comments", id: "5", relationship: "author" },
       data: { type: "people", id: "9" },
-    }) as Op;
+    });
     const resourceOp = decodeOperation({
       op: "remove",
       ref: { type: "comments", id: "5" },
-    }) as Op;
+    });
 
     expect(Atomic.isRelationshipOperation(relationshipOp)).toBe(true);
     expect(Atomic.isRelationshipOperation(resourceOp)).toBe(false);
@@ -539,7 +537,7 @@ describe("isRelationshipOperation", () => {
     const addOp = decodeOperation({
       op: "add",
       data: { type: "articles", attributes: { title: "Hello", body: "" } },
-    }) as Op;
+    });
     expect(Atomic.isRelationshipOperation(addOp)).toBe(false);
   });
 });
@@ -574,15 +572,13 @@ describe("operationsFor", () => {
   it("the record's schemas decode their wire forms", () => {
     const operations = Atomic.operationsFor(Article);
 
-    const add = Schema.decodeUnknownSync(operations.add as Schema.Codec<unknown, unknown>)({
+    const add = Schema.decodeUnknownSync(operations.add)({
       op: "add",
       data: { type: "articles", attributes: { title: "Hello", body: "" } },
     }) as { readonly op: string };
     expect(add.op).toBe("add");
 
-    const linkComments = Schema.decodeUnknownSync(
-      operations.relationships.comments.add as Schema.Codec<unknown, unknown>,
-    )({
+    const linkComments = Schema.decodeUnknownSync(operations.relationships.comments.add)({
       op: "add",
       ref: { type: "articles", id: "1", relationship: "comments" },
       data: [{ type: "comments", id: "5" }],
@@ -630,7 +626,7 @@ describe("Match integration (curried guards)", () => {
           op: "add",
           ref: { type: "articles", id: "1", relationship: "comments" },
           data: [{ type: "comments", id: "5" }],
-        }) as Op,
+        }),
       ),
     ).toBe("link 1 comments");
 
@@ -640,7 +636,7 @@ describe("Match integration (curried guards)", () => {
           op: "update",
           ref: { type: "articles", id: "1", relationship: "author" },
           data: null,
-        }) as Op,
+        }),
       ),
     ).toBe("set article author to null");
 
@@ -650,7 +646,7 @@ describe("Match integration (curried guards)", () => {
           op: "update",
           ref: { type: "comments", id: "5", relationship: "author" },
           data: { type: "people", id: "9" },
-        }) as Op,
+        }),
       ),
     ).toBe("set comment author");
 
@@ -659,7 +655,7 @@ describe("Match integration (curried guards)", () => {
         decodeOperation({
           op: "add",
           data: { type: "articles", attributes: { title: "Hello", body: "" } },
-        }) as Op,
+        }),
       ),
     ).toBe("add article");
 
@@ -668,7 +664,7 @@ describe("Match integration (curried guards)", () => {
         decodeOperation({
           op: "remove",
           ref: { type: "comments", id: "5" },
-        }) as Op,
+        }),
       ),
     ).toBe("remove comment");
   });
@@ -677,7 +673,7 @@ describe("Match integration (curried guards)", () => {
     const operation = decodeOperation({
       op: "remove",
       ref: { type: "articles", id: "1" },
-    }) as Op;
+    });
     expect(Atomic.targetsResource(operation, Article)).toBe(true);
     expect(Atomic.targetsResource(Article)(operation)).toBe(true);
     expect(Atomic.targetsResource(operation, Comment)).toBe(false);

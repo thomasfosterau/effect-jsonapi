@@ -51,15 +51,15 @@ const canned = (status: number, body: string, contentType = MEDIA_TYPE): HttpCli
     ),
   );
 
-const call = (client: HttpClient.HttpClient, decodeErrors = true) =>
+const call = (
+  client: HttpClient.HttpClient,
+  decodeErrors = true,
+): Promise<Exit.Exit<unknown, unknown>> =>
   Effect.runPromiseExit(
     Effect.gen(function* () {
       const api = yield* Client.make(Api, { baseUrl: "http://localhost", decodeErrors });
       return yield* api.people.get({ params: { id: Person.Id.make("1") }, query: {} });
-    }).pipe(Effect.provideService(HttpClient.HttpClient, client)) as Effect.Effect<
-      unknown,
-      unknown
-    >,
+    }).pipe(Effect.provideService(HttpClient.HttpClient, client)),
   );
 
 const failureOf = <A, E>(exit: Exit.Exit<A, E>): E => {
@@ -116,10 +116,7 @@ describe("Client.make({ decodeErrors: true })", () => {
             Effect.tapError(effect, (cause) => Effect.sync(() => void seen.push(cause))),
         });
         return yield* api.people.get({ params: { id: Person.Id.make("1") }, query: {} });
-      }).pipe(Effect.provideService(HttpClient.HttpClient, canned(409, body))) as Effect.Effect<
-        unknown,
-        unknown
-      >,
+      }).pipe(Effect.provideService(HttpClient.HttpClient, canned(409, body))),
     );
     expect(seen).toHaveLength(1);
     expect(Client.isErrorResponse(seen[0])).toBe(true);

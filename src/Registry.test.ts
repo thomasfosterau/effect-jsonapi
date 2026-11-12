@@ -149,7 +149,7 @@ describe("the router, over HTTP", () => {
   const json = async (response: Response) => ({
     status: response.status,
     contentType: response.headers.get("content-type"),
-    body: (await response.json()) as any,
+    body: await response.json(),
   });
 
   it("builds a Fetch-shaped handler at module init and answers a document", async () => {

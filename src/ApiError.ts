@@ -372,7 +372,7 @@ export const make =
       }
       static get wire() {
         // `this` is the user's final class, so decoded errors are `instanceof` it.
-        return makeWire(this as unknown as { new (...args: Array<any>): any }, {
+        return makeWire(this, {
           tag,
           status: config.status,
           code,

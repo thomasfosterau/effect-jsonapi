@@ -261,11 +261,11 @@ describe("blog example: writing", () => {
         expect(created.data?.relationships?.author.data.id).toBe(sampleAuthor.id);
         // The paginated comments relationship is created empty, links only.
         expect(created.data?.relationships?.comments.links.related).toBe(
-          `/articles/${created.data!.id}/comments`,
+          `/articles/${created.data.id}/comments`,
         );
 
         // and delete it again
-        yield* client.articles.delete({ params: { id: created.data!.id } });
+        yield* client.articles.delete({ params: { id: created.data.id } });
       }),
     );
   });
@@ -526,21 +526,19 @@ describe("blog example: relationship endpoints", () => {
         // Detach one comment
         yield* client.articles.removeCommentsRelationship({
           params: { id: articleId },
-          payload: { data: [Comment.ref(sampleComments[0]!.id)] },
+          payload: { data: [Comment.ref(sampleComments[0].id)] },
         });
 
         const afterRemove = yield* client.articles.commentsRelationship({
           params: { id: articleId },
           query: {},
         });
-        expect(afterRemove.data.map((identifier) => identifier.id)).toEqual([
-          sampleComments[1]!.id,
-        ]);
+        expect(afterRemove.data.map((identifier) => identifier.id)).toEqual([sampleComments[1].id]);
 
         // Re-attach it
         const afterAdd = yield* client.articles.addCommentsRelationship({
           params: { id: articleId },
-          payload: { data: [Comment.ref(sampleComments[0]!.id)] },
+          payload: { data: [Comment.ref(sampleComments[0].id)] },
         });
         expect(
           Arr.sort(

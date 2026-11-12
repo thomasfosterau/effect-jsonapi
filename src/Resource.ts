@@ -166,7 +166,7 @@ export const Identifier = <
     type: Schema.tag(type),
     id: (id ?? Id(type)) as IdSchema,
     meta: Schema.optionalKey(AnyMeta),
-  }) as Identifier<Type, IdSchema>;
+  });
 
 /**
  * The local-identifier schema for a resource type: `{ type, lid, meta? }`.
@@ -227,9 +227,7 @@ export const Ref = <R extends Any>(resource: R | (() => R)): Ref<R> => {
   // lazy thunk. `type` is a resource-only own property (never present on a
   // plain `() => R` thunk), so check for that instead.
   const thunk: () => R =
-    typeof resource === "function" && !("type" in resource)
-      ? (resource as () => R)
-      : () => resource as R;
+    typeof resource === "function" && !("type" in resource) ? resource : () => resource;
   return Schema.Union([
     Schema.suspend(() => thunk().identifier as R["identifier"]),
     Schema.suspend(() => LocalIdentifier(thunk().type) as LocalIdentifier<R["type"]>),
@@ -582,9 +580,9 @@ export const attribute = <
   Update,
   ResolveClearable<S, Clearable>
 > => {
-  const resource = (options?.resource ?? true) as boolean | "optional";
-  const create = (options?.create ?? "required") as AttributePresence;
-  const update = (options?.update ?? "optional") as "optional" | false;
+  const resource = options?.resource ?? true;
+  const create = options?.create ?? "required";
+  const update = options?.update ?? "optional";
   const clearable = options?.clearable ?? isNullable(schema);
   const declared = declare(schema, options);
   const config: RuntimeAttributeConfig = { schema: declared, resource, create, update, clearable };
@@ -1637,7 +1635,7 @@ export const attributeDescriptors = <R extends Any>(
 ): ReadonlyArray<AttributeDescriptor<keyof DeclaredAttributesOf<R> & string>> =>
   Object.entries(declaredAttributes(resource) as Schema.Struct.Fields).map(([key, field]) =>
     describeAttribute(key, field as Schema.Top),
-  ) as ReadonlyArray<AttributeDescriptor<keyof DeclaredAttributesOf<R> & string>>;
+  );
 
 /**
  * The relationship descriptor record of a resource definition — the
@@ -1922,7 +1920,7 @@ export const fieldKeys = <R extends Any>(resource: R): ReadonlyArray<FieldKeys<R
  * @category accessors
  */
 export const attributes = <R extends Any>(resource: R): AttributesOf<R> =>
-  resource.fields.attributes.fields as AttributesOf<R>;
+  resource.fields.attributes.fields;
 
 /**
  * The attribute field map of a resource definition **as declared** — the record
@@ -1986,7 +1984,7 @@ export const attributeAnnotations = <R extends Any>(resource: R): AttributeAnnot
   const fields = resource.fields.attributes.fields as Record<string, Schema.Top>;
   const result: Record<string, Schema.Annotations.Annotations | undefined> = {};
   for (const key of Object.keys(fields)) {
-    result[key] = Schema.resolveAnnotations(fields[key]!);
+    result[key] = Schema.resolveAnnotations(fields[key]);
   }
   return result as AttributeAnnotationsOf<R>;
 };
@@ -3107,11 +3105,10 @@ export const make = <
   // `extend` inherits them, `annotate` merges into them — so a resource never
   // silently loses its metadata the way a bare `schema.annotate(...)` would
   // lose the resource's own members.
-  const struct = (
+  const struct =
     options.annotations === undefined
       ? Schema.Struct(fields)
-      : Schema.Struct(fields).annotate(options.annotations)
-  ) as Schema.Struct<ResourceFields<Type, Attributes, Rels, Meta, IdSchema>>;
+      : Schema.Struct(fields).annotate(options.annotations);
 
   // Create payload relationships: `one` required, `optional`/`many` optional,
   // `paginated` excluded. The member itself is required iff a `one` exists.
@@ -3123,7 +3120,7 @@ export const make = <
       hasRequiredRelationship = true;
       createRelationshipFields[key] = schemaByKey[key]!;
     } else {
-      createRelationshipFields[key] = Schema.optionalKey(schemaByKey[key]!);
+      createRelationshipFields[key] = Schema.optionalKey(schemaByKey[key]);
     }
   }
   const createRelationshipsStruct = closedStruct(
@@ -3151,7 +3148,7 @@ export const make = <
   const updateRelationshipFields: Record<string, Schema.Top> = {};
   for (const [key, descriptor] of Object.entries(relationships)) {
     if (descriptor.kind === "paginated") continue;
-    updateRelationshipFields[key] = Schema.optionalKey(schemaByKey[key]!);
+    updateRelationshipFields[key] = Schema.optionalKey(schemaByKey[key]);
   }
 
   // The update payload's attributes are the tri-state `Schema.optional`
@@ -3175,7 +3172,7 @@ export const make = <
   // Closed like the enveloped payload's attributes.
   const updateInput = closedStruct(
     {
-      ...(updateAttributeFields(options.attributes) as Record<string, Schema.Top>),
+      ...updateAttributeFields(options.attributes),
       // No attribute may be named `id` (`validateFieldNames`), so this is the resource id.
       id,
     },

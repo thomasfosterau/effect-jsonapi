@@ -274,7 +274,7 @@ describe("family endpoints", () => {
   });
 
   it("polymorphic success document data is the member union", () => {
-    const successSchema = [...fetchNode.success][0]!;
+    const successSchema = [...fetchNode.success][0];
     const decoded = Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
       data: personWire,
     }) as { readonly data: { readonly type: string } };

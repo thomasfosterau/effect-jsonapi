@@ -643,7 +643,7 @@ describe("the per-resource transform pass", () => {
     expect(document.included?.[0]?.attributes).toEqual({ title: "Yo" });
     // the assertion that matters: one type, one shape
     expect(Object.keys(document.data.attributes)).toEqual(
-      Object.keys(document.included![0]!.attributes),
+      Object.keys(document.included![0].attributes),
     );
     // …and the relationship that carried the linkage went with the
     // fieldset, which exempts the member it linked (#494)
@@ -657,8 +657,8 @@ describe("the per-resource transform pass", () => {
     });
     expect(document.data[0]?.attributes).toEqual({ title: "Hi" });
     expect(document.included?.[0]?.attributes).toEqual({ title: "Yo" });
-    expect(Object.keys(document.data[0]!.attributes)).toEqual(
-      Object.keys(document.included![0]!.attributes),
+    expect(Object.keys(document.data[0].attributes)).toEqual(
+      Object.keys(document.included![0].attributes),
     );
   });
 

@@ -58,8 +58,7 @@ const fields = filterable(Article);
 const codec = Query.Filter(Article);
 type Ast = typeof codec.Type;
 const decode = (record: Record<string, unknown>): Ast => Schema.decodeUnknownSync(codec)(record);
-const encode = (ast: Ast): Record<string, string> =>
-  Schema.encodeSync(codec)(ast) as Record<string, string>;
+const encode = (ast: Ast): Record<string, string> => Schema.encodeSync(codec)(ast);
 const canonical = (record: Record<string, unknown>): ReadonlyArray<readonly [string, string]> =>
   Object.entries(encode(decode(record)));
 
@@ -929,7 +928,7 @@ const CASES = 400;
 const filterGenerator = (seed: number) => {
   const random = mulberry32(seed);
   const int = (max: number): number => Math.floor(random() * max);
-  const pick = <A>(items: ReadonlyArray<A>): A => items[int(items.length)]!;
+  const pick = <A>(items: ReadonlyArray<A>): A => items[int(items.length)];
 
   // One random literal generator per filterable attribute.
   type LiteralGenerators = {
@@ -1026,9 +1025,7 @@ describe(`Query.Filter: generated round trips (seed ${SEED}, ${CASES} cases)`, (
         (n) =>
           (P.isTagged(n, "And") || P.isTagged(n, "Or")) &&
           new Set(
-            n.members
-              .filter((m) => P.isTagged(m, "Compare"))
-              .map((m) => `${m.field}/${(m as Filter.Compare).op}`),
+            n.members.filter((m) => P.isTagged(m, "Compare")).map((m) => `${m.field}/${m.op}`),
           ).size < n.members.filter((m) => P.isTagged(m, "Compare")).length,
       ),
     ).toBe(true);
@@ -1159,7 +1156,7 @@ describe("Query.canonical with filter: true", () => {
         q.page = page;
       }
       if (random() < 0.8) q.filter = Filter.normalise(node(0) as Ast, fields);
-      return q as Decoded;
+      return q;
     };
 
     const cases = Array.from({ length: CANONICAL_CASES }, (_, i) => [i, decodedQuery()] as const);
@@ -1420,7 +1417,7 @@ describe("Endpoint.list with filter: true, end to end", () => {
     return {
       status: response.status,
       contentType: response.headers.get("content-type"),
-      body: (await response.json()) as any,
+      body: await response.json(),
     };
   };
 

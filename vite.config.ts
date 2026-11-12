@@ -151,10 +151,6 @@ export default defineConfig({
       // 563 sites: the type-level `as` narrowings `casting-awareness` and
       // `require-safety-comment-for-type-assertion` already count.
       "typescript/no-unsafe-type-assertion": "warn",
-      // 236 sites. Autofixable, but each removal needs review: the assertions
-      // in the conditional-type machinery can be load-bearing for the emitted
-      // declarations, which this check does not see.
-      "typescript/no-unnecessary-type-assertion": "warn",
       // 63 sites, 59 of them in tests (most in the type-level tests under test/).
       "typescript/no-unnecessary-type-parameters": "warn",
       // 43 sites, 39 in src/ (most in Resource.ts's mapped types).

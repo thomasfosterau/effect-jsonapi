@@ -204,7 +204,7 @@ const pageSameAttributes: Equals<
   NonNullable<(typeof page)["included"]>[number]["attributes"]
 > = true;
 // @ts-expect-error -- projected in `data` too, not only in `included`
-assertType<string>(page.data[0]!.attributes.body);
+assertType<string>(page.data[0].attributes.body);
 
 // A null primary has no resource to transform, and stays null.
 const empty = Handlers.data(null, { onResource: Handlers.project({ articles: ["title"] }) });
@@ -243,7 +243,7 @@ const withSelfLink = Handlers.transform<SelfLinkLambda>((resource) => ({
 const linked = Handlers.data(article, { included: [related], onResource: withSelfLink });
 assertType<string>(linked.data.links.self);
 assertType<string>(linked.data.attributes.body);
-assertType<string>(linked.included![0]!.links.self);
+assertType<string>(linked.included![0].links.self);
 // @ts-expect-error -- the lambda declares `self`, and nothing else
 assertType<string>(linked.data.links.related);
 

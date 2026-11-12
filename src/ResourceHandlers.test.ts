@@ -866,7 +866,7 @@ describe("readOnly", () => {
     const handlers = ResourceHandlers.readOnly({
       ops,
       segment: "people",
-      listQuery: peopleListQuery as ResourceHandlers.ListQuery<ListInput>,
+      listQuery: peopleListQuery,
       linkBase: Effect.succeed("https://example.test"),
     });
     expect(Arr.sort(Object.keys(handlers), Order.String)).toEqual(["get", "list"]);

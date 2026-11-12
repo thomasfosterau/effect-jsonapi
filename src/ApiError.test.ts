@@ -79,7 +79,7 @@ describe("ApiError.make", () => {
     };
     const error = Schema.decodeUnknownSync(ArticleNotFound.wire)(document);
     expect(error).toBeInstanceOf(ArticleNotFound);
-    expect((error as ArticleNotFound).id).toBe("42");
+    expect(error.id).toBe("42");
   });
 
   it("round-trips errors without fields", () => {

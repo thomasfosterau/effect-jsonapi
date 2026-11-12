@@ -439,7 +439,7 @@ describe("github example: writing", () => {
         expect(created.data?.relationships?.owner.data?.id).toBe(octocat.id);
 
         // and delete it again
-        yield* client.repositories.delete({ params: { id: created.data!.id } });
+        yield* client.repositories.delete({ params: { id: created.data.id } });
       }),
     );
   });
@@ -693,7 +693,7 @@ describe("github example: related resource endpoints", () => {
 
     // Full comment resources, paginated GitHub-style
     expect(document.data).toHaveLength(2);
-    expect(document.data[0]?.attributes.body).toBe(bugComments[0]!.attributes.body);
+    expect(document.data[0]?.attributes.body).toBe(bugComments[0].attributes.body);
     expect(document.meta?.total).toBe(3);
     expect(document.links?.next).toBe("/issues/1/comments?page[number]=2&page[size]=2");
   });

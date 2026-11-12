@@ -208,16 +208,17 @@ export interface Key extends Schema.decodeTo<Schema.String, Schema.String> {}
  * @since 0.15.0
  * @category schemas
  */
-export const Key: Key = Schema.String.pipe(
-  Schema.decodeTo(
-    Schema.String.check(
-      Schema.isMinLength(1),
-      Schema.isMaxLength(255),
-      Schema.isPattern(/^[\x20-\x7E]+$/, { title: "printable US-ASCII" }),
+export const Key: Key = ((): Key =>
+  Schema.String.pipe(
+    Schema.decodeTo(
+      Schema.String.check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(255),
+        Schema.isPattern(/^[\x20-\x7E]+$/, { title: "printable US-ASCII" }),
+      ),
+      SchemaTransformation.transform<string, string>({ decode: unquote, encode: (key) => key }),
     ),
-    SchemaTransformation.transform<string, string>({ decode: unquote, encode: (key) => key }),
-  ),
-) as Key;
+  ))();
 
 /**
  * The schema type of {@link Headers}: the request headers of an endpoint that
