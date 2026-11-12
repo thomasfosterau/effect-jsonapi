@@ -92,6 +92,7 @@ import * as Filter from "effect/Filter";
 import * as Layer from "effect/Layer";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import * as Rec from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -376,7 +377,7 @@ const sourceOf = (
     Match.when("Query", () => {
       const keys: Array<string> = [];
       for (const segment of path) {
-        if (typeof segment !== "string") break;
+        if (!P.isString(segment)) break;
         keys.push(segment);
       }
       if (Arr.isReadonlyArrayEmpty(keys)) return undefined;
@@ -390,11 +391,11 @@ const sourceOf = (
       };
     }),
     Match.when("Params", () => {
-      const key = path.find((segment): segment is string => typeof segment === "string");
+      const key = path.find((segment): segment is string => P.isString(segment));
       return key === undefined ? undefined : { parameter: key };
     }),
     Match.when("Headers", () => {
-      const key = path.find((segment): segment is string => typeof segment === "string");
+      const key = path.find((segment): segment is string => P.isString(segment));
       return key === undefined ? undefined : { header: key };
     }),
     Match.when("Payload", () =>
@@ -476,9 +477,7 @@ export const schemaErrorDocument = (
   // per leaf by the path the leaf sits at.
   const metaAt = indexErrorMeta(issue);
   const errors = leaves.map((leaf) => {
-    const path = leaf.wire.flatMap((key) =>
-      typeof key === "string" || typeof key === "number" ? [key] : [],
-    );
+    const path = leaf.wire.flatMap((key) => (P.isString(key) || P.isNumber(key) ? [key] : []));
     return { detail: leaf.message, source: sourceOf(part, path), meta: metaAt(leaf.path) };
   });
   if (!errors.some((error) => error.source !== undefined)) return toDocument(schemaError(part));

@@ -2025,9 +2025,9 @@ describe("Resource.annotate / Resource.annotations", () => {
     expect(attributeKeys(annotated)).toEqual(["name"]);
     expect(annotated.ref("1")).toEqual({ type: "widgets", id: "1" });
     expect(annotated.lidRef("a")).toEqual({ type: "widgets", lid: "a" });
-    expect(typeof annotated.document).toBe("function");
-    expect(typeof annotated.collection).toBe("function");
-    expect(typeof annotated.nullable).toBe("function");
+    expect(annotated).toHaveProperty("document", expect.any(Function));
+    expect(annotated).toHaveProperty("collection", expect.any(Function));
+    expect(annotated).toHaveProperty("nullable", expect.any(Function));
     // and it still decodes as the resource it is
     expect(
       Schema.decodeUnknownSync(annotated)({ type: "widgets", id: "1", attributes: { name: "n" } }),

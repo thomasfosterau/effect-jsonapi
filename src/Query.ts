@@ -47,11 +47,11 @@
  *
  * @since 0.1.0
  */
+import * as P from "effect/Predicate";
 import type * as SchemaAST from "effect/SchemaAST";
 import type * as Types from "effect/Types";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
-import * as P from "effect/Predicate";
 import * as Rec from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -790,7 +790,7 @@ export const IncludeList: Schema.decodeTo<
     Schema.Array(Schema.String),
     SchemaTransformation.transform<ReadonlyArray<string>, string | ReadonlyArray<string>>({
       decode: (value) =>
-        (typeof value === "string" ? [value] : value).flatMap((occurrence) =>
+        (P.isString(value) ? [value] : value).flatMap((occurrence) =>
           occurrence
             .split(",")
             .map((path) => path.trim())
@@ -1763,8 +1763,8 @@ export const schema = <R extends Any, const O extends Options<R>>(
   const include = options.include;
   // The include paths the endpoint legalises; none while `include` is off.
   let includable: ReadonlyArray<string> = [];
-  if (include === true || typeof include === "object") {
-    const includeOptions = (typeof include === "object" ? include : undefined) as never;
+  if (include === true || P.isObjectOrArray(include)) {
+    const includeOptions = (P.isObjectOrArray(include) ? include : undefined) as never;
     includable = includePathsFor(resources, includeOptions);
     // The paths are computed once: `Include` takes them as an allow-list,
     // which legalises exactly the same set.
@@ -1842,7 +1842,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
     // The bare `filter` key is malformed under the grammar; declared here so
     // it reaches the grammar's rejection rather than being dropped.
     flatFields.filter = Schema.optionalKey(FilterWireValue);
-  } else if (typeof options.filter === "object") {
+  } else if (P.isObjectOrArray(options.filter)) {
     nestedFields.filter = Schema.optionalKey(Schema.Struct(options.filter));
     for (const key of Object.keys(options.filter)) {
       flatFields[`filter[${key}]`] = Schema.optionalKey(Schema.String);

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Order from "effect/Order";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Endpoint from "./Endpoint.js";
 import * as Handlers from "./Handlers.js";
@@ -124,7 +125,7 @@ describe("included", () => {
     });
     expect(union.members).toEqual([Comment, Person, Company]);
     for (const member of union.members) {
-      expect(typeof (member as { readonly type?: unknown }).type).toBe("string");
+      expect(P.isString((member as { readonly type?: unknown }).type)).toBe(true);
     }
   });
 });

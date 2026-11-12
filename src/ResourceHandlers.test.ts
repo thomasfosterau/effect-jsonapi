@@ -17,6 +17,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as ApiError from "./ApiError.js";
 import type * as Assemble from "./Assemble.js";
@@ -832,7 +833,7 @@ describe("list", () => {
       );
       return LINK_NAMES.map((name) => {
         const link = document.links[name];
-        if (typeof link !== "string") throw new Error(`the \`${name}\` link is missing`);
+        if (!P.isString(link)) throw new Error(`the \`${name}\` link is missing`);
         return link;
       });
     };

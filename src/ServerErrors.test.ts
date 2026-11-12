@@ -476,7 +476,7 @@ describe("respond", () => {
 
   it("consults the caller's extra arms after the catalogue", async () => {
     const materialise = (cause: unknown) =>
-      typeof cause === "object" && cause !== null && "code" in cause && cause.code === "23505"
+      P.isObjectOrArray(cause) && "code" in cause && cause.code === "23505"
         ? Option.some(
             new ServerErrors.JsonapiError({
               status: 409,

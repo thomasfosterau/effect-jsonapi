@@ -1033,7 +1033,7 @@ describe(`Query.Filter: generated round trips (seed ${SEED}, ${CASES} cases)`, (
       has(
         (n) =>
           (P.isTagged(n, "In") || P.isTagged(n, "NotIn")) &&
-          n.values.some((v) => typeof v === "string" && /[,\\]/.test(v)),
+          n.values.some((v) => P.isString(v) && /[,\\]/.test(v)),
       ),
     ).toBe(true);
     expect(

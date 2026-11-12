@@ -28,6 +28,7 @@ import * as Bounded from "@thomasfosterau/effect-ext/Bounded";
 import * as Ids from "@thomasfosterau/effect-ext/Ids";
 import * as TriState from "@thomasfosterau/effect-ext/TriState";
 import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as Resource from "./Resource.js";
@@ -252,7 +253,7 @@ export const SortParam: Schema.Codec<
   Schema.decodeTo(
     Schema.String.check(Schema.isPattern(SORT_PATTERN)),
     SchemaTransformation.transform<string, string | ReadonlyArray<string>>({
-      decode: (value) => (typeof value === "string" ? value : value.join(",")),
+      decode: (value) => (P.isString(value) ? value : value.join(",")),
       encode: (value) => value,
     }),
   ),

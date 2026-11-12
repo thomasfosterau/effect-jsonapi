@@ -52,6 +52,7 @@ import * as Effect from "effect/Effect";
 import * as HashMap from "effect/HashMap";
 import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import * as Rec from "effect/Record";
 import type { JsonApiObject } from "./Document.js";
 import { serialise, withPagePairs } from "./internal/canonical.js";
@@ -1386,13 +1387,11 @@ const withQuery = (path: string, query: string): string =>
 
 // A request's canonical query, however it was handed over.
 const queryString = (query: string | ReadonlyArray<Pair>): string =>
-  typeof query === "string" ? query : serialise(query);
+  P.isString(query) ? query : serialise(query);
 
 // A link with a query string appended, in either link spelling.
 const linkWithQuery = (link: LinkValue, query: string): LinkValue =>
-  typeof link === "string"
-    ? withQuery(link, query)
-    : { ...link, href: withQuery(link.href, query) };
+  P.isString(link) ? withQuery(link, query) : { ...link, href: withQuery(link.href, query) };
 
 // The top-level links of a document: `links.self` wins over the `self`
 // option, and `query` is appended to whichever `self` the document ends up

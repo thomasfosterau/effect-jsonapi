@@ -58,6 +58,7 @@
  * @see {@link https://jsonapi.org/ext/atomic/}
  * @since 0.1.0
  */
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { AnyMeta, JsonApiObject, TopLevelLinks } from "./Document.js";
 import type { LinksValue, MetaValue, ResourceValue } from "./Handlers.js";
@@ -985,7 +986,7 @@ export const ResultDocument = <
 // ---------------------------------------------------------------------------
 
 const targetRef = (type: string, target: string | { readonly lid: string }): RefValue =>
-  typeof target === "string" ? { type, id: target } : { type, lid: target.lid };
+  P.isString(target) ? { type, id: target } : { type, lid: target.lid };
 
 /**
  * Builds an `add` operation value: creates a resource.
@@ -1533,9 +1534,7 @@ export const operationPointer = (index: number): string => `/atomic:operations/$
 // ---------------------------------------------------------------------------
 
 const isOperationValue = (value: unknown): value is { readonly op: string } =>
-  typeof value === "object" &&
-  value !== null &&
-  typeof (value as { readonly op?: unknown }).op === "string";
+  P.isObject(value) && P.isString(value["op"]);
 
 /**
  * Type guard: does this operation target a relationship (rather than a
@@ -1585,7 +1584,7 @@ export const isRelationshipOperation = <Op extends { readonly op: string }>(
   operation: Op,
 ): operation is Extract<Op, { readonly ref: { readonly relationship: string } }> => {
   const ref = (operation as { readonly ref?: unknown }).ref;
-  return typeof ref === "object" && ref !== null && "relationship" in ref;
+  return P.isObjectOrArray(ref) && "relationship" in ref;
 };
 
 /**
@@ -1615,7 +1614,7 @@ export type TargetsResource<Op, R extends Any> = Extract<Op, ResourceOperationTa
 const targetsResourceImpl = (operation: { readonly op: string }, resource: Any): boolean => {
   if (isRelationshipOperation(operation)) return false;
   const data = (operation as { readonly data?: unknown }).data;
-  if (data !== undefined && data !== null && typeof data === "object" && !Array.isArray(data)) {
+  if (data !== undefined && P.isObjectOrArray(data) && !Array.isArray(data)) {
     return (data as { readonly type?: unknown }).type === resource.type;
   }
   const ref = (operation as { readonly ref?: { readonly type?: unknown } | undefined }).ref;

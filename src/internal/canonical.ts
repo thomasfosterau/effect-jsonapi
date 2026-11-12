@@ -6,6 +6,7 @@
  *
  * @internal
  */
+import * as P from "effect/Predicate";
 import type * as Schema from "effect/Schema";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -74,8 +75,8 @@ export type FlatQuery = Readonly<Partial<Record<string, Schema.Json>>>;
 const pairsOf = (key: string, member: FlatValue): ReadonlyArray<Pair> => {
   if (Option.isNone(member) || member.value === null) return [];
   const value = member.value;
-  if (typeof value === "string") return [[key, value]];
-  if (typeof value === "number" || typeof value === "boolean") return [[key, String(value)]];
+  if (P.isString(value)) return [[key, value]];
+  if (P.isNumber(value) || P.isBoolean(value)) return [[key, String(value)]];
   if (Array.isArray(value)) {
     return key === "include"
       ? [[key, value.map(String).join(",")]]

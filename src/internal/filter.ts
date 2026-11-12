@@ -316,7 +316,7 @@ export const decodeFilter = (
     if (value === undefined) continue;
     const segments = keySegments(key);
     let raw: string;
-    if (typeof value === "string") {
+    if (P.isString(value)) {
       raw = value;
     } else if (segments !== undefined && isListPosition(segments)) {
       // The repeated-key spelling of a comma list: `filter[f]=a&filter[f]=b`

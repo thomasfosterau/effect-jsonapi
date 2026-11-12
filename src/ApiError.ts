@@ -342,18 +342,16 @@ export const make =
     const fields = (config.fields ?? {}) as Fields;
     const fieldKeys = Object.keys(fields);
     const code = config.code ?? snakeCase(tag);
-    const detail =
-      typeof config.detail === "function"
-        ? config.detail
-        : config.detail !== undefined
-          ? () => config.detail as string
-          : undefined;
-    const source =
-      typeof config.source === "function"
-        ? config.source
-        : config.source !== undefined
-          ? () => config.source as typeof ErrorSource.Type
-          : undefined;
+    const detail = P.isFunction(config.detail)
+      ? config.detail
+      : config.detail !== undefined
+        ? () => config.detail as string
+        : undefined;
+    const source = P.isFunction(config.source)
+      ? config.source
+      : config.source !== undefined
+        ? () => config.source as typeof ErrorSource.Type
+        : undefined;
 
     // The conditional `MissingSelfGeneric` branch only matters at the user's
     // `extends` clause, where `Self` is concrete — cast it away here.

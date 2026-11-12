@@ -46,6 +46,7 @@
  */
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
+import * as P from "effect/Predicate";
 import type * as ApiError from "./ApiError.js";
 import type * as Document from "./Document.js";
 import * as Handlers from "./Handlers.js";
@@ -533,9 +534,9 @@ export interface Pagination {
 // ---------------------------------------------------------------------------
 
 const toLinkString = (value: LinkLike): string => {
-  if (typeof value === "string") return value;
+  if (P.isString(value)) return value;
   if (value instanceof URL) return value.href;
-  return typeof value.href === "string" ? value.href : value.href.href;
+  return P.isString(value.href) ? value.href : value.href.href;
 };
 
 /**
@@ -544,7 +545,7 @@ const toLinkString = (value: LinkLike): string => {
  */
 const readRelationship = (resource: ResourceLike, key: string): RelationshipObject | undefined => {
   const value = resource.relationships?.[key];
-  if (value === null || typeof value !== "object") return undefined;
+  if (!P.isObjectKeyword(value) || P.isFunction(value)) return undefined;
   if (Array.isArray(value)) return { data: value as ReadonlyArray<Ref> };
   if ("data" in value) return value as RelationshipObject;
   if ("type" in value && "id" in value) return { data: value as Ref };
@@ -678,9 +679,9 @@ const toWireValue = <A>(value: A): WireValue => {
   if (Array.isArray(value)) {
     return value.map((entry) => (entry === undefined ? null : toWireValue(entry)));
   }
-  if (value !== null && typeof value === "object") {
-    const toJson = (value as { readonly toJSON?: unknown }).toJSON;
-    if (typeof toJson === "function") return toWireValue(toJson.call(value));
+  if (P.isObjectOrArray(value)) {
+    const toJson = P.hasProperty(value, "toJSON") ? value.toJSON : undefined;
+    if (P.isFunction(toJson)) return toWireValue(toJson.call(value));
     const out: { [key: string]: WireValue } = {};
     for (const [key, entry] of Object.entries(value)) {
       // An own `__proto__` member (as `JSON.parse` gives) stays a member.

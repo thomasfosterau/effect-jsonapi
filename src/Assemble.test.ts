@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as P from "effect/Predicate";
 import * as Rec from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as ApiError from "./ApiError.js";
@@ -150,7 +151,7 @@ describe("Assemble.resource", () => {
 
   it("coerces URL `links.self` and relationship `links.related` to wire strings", async () => {
     const document = await run(Assemble.resource(person("p1")));
-    expect(typeof document.data.links?.self).toBe("string");
+    expect(P.isString(document.data.links?.self)).toBe(true);
     const rels = document.data.relationships as Record<string, { links: { related: unknown } }>;
     expect(rels["birthPlace"]?.links.related).toBe("https://example.test/people/p1/birthPlace");
     expect(rels["officeHoldings"]?.links.related).toBe(
