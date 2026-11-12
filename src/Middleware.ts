@@ -372,7 +372,7 @@ const jsonPointer = (path: ReadonlyArray<string | number>): string =>
 const sourceOf = (
   part: RequestPart,
   path: ReadonlyArray<string | number>,
-): typeof ErrorSource.Type | undefined =>
+): ErrorSource | undefined =>
   Match.value(part).pipe(
     Match.when("Query", () => {
       const keys: Array<string> = [];

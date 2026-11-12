@@ -156,7 +156,7 @@ export class ValidationFailure extends Schema.TaggedError<
  * @since 0.16.0
  * @category models
  */
-export type ErrorObject = typeof Document.ErrorObject.Type;
+export type ErrorObject = Document.ErrorObject;
 
 /**
  * The document {@link JsonapiError.toDocument} builds: `errors` plus the

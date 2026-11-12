@@ -286,7 +286,7 @@ export type JsonApiObject = typeof JsonApiObject.Type;
  * @since 0.1.0
  * @category constants
  */
-export const v1_1: typeof JsonApiObject.Type = { version: "1.1" };
+export const v1_1: JsonApiObject = { version: "1.1" };
 
 // ---------------------------------------------------------------------------
 // Error objects

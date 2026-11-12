@@ -838,7 +838,7 @@ export interface IncludedResource {
 export interface DocumentMembers {
   readonly meta?: { readonly [key: string]: unknown } | undefined;
   readonly links?: { readonly [key: string]: unknown } | undefined;
-  readonly jsonapi?: typeof JsonApiObject.Type | undefined;
+  readonly jsonapi?: JsonApiObject | undefined;
 }
 
 /**

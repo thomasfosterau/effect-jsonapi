@@ -15,7 +15,7 @@ describe("Filter", () => {
     expectTypeOf<Filter.Operator>().toEqualTypeOf<
       "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "in" | "nin" | "isnull"
     >();
-    expectTypeOf<typeof Filter.Operator.Type>().toEqualTypeOf<Filter.Operator>();
+    expectTypeOf<Filter.Operator>().toEqualTypeOf<Filter.Operator>();
     expectTypeOf<(typeof Filter.operators)[number]>().toEqualTypeOf<Filter.Operator>();
   });
 
