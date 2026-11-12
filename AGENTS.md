@@ -87,14 +87,14 @@ The same split explains why filtering has two forms with different flat encoding
 - `pnpm install` — dependencies, the Vite+ git hooks (pre-commit runs `vp staged`: format with fixes, then lint without, on staged files) and, through the root `prepare` script, the Effect-patched `tsc` / `oxlint` binaries. There is **no pre-push hook** — run the gates yourself.
 - `vp check` — format + lint (Oxfmt + Oxlint); the lint is type-aware through oxlint-tsgolint (`typeAware` + `typeCheck` in `vite.config.ts`), reading each file's nearest `tsconfig.json`, so it never depends on `dist/`. `vp run check` — the type gate: sources + colocated tests + type-level tests (`typecheck`), the emitted declarations (`typecheck:dist`, which builds `dist/` first) and every example. They are different commands.
 - `vp run -r test:unit` — the root suite and each example's, under `vite-plus/test`.
-- `vp run typecheck:floor` — a typed `Client.make` consumer (`test/floor/`) compiled against the packed package and `effect` 4.1.0 exactly, the peer floor (#586); needs network and `dist/`; CI runs it as its own job. Not part of `vp run check`. Validate a change to it by running with `EFFECT_VERSION=4.0.6` (must fail).
+- `vp run typecheck:floor` — a typed `Client.make` consumer (`test/floor/`) compiled against the packed package and `effect` 4.1.0 exactly, the peer floor (#586); needs network and `dist/`; the last gate of `vp run ci`. Not part of `vp run check`. Validate a change to it by running with `EFFECT_VERSION=4.0.6` (must fail).
 - `vp run build` — `vp pack`, then `tsc -p tsconfig.build.json` → `dist/`.
 - `vp run docgen` — build `dist/`, then type-check and execute every JSDoc `@example`; generate the API docs under `docs/`.
 - `vp run test:coverage` — the root suite under one Istanbul map at `coverage/coverage-final.json`, which `fallow audit` reads for exact per-function CRAP scores (`health.coverage` in `.fallowrc.json`). Without it fallow scores every function as uncovered.
 - `vp exec fallow audit --base origin/trunk` — change-set review (dead code, complexity, duplication); not a CI gate.
 - `pnpm changeset` — add a changeset.
 
-Invoke everything through `vp` (`vp exec` instead of `npx`; `vp run <task>` instead of bare `pnpm run`). CI sets up with `voidzero-dev/setup-vp`, installs with `--frozen-lockfile --ignore-scripts` and then runs `pnpm run prepare` explicitly (see `.github/workflows/ci.yml`).
+Invoke everything through `vp` (`vp exec` instead of `npx`; `vp run <task>` instead of bare `pnpm run`). CI sets up with `voidzero-dev/setup-vp`, installs with `--frozen-lockfile --ignore-scripts` and then runs `vp run ci` and nothing else, on Node.js `lts` and the newest released line (see `.github/workflows/ci.yml`). The `ci` task in `vite.config.ts` is the whole pipeline in order — `pnpm run prepare`, `build`, `vp check`, `check`, `-r test:unit`, `docgen`, `pnpm audit --audit-level high`, `typecheck:floor` — stopping at the first failure; run it locally to reproduce CI exactly (it needs network for the last two).
 
 ## Verification
 
@@ -109,7 +109,7 @@ Before you report work as done, run the gates below in order and quote each comm
 7. `vp run test:coverage`, then `vp exec fallow audit --base origin/trunk` — the fallow gate reads the coverage map on disk and never refreshes it.
 8. A changeset when the change alters published behaviour (rule: [Branches and pull requests](#branches-and-pull-requests)).
 
-None needs a credential, a database, a browser or Docker. CI also runs `pnpm audit --audit-level high`.
+None needs a credential, a database, a browser or Docker. CI runs `vp run ci`, which adds `pnpm audit --audit-level high` and `vp run typecheck:floor` to steps 2–6.
 
 ## Branches and pull requests
 

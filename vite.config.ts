@@ -314,6 +314,39 @@ export default defineConfig({
   },
   run: {
     tasks: {
+      // The whole CI pipeline, as one task: `.github/workflows/ci.yml` runs
+      // exactly `vp run ci` after its install, on each Node line of its
+      // matrix, so a green local `vp run ci` is a green CI run. It runs the
+      // gates in order and stops at the first failure:
+      //
+      // 1. `pnpm run prepare`: the Effect-patched `tsc` / `oxlint` every gate
+      //    runs on. CI installs with `--ignore-scripts`, so the repository's
+      //    own `prepare` runs here, and locally it is an idempotent re-run.
+      // 2. `build` first, so `check`'s `typecheck:dist`, the entry-point test,
+      //    `docgen` and `typecheck:floor` read a fresh `dist/` (a cache hit
+      //    after this).
+      // 3. `vp check` (format + lint), then `check` (the type gates), the
+      //    unit suites of the root and every example, and `docgen` (every
+      //    JSDoc `@example` compiled and executed).
+      // 4. `pnpm audit --audit-level high`, then `typecheck:floor` (#586);
+      //    both need network.
+      //
+      // A shell chain rather than `dependsOn`, because the order matters and a
+      // graph would run independent gates in parallel.
+      ci: {
+        command: [
+          "node --version",
+          "pnpm run prepare",
+          "vp run build",
+          "vp check",
+          "vp run --concurrency-limit 2 check",
+          "vp run -r test:unit",
+          "vp run docgen",
+          "pnpm audit --audit-level high",
+          "vp run typecheck:floor",
+        ].join(" && "),
+        cache: false,
+      },
       // The CI type gate, as one task: the sources + colocated tests + the
       // type-level tests (`typecheck`), the emitted declarations
       // (`typecheck:dist`, which builds `dist/` first), and every example.
@@ -352,7 +385,7 @@ export default defineConfig({
       // admits, so the published declarations cannot silently need a newer
       // effect. Reads `dist/` (via `pnpm pack`), hence `build`. See
       // test/floor/check.sh. Needs network (a scratch `pnpm install`), so it is
-      // not in `check`; CI runs it as its own job.
+      // not in `check`; `ci` runs it last.
       "typecheck:floor": {
         command: "bash test/floor/check.sh",
         dependsOn: ["build"],
@@ -391,8 +424,8 @@ export default defineConfig({
         cache: false,
       },
       // Type-checks AND executes every JSDoc `@example`, and generates the API
-      // docs under docs/. Not part of `check`: it is a separate CI step, so a
-      // broken example fails visibly on its own line. Depends on `build`
+      // docs under docs/. Not part of `check`: `ci` runs it after the unit
+      // suites, so a broken example names `docgen` as the failing gate. Depends on `build`
       // because docgen 4.x resolves an example's package imports through the
       // package's `exports`, i.e. against `dist/`, not `src/`.
       docgen: {
