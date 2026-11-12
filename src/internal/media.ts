@@ -105,11 +105,11 @@ const unquote = (value: string): string =>
 const QVALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/;
 
 // One media range of an `Accept` / `Content-Type` value: its lowercased base,
-// its parameters in order, and its `q` weight (`undefined` when malformed).
+// its parameters in order, and its `q` weight (`None` when malformed).
 interface MediaRange {
   readonly base: string;
   readonly parameters: ReadonlyArray<readonly [name: string, value: string]>;
-  readonly weight: number | undefined;
+  readonly weight: Option.Option<number>;
 }
 
 /**
@@ -126,7 +126,7 @@ interface MediaRange {
  * `;q=0.8;foo=bar` has none.
  *
  * `weight` defaults to `1` (RFC 9110 §12.4.2) when the entry carries no `q`,
- * and is `undefined` when the entry carries a malformed `q` — one outside the
+ * and is `None` when the entry carries a malformed `q` — one outside the
  * `qvalue` grammar (`0` to `1`, at most three decimals). Both callers (the
  * §5 middleware and a host's representation negotiation) read a malformed
  * weight as the default `1` — never a refusal — but the parser reports it
@@ -145,9 +145,9 @@ export const parseMediaType = (entry: string): MediaRange => {
     parameters.push([name, unquote(value)] as const);
     return Option.none();
   });
-  const weight: number | undefined = Option.match(quality, {
-    onNone: () => 1,
-    onSome: (value) => (QVALUE.test(value) ? Number(value) : undefined),
+  const weight = Option.match(quality, {
+    onNone: () => Option.some(1),
+    onSome: (value) => (QVALUE.test(value) ? Option.some(Number(value)) : Option.none()),
   });
   return { base: baseMediaType(first ?? ""), parameters, weight };
 };

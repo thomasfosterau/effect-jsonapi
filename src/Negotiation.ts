@@ -378,7 +378,7 @@ const acceptEntries = (
       return {
         base,
         clean: base !== MEDIA_TYPE || clean(parameters),
-        weight: weight ?? 1,
+        weight: Option.getOrElse(weight, () => 1),
       };
     });
 

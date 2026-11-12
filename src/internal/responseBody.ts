@@ -19,17 +19,19 @@ import { isJsonObject, unlinkedIncluded } from "./linkage.js";
 
 /**
  * The response text of a body whose bytes are already settled — everything the
- * package's own endpoints emit. `undefined` means "this response cannot be
+ * package's own endpoints emit. `None` means "this response cannot be
  * reproduced byte for byte" (a stream, a form, a raw value the platform will
  * serialise later).
  */
-export const bodyText = (response: HttpServerResponse.HttpServerResponse): string | undefined => {
+export const bodyText = (
+  response: HttpServerResponse.HttpServerResponse,
+): Option.Option<string> => {
   const body = response.body;
   return Match.value(body).pipe(
-    Match.tag("Empty", () => ""),
-    Match.tag("Uint8Array", (body) => new TextDecoder().decode(body.body)),
-    Match.tag("Raw", (body) => (P.isString(body.body) ? body.body : undefined)),
-    Match.orElse(() => undefined),
+    Match.tag("Empty", () => Option.some("")),
+    Match.tag("Uint8Array", (body) => Option.some(new TextDecoder().decode(body.body))),
+    Match.tag("Raw", (body) => Option.liftPredicate(body.body, P.isString)),
+    Match.orElse(() => Option.none<string>()),
   );
 };
 
@@ -84,7 +86,7 @@ export const withCreatedLocation = (
   response: HttpServerResponse.HttpServerResponse,
 ): HttpServerResponse.HttpServerResponse => {
   if (response.status !== 201 || response.headers["location"] !== undefined) return response;
-  return Option.fromUndefinedOr(bodyText(response)).pipe(
+  return bodyText(response).pipe(
     Option.flatMap(documentLocation),
     Option.match({
       onNone: () => response,
@@ -128,11 +130,10 @@ export const unlinkedOnWire = (
   fields?: Parameters<typeof unlinkedIncluded>[1],
 ): ReadonlyArray<string> => {
   if (response.status < 200 || response.status >= 300) return [];
-  const text = bodyText(response);
   // Cheap pre-filter: a document with no `included` member can't violate it,
   // so most responses are never parsed a second time.
-  if (text === undefined || !text.includes('"included"')) return [];
-  return Option.match(parseJsonValue(text), {
+  const text = Option.filter(bodyText(response), (text) => text.includes('"included"'));
+  return Option.match(Option.flatMap(text, parseJsonValue), {
     onNone: () => [],
     onSome: (document) =>
       isJsonObject(document) ? unlinkedIncluded(document, fields).map(label) : [],

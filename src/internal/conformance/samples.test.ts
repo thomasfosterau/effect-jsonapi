@@ -125,10 +125,10 @@ describe("Conformance: Report.samples (#319)", () => {
             probe: { method: "GET", url: probe.url, headers: {}, body: undefined },
             status,
             headers: {},
-            contentType: undefined,
+            contentType: Option.none(),
             text: "",
             body: Option.none(),
-            transportError: undefined,
+            transportError: Option.none(),
             redirects: [],
             unfollowed: Option.none(),
           });

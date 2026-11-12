@@ -194,11 +194,12 @@ export interface Observation {
   /** `0` when no response was obtained at all (the transport failed). */
   readonly status: number;
   readonly headers: Readonly<Record<string, string>>;
-  readonly contentType: string | undefined;
+  readonly contentType: Option.Option<string>;
   readonly text: string;
   /** The parsed JSON body, or `None` when the body was empty or not JSON. */
   readonly body: Body;
-  readonly transportError: string | undefined;
+  /** Why no response was obtained, or `None` when one was. */
+  readonly transportError: Option.Option<string>;
   /**
    * Each redirect the kit followed to reach this answer, as the absolute URL
    * it then requested, in order; empty when the first answer was the answer.
@@ -336,7 +337,7 @@ export interface Discovered {
    */
   readonly linkageNullable: boolean;
   /** The first literal path segment — the resource type under the conventional paths. */
-  readonly segment: string | undefined;
+  readonly segment: Option.Option<string>;
   readonly params: ReadonlyArray<string>;
   /** Flat wire query keys (`include`, `page[limit]`, `fields[articles]`, …). */
   readonly queryKeys: ReadonlyArray<string>;
@@ -371,9 +372,7 @@ export interface Discovered {
  */
 export type IdempotencyKey = "absent" | "optional" | "required";
 
-const resolveEncoding = SchemaAST.resolveAt<{ readonly contentType?: string | undefined }>(
-  "~httpApiEncoding",
-);
+const resolveEncoding = SchemaAST.resolveAt<{ readonly contentType?: string }>("~httpApiEncoding");
 
 /**
  * What an endpoint's query declares, by the walk `Middleware` checks requests
@@ -382,22 +381,28 @@ const resolveEncoding = SchemaAST.resolveAt<{ readonly contentType?: string | un
  * enumerable at all.
  */
 const wireKeys = (
-  schema: { readonly ast: SchemaAST.AST } | undefined,
+  schema: Option.Option<{ readonly ast: SchemaAST.AST }>,
 ): Pick<Discovered, "queryKeys" | "queryEnumerable" | "filterGrammar" | "queryPrefixes"> =>
-  Option.match(schema === undefined ? Option.some([]) : declaredNames(schema.ast), {
-    onNone: () => ({
-      queryKeys: [],
-      queryEnumerable: false,
-      filterGrammar: false,
-      queryPrefixes: [],
+  Option.match(
+    Option.match(schema, {
+      onNone: () => Option.some<ReadonlyArray<string>>([]),
+      onSome: (schema) => declaredNames(schema.ast),
     }),
-    onSome: (names) => ({
-      queryKeys: names.filter((name) => !name.endsWith("[")),
-      queryEnumerable: true,
-      filterGrammar: names.includes("filter["),
-      queryPrefixes: names.filter((name) => name.endsWith("[")),
-    }),
-  });
+    {
+      onNone: () => ({
+        queryKeys: [],
+        queryEnumerable: false,
+        filterGrammar: false,
+        queryPrefixes: [],
+      }),
+      onSome: (names) => ({
+        queryKeys: names.filter((name) => !name.endsWith("[")),
+        queryEnumerable: true,
+        filterGrammar: names.includes("filter["),
+        queryPrefixes: names.filter((name) => name.endsWith("[")),
+      }),
+    },
+  );
 
 const isIdempotencyHeader = (name: PropertyKey): boolean =>
   String(name).toLowerCase() === IDEMPOTENCY_HEADER;
@@ -580,7 +585,7 @@ export function discover(api: HttpApi.Top): ReadonlyArray<Discovered> {
     return Arr.map(R.keys(endpoints), (name): Discovered => {
       const endpoint = endpoints[name];
       const segments = endpoint.path.split("/").filter((segment) => segment !== "");
-      const query = wireKeys(endpoint.query);
+      const query = wireKeys(Option.fromUndefinedOr(endpoint.query));
       const responseMediaType = Arr.findFirst(endpoint.success, (success) =>
         Option.fromUndefinedOr(resolveEncoding(success.ast)?.contentType),
       );
@@ -597,7 +602,7 @@ export function discover(api: HttpApi.Top): ReadonlyArray<Discovered> {
         linkage: declaredCardinality(endpoint, role),
         linkageTypes: declaredLinkageTypes(endpoint, role),
         linkageNullable: declaredNullable(endpoint, role),
-        segment: segments.find((segment) => !segment.startsWith(":")),
+        segment: Arr.findFirst(segments, (segment) => !segment.startsWith(":")),
         params: segments
           .filter((segment) => segment.startsWith(":"))
           .map((segment) => segment.slice(1)),
@@ -737,13 +742,13 @@ export const resolvePath = (endpoint: Discovered, options: ResolvedOptions): Res
   const override = options.paths[key];
   if (override !== undefined) return { _tag: "Resolved", path: override };
   if (Arr.isReadonlyArrayEmpty(endpoint.params)) return { _tag: "Resolved", path: endpoint.path };
-  const type = endpoint.segment;
-  if (type === undefined) {
+  if (Option.isNone(endpoint.segment)) {
     return {
       _tag: "Unresolved",
       reason: `${endpoint.path} has path parameters and no literal segment to key a sample id on — pass paths["${key}"]`,
     };
   }
+  const type = endpoint.segment.value;
   const id = options.ids[type];
   if (id === undefined) {
     return {
@@ -801,7 +806,7 @@ export interface Context {
 /** A response body as JSON, or `None` when it is not JSON. */
 const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json));
 
-const headerRecord = (headers: Readonly<Record<string, string | undefined>>) => {
+const headerRecord = (headers: Readonly<Record<string, string>>) => {
   const out: Record<string, string> = {};
   Arr.forEach(R.keys(headers), (key) => {
     const value = headers[key];
@@ -909,10 +914,10 @@ const unread = (
   probe,
   status: 0,
   headers: {},
-  contentType: undefined,
+  contentType: Option.none(),
   text: "",
   body: Option.none(),
-  transportError,
+  transportError: Option.some(transportError),
   redirects,
   unfollowed,
 });
@@ -1287,10 +1292,10 @@ const answerOf = (
       probe,
       status: response.status,
       headers: headersOut,
-      contentType: headersOut["content-type"],
+      contentType: R.get(headersOut, "content-type"),
       text,
       body,
-      transportError: undefined,
+      transportError: Option.none(),
       redirects,
       unfollowed: Option.none(),
     } satisfies Observation;
@@ -1339,11 +1344,15 @@ export interface RuleImpl {
 }
 
 /** @internal */
-export const pass = (rule: Rule, probes: number, note?: string): Passed => ({
+export const pass = (
+  rule: Rule,
+  probes: number,
+  note: Option.Option<string> = Option.none(),
+): Passed => ({
   _tag: "Passed",
   rule,
   probes,
-  note,
+  note: Option.getOrUndefined(note),
 });
 
 /** @internal */
@@ -1531,7 +1540,7 @@ export const settle = (
   rule: Rule,
   probes: number,
   findings: ReadonlyArray<Finding>,
-  note?: string,
+  note: Option.Option<string> = Option.none(),
 ): Outcome =>
   Arr.isReadonlyArrayEmpty(findings)
     ? pass(rule, probes, note)
@@ -1544,7 +1553,7 @@ export const finding = (
     readonly detail: string;
     readonly expected: string;
     readonly observed: string;
-    readonly probe?: Probe | undefined;
+    readonly probe?: Probe;
   },
 ): Finding => ({
   rule,
@@ -1560,9 +1569,10 @@ export const finding = (
  * @internal
  */
 export const statusOf = (observation: Observation): string =>
-  observation.transportError === undefined
-    ? `${observation.status}`
-    : unansweredAs(observation, observation.transportError);
+  Option.match(observation.transportError, {
+    onNone: () => `${observation.status}`,
+    onSome: (transportError) => unansweredAs(observation, transportError),
+  });
 
 /**
  * A probe with no answer to read, as a finding or a note names it: the
@@ -1589,9 +1599,12 @@ export const succeeded = (observation: Observation): boolean =>
  * @internal
  */
 export const describe = (observation: Observation): string => {
-  if (observation.transportError !== undefined)
-    return unansweredAs(observation, observation.transportError);
-  const type = observation.contentType === undefined ? "" : ` ${observation.contentType}`;
+  if (Option.isSome(observation.transportError))
+    return unansweredAs(observation, observation.transportError.value);
+  const type = Option.match(observation.contentType, {
+    onNone: () => "",
+    onSome: (contentType) => ` ${contentType}`,
+  });
   const excerpt =
     observation.text === ""
       ? ""
@@ -1683,7 +1696,7 @@ export const resourceLabel = (resource: {
 /** Every identity a response's document shows: its resource objects' own, and those their relationships name. */
 const shownBy = (observation: Observation): ReadonlyArray<string> =>
   Arr.flatMap(resourcesOf(observation.body), ({ resource }) => [
-    ...Option.toArray(Option.fromUndefinedOr(identity(resource))),
+    ...Option.toArray(identity(resource)),
     ...linkageOf(resource),
   ]);
 
@@ -1828,12 +1841,23 @@ export const probeable = (ctx: Context, roles: ReadonlyArray<Role>): Probeable =
  *
  * @internal
  */
-export const coverageNote = (unresolved: ReadonlyArray<string>): string | undefined =>
+export const coverageNote = (unresolved: ReadonlyArray<string>): Option.Option<string> =>
   Arr.match(unresolved, {
-    onEmpty: () => undefined,
+    onEmpty: () => Option.none(),
     onNonEmpty: (missing) =>
-      `${missing.length} endpoint${missing.length === 1 ? "" : "s"} not probed: ${missing.join("; ")}`,
+      Option.some(
+        `${missing.length} endpoint${missing.length === 1 ? "" : "s"} not probed: ${missing.join("; ")}`,
+      ),
   });
+
+/**
+ * A rule's notes as the one note its pass carries, `"; "`-joined, or `None`
+ * when there are none.
+ *
+ * @internal
+ */
+export const joinNotes = (notes: ReadonlyArray<string>): Option.Option<string> =>
+  Arr.isReadonlyArrayEmpty(notes) ? Option.none() : Option.some(notes.join("; "));
 
 /**
  * The standard skip reason when a rule found no endpoint of the shape it needs:

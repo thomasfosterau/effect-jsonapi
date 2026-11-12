@@ -366,10 +366,13 @@ const isApiError = (
   error: unknown,
 ): error is ApiError.Any & { readonly constructor: ApiErrorConstructor } => {
   if (!ApiError.isApiError(error)) return false;
-  const ctor: Partial<ApiErrorConstructor> | undefined = (
-    error as { readonly constructor?: Partial<ApiErrorConstructor> }
-  ).constructor;
-  return ctor !== undefined && P.isNumber(ctor.status) && Schema.isSchema(ctor.wire);
+  const ctor: unknown = error.constructor;
+  return (
+    P.hasProperty(ctor, "status") &&
+    P.isNumber(ctor.status) &&
+    P.hasProperty(ctor, "wire") &&
+    Schema.isSchema(ctor.wire)
+  );
 };
 
 const apiErrorToJsonapi = (

@@ -20,6 +20,7 @@
  */
 import * as Arr from "effect/Array";
 import type * as Schema from "effect/Schema";
+import type * as SchemaAST from "effect/SchemaAST";
 import type * as SchemaIssue from "effect/SchemaIssue";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
@@ -38,15 +39,10 @@ const META_KEYS: Partial<Readonly<Record<Family, string>>> = {
 };
 
 /** The `meta` a schema node publishes through its vocabulary, if any. */
-const errorMetaOf = (
-  annotations: Schema.Annotations.Annotations | undefined,
-): ErrorMeta | undefined => {
-  if (annotations === undefined) return undefined;
-  const vocabulary = vocabularyOf(annotations);
-  if (Option.isNone(vocabulary)) return undefined;
-  const key = META_KEYS[vocabulary.value.family];
-  return key === undefined ? undefined : { [key]: vocabulary.value.values };
-};
+const errorMetaOf = (annotations: Schema.Annotations.Annotations): Option.Option<ErrorMeta> =>
+  Option.flatMap(vocabularyOf(annotations), ({ family, values }) =>
+    Option.map(Option.fromUndefinedOr(META_KEYS[family]), (key) => ({ [key]: values })),
+  );
 
 /** One annotated node: where in the decoded value it sits, and what it publishes. */
 interface Found {
@@ -58,19 +54,12 @@ interface Found {
 // `InvalidValue` / `Forbidden` carry key- or issue-level annotations rather
 // than a schema node, so they never publish `meta` themselves — a failure
 // under them still inherits from an annotated ancestor.
-const astOf = (
-  issue: SchemaIssue.Issue,
-): { readonly annotations?: Schema.Annotations.Annotations | undefined } | undefined =>
+const astOf = (issue: SchemaIssue.Issue): Option.Option<SchemaAST.AST> =>
   Match.value(issue).pipe(
-    Match.tag(
-      "InvalidType",
-      "UnexpectedKey",
-      "Composite",
-      "AnyOf",
-      "Encoding",
-      (issue) => issue.ast,
+    Match.tag("InvalidType", "UnexpectedKey", "Composite", "AnyOf", "Encoding", (issue) =>
+      Option.some(issue.ast),
     ),
-    Match.orElse(() => undefined),
+    Match.orElse(() => Option.none()),
   );
 
 const collect = (
@@ -78,8 +67,10 @@ const collect = (
   path: ReadonlyArray<PropertyKey>,
   found: Array<Found>,
 ): void => {
-  const meta = errorMetaOf(astOf(issue)?.annotations);
-  if (meta !== undefined) found.push({ path, meta });
+  const meta = Option.flatMap(astOf(issue), (ast) =>
+    Option.flatMap(Option.fromUndefinedOr(ast.annotations), errorMetaOf),
+  );
+  if (Option.isSome(meta)) found.push({ path, meta: meta.value });
   Match.value(issue).pipe(
     Match.tag("Pointer", (issue) => collect(issue.issue, [...path, ...issue.path], found)),
     Match.tag("Filter", "Encoding", (issue) => collect(issue.issue, path, found)),
@@ -97,22 +88,26 @@ const isPrefix = (prefix: ReadonlyArray<PropertyKey>, path: ReadonlyArray<Proper
 
 /**
  * The `meta` a formatted leaf at `path` should carry: the annotation of the
- * nearest annotated node on the way down to it, `undefined` when there is
+ * nearest annotated node on the way down to it, `None` when there is
  * none. Build the index once per issue with {@link indexErrorMeta} and query
  * it per leaf.
  */
 export const indexErrorMeta = (
   issue: SchemaIssue.Issue,
-): ((path: ReadonlyArray<PropertyKey>) => ErrorMeta | undefined) => {
+): ((path: ReadonlyArray<PropertyKey>) => Option.Option<ErrorMeta>) => {
   const found: Array<Found> = [];
   collect(issue, [], found);
-  return (path) => {
-    const best = Arr.reduce<Found, Found | undefined>(found, undefined, (current, candidate) =>
-      isPrefix(candidate.path, path) &&
-      (current === undefined || candidate.path.length >= current.path.length)
-        ? candidate
-        : current,
+  return (path) =>
+    Option.map(
+      Arr.reduce(found, Option.none<Found>(), (current, candidate) =>
+        isPrefix(candidate.path, path) &&
+        Option.match(current, {
+          onNone: () => true,
+          onSome: (current) => candidate.path.length >= current.path.length,
+        })
+          ? Option.some(candidate)
+          : current,
+      ),
+      (best) => best.meta,
     );
-    return best?.meta;
-  };
 };

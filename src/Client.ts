@@ -110,7 +110,7 @@ import * as Option from "effect/Option";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
+import { Headers, HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 import type { HttpApi, HttpApiGroup } from "effect/http-api";
 import { HttpApiClient } from "effect/http-api";
 import type { JsonApiObject, Wire } from "./Document.js";
@@ -309,11 +309,15 @@ export const isMutatingMethod = (method: string): boolean =>
 // `multipart/form-data` on an upload endpoint, say — is a deliberate choice
 // about the representation, not a mislabelled JSON:API body, and is left alone:
 // only the label changes, never the bytes, and never the meaning.
-const isRelabellable = (header: string | undefined): boolean => {
-  if (header === undefined || header === "") return true;
-  const base = baseMediaType(header);
-  return base === MEDIA_TYPE || base === "application/json";
-};
+const isRelabellable = (header: Option.Option<string>): boolean =>
+  Option.match(header, {
+    onNone: () => true,
+    onSome: (header) => {
+      if (header === "") return true;
+      const base = baseMediaType(header);
+      return base === MEDIA_TYPE || base === "application/json";
+    },
+  });
 
 /**
  * Stamps the JSON:API negotiation headers on one request, with the given
@@ -344,7 +348,7 @@ export const jsonApiHeadersWith = (
   return (request) => {
     const accepted = HttpClientRequest.setHeader(request, "accept", type);
     if (!isMutatingMethod(accepted.method)) return accepted;
-    return isRelabellable(accepted.headers["content-type"])
+    return isRelabellable(Headers.get(accepted.headers, "content-type"))
       ? HttpClientRequest.setHeader(accepted, "content-type", type)
       : accepted;
   };
@@ -712,8 +716,10 @@ export const DEFAULT_ERROR_MESSAGE = "Request could not be completed";
  * @category accessors
  */
 export const errorMessage = (document: ErrorDocument): string => {
-  const first = document.errors[0] as ErrorDocument["errors"][number] | undefined;
-  return first?.detail ?? first?.title ?? DEFAULT_ERROR_MESSAGE;
+  return Option.match(Arr.head(document.errors), {
+    onNone: () => DEFAULT_ERROR_MESSAGE,
+    onSome: (first) => first.detail ?? first.title ?? DEFAULT_ERROR_MESSAGE,
+  });
 };
 
 // ---------------------------------------------------------------------------
@@ -1020,10 +1026,10 @@ export interface LinkedResource {
 
 /** The refs one relationship key carries: `[]` for absent, `null` or empty linkage. */
 const refsOf = (
-  resource: LinkedResource | undefined,
+  resource: LinkedResource,
   key: string,
 ): ReadonlyArray<{ readonly type: string; readonly id: string }> => {
-  const linkage = resource?.relationships?.[key];
+  const linkage = resource.relationships?.[key];
   if (!P.isObject(linkage)) return [];
   const data = linkage["data"];
   if (!P.isObjectOrArray(data)) return [];
@@ -1106,13 +1112,12 @@ export const related = <R extends Any, const K extends RelationshipName<R>>(
   key: K,
   index: IncludedIndex,
 ): Related<R, K> => {
-  const resolved = lookup(refsOf(data, key), index);
-  const descriptor = relationships(resource)[key] as Relationship.Descriptor | undefined;
+  const resolved = data === undefined ? [] : lookup(refsOf(data, key), index);
   // The values in the index are the target's decoded resources; the
   // definition says which type each key resolves to.
   return (
-    descriptor !== undefined && Relationship.isToOne(descriptor)
-      ? Option.fromUndefinedOr(resolved[0])
+    Option.exists(R.get(relationships(resource), key), Relationship.isToOne)
+      ? Arr.head(resolved)
       : resolved
   ) as Related<R, K>;
 };
@@ -1133,7 +1138,7 @@ export const walk = <R extends Any, const P extends IncludePathsTo<R, 3>>(
   path: P,
   index: IncludedIndex,
 ): ReadonlyArray<PathTarget<R, P>["Type"]> => {
-  const roots: ReadonlyArray<LinkedResource | undefined> = [data];
+  const roots: ReadonlyArray<LinkedResource> = data === undefined ? [] : [data];
   const level = Arr.reduce(path.split("."), roots, (parents, segment) => {
     const seen = MutableHashSet.empty<string>();
     return parents.flatMap((parent) =>
@@ -1258,11 +1263,11 @@ export interface PageCursorOptions {
   readonly maxLimit?: number | undefined;
 }
 
-const nonNegativeInt = (raw: string | null): number | undefined => {
-  if (raw === null || raw.trim() === "") return undefined;
-  const parsed = Number(raw);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
-};
+const nonNegativeInt = (raw: string | null): Option.Option<number> =>
+  Option.flatMap(
+    Option.filter(Option.fromNullOr(raw), (raw) => raw.trim() !== ""),
+    (raw) => Option.liftPredicate(Number(raw), (parsed) => Number.isInteger(parsed) && parsed >= 0),
+  );
 
 const searchParamsOf = (source: URL | URLSearchParams | string): URLSearchParams =>
   source instanceof URLSearchParams
@@ -1298,8 +1303,11 @@ export const readPageCursor = (
 ): PageCursor => {
   const key = options?.key ?? "page";
   const params = searchParamsOf(source);
-  const limit = nonNegativeInt(params.get(`${key}[limit]`)) ?? options?.defaultLimit ?? 50;
-  const offset = nonNegativeInt(params.get(`${key}[offset]`)) ?? 0;
+  const limit = Option.getOrElse(
+    nonNegativeInt(params.get(`${key}[limit]`)),
+    () => options?.defaultLimit ?? 50,
+  );
+  const offset = Option.getOrElse(nonNegativeInt(params.get(`${key}[offset]`)), () => 0);
   return { offset, limit: Math.min(Math.max(limit, 1), options?.maxLimit ?? 100) };
 };
 

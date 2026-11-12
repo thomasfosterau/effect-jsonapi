@@ -1616,8 +1616,11 @@ const targetsResourceImpl = (operation: { readonly op: string }, resource: Any):
   if (data !== undefined && P.isObjectOrArray(data) && !Array.isArray(data)) {
     return (data as { readonly type?: unknown }).type === resource.type;
   }
-  const ref = (operation as { readonly ref?: { readonly type?: unknown } | undefined }).ref;
-  return ref?.type === resource.type;
+  return (
+    P.hasProperty(operation, "ref") &&
+    P.hasProperty(operation.ref, "type") &&
+    operation.ref.type === resource.type
+  );
 };
 
 /**
@@ -1711,14 +1714,11 @@ const targetsRelationshipImpl = (
   resource: Any,
   relationship: string,
 ): boolean => {
-  const ref = (
-    operation as {
-      readonly ref?: { readonly type?: unknown; readonly relationship?: unknown } | undefined;
-    }
-  ).ref;
+  if (!P.hasProperty(operation, "ref")) return false;
+  const ref = operation.ref;
   return (
-    ref !== undefined &&
-    ref !== null &&
+    P.hasProperty(ref, "type") &&
+    P.hasProperty(ref, "relationship") &&
     ref.type === resource.type &&
     ref.relationship === relationship
   );

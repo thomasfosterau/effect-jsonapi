@@ -26,6 +26,7 @@
  * @internal
  */
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
@@ -144,8 +145,7 @@ const optionalMember = (field: Schema.Struct.Fields[string]) =>
 // The `relationships` member of a resource object's field map, its struct
 // rebuilt with every relationship an optional key; anything else (a
 // hand-rolled definition's) as it stands.
-const sparseRelationships = (member: Schema.Struct.Fields[string] | undefined) => {
-  if (member === undefined) return {};
+const rebuiltRelationships = (member: Schema.Struct.Fields[string]) => {
   const inner: unknown = P.hasProperty(member, "schema") ? member.schema : undefined;
   if (!P.hasProperty(inner, "fields") || !P.isObject(inner.fields))
     return { relationships: member };
@@ -154,6 +154,12 @@ const sparseRelationships = (member: Schema.Struct.Fields[string] | undefined) =
   const fields = inner.fields as Schema.Struct.Fields;
   return { relationships: Schema.optionalKey(Schema.Struct(R.map(fields, optionalMember))) };
 };
+
+const sparseRelationships = (fields: Schema.Struct.Fields) =>
+  Option.match(R.get(fields, "relationships"), {
+    onNone: () => ({}),
+    onSome: rebuiltRelationships,
+  });
 
 /**
  * The runtime {@link SparseResource}: the definition's own fields, its
@@ -168,7 +174,7 @@ export const sparseResource = (resource: ResourceStruct): Schema.Top => {
   const sparse = Schema.Struct({
     ...resource.fields,
     attributes: Schema.Struct(R.map(resource.fields.attributes.fields, optionalMember)),
-    ...sparseRelationships(resource.fields["relationships"]),
+    ...sparseRelationships(resource.fields),
   }).annotate(annotations);
   sparseCache.set(resource, sparse);
   return sparse;

@@ -892,12 +892,12 @@ export const layer = (store: Store): Layer.Layer<Middleware> =>
         return yield* httpEffect.pipe(
           Effect.tap((response) => {
             const text = bodyText(response);
-            return response.status >= 500 || text === undefined
+            return response.status >= 500 || Opt.isNone(text)
               ? store.release(attempt)
               : store.complete(attempt, {
                   status: response.status,
                   headers: { ...response.headers },
-                  body: text,
+                  body: text.value,
                 });
           }),
           // A defect, an interruption, or a handler failure encoded downstream

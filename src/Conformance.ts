@@ -945,10 +945,10 @@ const resolveOptions = (
   requestTimeout,
 });
 
-const selected = (options: Options | undefined): ReadonlyArray<Core.RuleImpl> => {
-  const tiers = options?.tiers;
-  const only = options?.only;
-  const skip = options?.skip ?? [];
+const selected = (options: Options): ReadonlyArray<Core.RuleImpl> => {
+  const tiers = options.tiers;
+  const only = options.only;
+  const skip = options.skip ?? [];
   // By segment: a prefix is the id itself, or the id continues it with `/`
   // (#367), so `spec/status/create-location` never reaches
   // `spec/status/create-location-matches-self`.
@@ -975,13 +975,13 @@ const execute = <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
   client: HttpClient.HttpClient,
   transport: Report["transport"],
   baseUrl: string,
-  options: Options | undefined,
+  options: Options,
 ): Effect.Effect<Report> =>
   Effect.gen(function* () {
     const resolved = resolveOptions(
       baseUrl,
-      options ?? {},
-      yield* Core.requestTimeoutOf(Option.fromUndefinedOr(options?.requestTimeout)),
+      options,
+      yield* Core.requestTimeoutOf(Option.fromUndefinedOr(options.requestTimeout)),
     );
     const observed = MutableHashSet.empty<string>();
     const writes: Core.Context["writes"] = [];
@@ -1024,7 +1024,7 @@ const execute = <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
       ({ outcome }) => outcome,
     );
     return {
-      target: options?.target ?? api.identifier,
+      target: options.target ?? api.identifier,
       version: "1.1",
       transport,
       outcomes,
@@ -1131,7 +1131,7 @@ export const verify = Effect.fnUntraced(function* <
       return HttpServerResponse.toClientResponse(response);
     }, Effect.scoped),
   );
-  return yield* execute(api, client, "in-process", IN_PROCESS_ORIGIN, options);
+  return yield* execute(api, client, "in-process", IN_PROCESS_ORIGIN, options ?? {});
 });
 
 /**

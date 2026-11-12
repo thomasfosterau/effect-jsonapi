@@ -388,8 +388,10 @@ describe("runner (requestTimeout)", () => {
     ]);
     expect(settled).toEqual([false, true]);
     expect(observation.status).toBe(0);
-    expect(observation.transportError).toBe(timedOutNote(Duration.seconds(1)));
-    expect(observation.transportError).toBe("no answer within 1s, the run's `requestTimeout`");
+    expect(observation.transportError).toEqual(Option.some(timedOutNote(Duration.seconds(1))));
+    expect(observation.transportError).toEqual(
+      Option.some("no answer within 1s, the run's `requestTimeout`"),
+    );
     // A transport error, not a redirect the kit did not follow.
     expect(observation.unfollowed).toEqual(Option.none());
     expect(target.interrupted()).toBe(1);
@@ -399,7 +401,7 @@ describe("runner (requestTimeout)", () => {
     const target = slow(() => ({ after: "999 millis" }));
     const { observation } = await clocked(target.request({ url: "/0" }), ["999 millis"]);
     expect(observation.status).toBe(200);
-    expect(observation.transportError).toBeUndefined();
+    expect(observation.transportError).toEqual(Option.none());
     expect(target.interrupted()).toBe(0);
   });
 
@@ -411,7 +413,7 @@ describe("runner (requestTimeout)", () => {
     ]);
     expect(settled).toEqual([false, true]);
     expect(observation.status).toBe(0);
-    expect(observation.transportError).toBe(timedOutNote(Duration.seconds(1)));
+    expect(observation.transportError).toEqual(Option.some(timedOutNote(Duration.seconds(1))));
   });
 
   it("gives each redirect hop a timeout of its own, and names the hop it cut short", async () => {
@@ -438,7 +440,7 @@ describe("runner (requestTimeout)", () => {
     expect(lost.settled).toEqual([false, false, true]);
     expect(lost.observation.status).toBe(0);
     expect(lost.observation.redirects).toEqual(["http://origin.test/1"]);
-    expect(lost.observation.transportError).toBe(timedOutNote(Duration.seconds(1)));
+    expect(lost.observation.transportError).toEqual(Option.some(timedOutNote(Duration.seconds(1))));
     expect(lost.observation.unfollowed).toEqual(Option.none());
     expect(held.sent).toEqual(["/0", "/1"]);
   });
@@ -451,7 +453,9 @@ describe("runner (requestTimeout)", () => {
     ]);
     expect(settled).toEqual([false, true]);
     expect(observation.status).toBe(0);
-    expect(observation.transportError).toBe("no answer within 30s, the run's `requestTimeout`");
+    expect(observation.transportError).toEqual(
+      Option.some("no answer within 30s, the run's `requestTimeout`"),
+    );
     expect(target.interrupted()).toBe(1);
   });
 
@@ -484,7 +488,7 @@ describe("runner (requestTimeout)", () => {
     ]);
     expect(settled).toEqual([false, true]);
     expect(observation.status).toBe(0);
-    expect(observation.transportError).toBe(timedOutNote(Duration.seconds(1)));
+    expect(observation.transportError).toEqual(Option.some(timedOutNote(Duration.seconds(1))));
     expect(attempts).toBe(1);
     expect(interrupted).toBe(1);
   });
@@ -602,10 +606,10 @@ describe("undecidedByRedirects (a rule a redirect left undecided)", () => {
     probe: { method: "GET", url, headers: {}, body: undefined },
     status: 200,
     headers: {},
-    contentType: undefined,
+    contentType: Option.none(),
     text: "",
     body: Option.none(),
-    transportError: undefined,
+    transportError: Option.none(),
     redirects: [],
     unfollowed: Option.none(),
   });
@@ -614,7 +618,7 @@ describe("undecidedByRedirects (a rule a redirect left undecided)", () => {
   const redirected = (url: string): Observation => ({
     ...read(url),
     status: 0,
-    transportError: "redirected",
+    transportError: Option.some("redirected"),
     unfollowed: Option.some({
       status: 302,
       location: `https://elsewhere.test${url}`,
@@ -636,7 +640,9 @@ describe("undecidedByRedirects (a rule a redirect left undecided)", () => {
   });
 
   it("keeps the rule's own note when every request was redirected", () => {
-    expect(undecidedByRedirects(pass(rule, 1, "its note"), [redirected("/b")])).toEqual(
+    expect(
+      undecidedByRedirects(pass(rule, 1, Option.some("its note")), [redirected("/b")]),
+    ).toEqual(
       skip(
         rule,
         `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow or read (${named("/b")}); the rule's own note: its note`,
@@ -649,7 +655,6 @@ describe("undecidedByRedirects (a rule a redirect left undecided)", () => {
       detail: "a finding on no one probe",
       expected: "x",
       observed: "y",
-      probe: undefined,
     });
     const failed = { _tag: "Failed", rule, probes: 2, findings: [loose] } as const;
     expect(undecidedByRedirects(failed, [read("/a"), redirected("/b")])).toEqual(failed);

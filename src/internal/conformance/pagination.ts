@@ -47,6 +47,7 @@ import {
   succeeded,
   withQuery,
   topLevel,
+  joinNotes,
 } from "./core.js";
 import {
   answeredFrom,
@@ -129,7 +130,7 @@ const pageOf = (target: Target, observation: Observation): Option.Option<Page> =
         members: Arr.filterMap(data, (item) =>
           isJsonObject(item)
             ? Result.fromOption(
-                Option.map(Option.fromUndefinedOr(identity(item)), (key) => ({
+                Option.map(identity(item), (key) => ({
                   key,
                   label: resourceLabel(item),
                 })),
@@ -344,7 +345,6 @@ const judgeEnd = (run: Walk, start: string): ReadonlyArray<Judged> => {
         detail: `following \`next\` from ${start} listed ${counted(repeats.length, "resource")} a second time${stalled}`,
         expected: "each resource on exactly one page",
         observed: listed(repeats),
-        probe: undefined,
       }),
     });
   }
@@ -834,7 +834,6 @@ const crossCheck = (reference: Walk, paged: Walk, path: string): ReadonlyArray<J
               detail: `following \`next\` from ${start} never reached ${counted(missed.length, "resource")} ${path} lists`,
               expected: `every resource ${path} lists, on some page`,
               observed: `never reached: ${listed(missed)}`,
-              probe: undefined,
             }),
           },
         ]),
@@ -847,7 +846,6 @@ const crossCheck = (reference: Walk, paged: Walk, path: string): ReadonlyArray<J
               detail: `following \`next\` from ${start} reached ${counted(extra.length, "resource")} ${path} does not list`,
               expected: `only resources ${path} lists`,
               observed: `not in ${path}: ${listed(extra)}`,
-              probe: undefined,
             }),
           },
         ]),
@@ -929,7 +927,7 @@ const outcomeOf = (
             `${notes.length} collection${notes.length === 1 ? "" : "s"} not decided: ${notes.join("; ")}`,
           ),
     ),
-    ...Option.toArray(Option.fromUndefinedOr(coverageNote(unresolved))),
+    ...Option.toArray(coverageNote(unresolved)),
   ];
-  return pass(rule, probes, Arr.isReadonlyArrayEmpty(note) ? undefined : note.join("; "));
+  return pass(rule, probes, joinNotes(note));
 };

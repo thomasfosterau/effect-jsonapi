@@ -226,11 +226,11 @@ const atomicResponseExt: RuleImpl = {
 
 const judgeAtomicMediaType = (target: WriteTarget, observation: Observation): Verdict => {
   const header = observation.contentType;
-  if (observation.text === "" || header === undefined)
+  if (observation.text === "" || Option.isNone(header))
     return undecided(
       `an \`add\` of a "${target.key}" resource answered ${observation.status} with no document, so there was no media type to check`,
     );
-  const { base, parameters } = parseMediaType(header);
+  const { base, parameters } = parseMediaType(header.value);
   const ext = parameters.find(([name]) => name === "ext")?.[1] ?? "";
   return decided(
     1,
@@ -608,7 +608,7 @@ const listPathFor = (ctx: Context, target: WriteTarget): Result.Result<string, s
       ctx.endpoints,
       (endpoint) =>
         endpoint.role === "collection" &&
-        endpoint.segment === target.key &&
+        Option.contains(endpoint.segment, target.key) &&
         Arr.isReadonlyArrayEmpty(endpoint.params),
     ),
     () =>
@@ -1002,7 +1002,7 @@ const toManyOf = (ctx: Context, target: WriteTarget): Result.Result<ToMany, stri
   Result.fromOption(
     Arr.findFirst(ctx.endpoints, (endpoint) =>
       endpoint.role === "relationshipWrite" &&
-      endpoint.segment === target.key &&
+      Option.contains(endpoint.segment, target.key) &&
       endpoint.linkage === "many"
         ? Option.flatMap(Option.fromNullishOr(RELATIONSHIP_PATH.exec(endpoint.path)?.[1]), (name) =>
             Option.map(Arr.head(endpoint.linkageTypes), (type) => ({ name, type })),

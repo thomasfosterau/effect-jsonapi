@@ -157,7 +157,7 @@ const responseMediaType: RuleImpl = {
       yield* eachSuccessfulRead(ctx, resolved, (path, observation) => {
         if (observation.text === "") return;
         const header = observation.contentType;
-        if (header === undefined) {
+        if (Option.isNone(header)) {
           findings.push(
             finding(responseMediaType.rule, {
               detail: `${path} answered a JSON:API document with no Content-Type`,
@@ -168,7 +168,7 @@ const responseMediaType: RuleImpl = {
           );
           return;
         }
-        const { base, parameters } = parseMediaType(header);
+        const { base, parameters } = parseMediaType(header.value);
         if (base !== MEDIA_TYPE) {
           findings.push(
             finding(responseMediaType.rule, {
@@ -508,8 +508,8 @@ const overDocuments =
   (
     impl: Rule,
     options: {
-      readonly applicable?: ((body: Schema.Json) => boolean) | undefined;
-      readonly inapplicable?: string | undefined;
+      readonly applicable?: (body: Schema.Json) => boolean;
+      readonly inapplicable?: string;
       readonly check: (
         body: Schema.Json,
         observation: Observation,
@@ -682,10 +682,12 @@ const noDuplicateResources: RuleImpl = {
         const duplicates: Array<string> = [];
         Arr.forEach(resources, ({ pointer, resource }) => {
           const key = identity(resource);
-          if (key === undefined) return;
-          const first = Option.getOrUndefined(MutableHashMap.get(seen, key));
-          if (first === undefined) MutableHashMap.set(seen, key, pointer);
-          else duplicates.push(`${resourceLabel(resource)} at ${first} and ${pointer}`);
+          if (Option.isNone(key)) return;
+          Option.match(MutableHashMap.get(seen, key.value), {
+            onNone: () => MutableHashMap.set(seen, key.value, pointer),
+            onSome: (first) =>
+              duplicates.push(`${resourceLabel(resource)} at ${first} and ${pointer}`),
+          });
         });
         return Arr.isReadonlyArrayEmpty(duplicates)
           ? []
@@ -887,7 +889,7 @@ const errorProbes = (ctx: Context) =>
     const read = readable(ctx).resolved;
     const out: Array<Observation> = [];
     const resource = ctx.endpoints.find((endpoint) => endpoint.role === "resource");
-    if (resource !== undefined && resource.segment !== undefined) {
+    if (resource !== undefined && Option.isSome(resource.segment)) {
       const path = resource.path.replace(
         `:${resource.params[0]}`,
         encodeURIComponent(ctx.options.absentId),
@@ -1523,9 +1525,11 @@ const settleRefusal = (
         impl,
         probes,
         [],
-        Arr.isReadonlyArrayEmpty(errorObjectsOf(observation.body))
-          ? `the 400 for ${sent} carried no JSON:API error objects, so its status alone decided this rule`
-          : `the 400 for ${sent} named no \`source.parameter\` (optional in JSON:API), so its status alone decided this rule`,
+        Option.some(
+          Arr.isReadonlyArrayEmpty(errorObjectsOf(observation.body))
+            ? `the 400 for ${sent} carried no JSON:API error objects, so its status alone decided this rule`
+            : `the 400 for ${sent} named no \`source.parameter\` (optional in JSON:API), so its status alone decided this rule`,
+        ),
       ),
     onNonEmpty: (parameters) =>
       settle(
@@ -1582,7 +1586,7 @@ interface UsableProbe {
  * nothing of the links.
  */
 const saysNothingOfRefusal = (observation: Observation): boolean =>
-  observation.transportError !== undefined ||
+  Option.isSome(observation.transportError) ||
   observation.status === 408 ||
   observation.status === 429;
 
@@ -2057,7 +2061,7 @@ const resourceNotFound: RuleImpl = {
         resourceNotFound.rule,
         1,
         findings,
-        `probed with the absent id "${ctx.options.absentId}"`,
+        Option.some(`probed with the absent id "${ctx.options.absentId}"`),
       );
     }),
 };

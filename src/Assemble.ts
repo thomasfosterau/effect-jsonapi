@@ -49,13 +49,14 @@ import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as HashSet from "effect/HashSet";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import type * as ApiError from "./ApiError.js";
 import type * as Document from "./Document.js";
 import * as Handlers from "./Handlers.js";
 import { assign } from "./internal/define.js";
 import * as Query from "./Query.js";
-import { definedMember } from "./internal/members.js";
+import { definedMember, someMember } from "./internal/members.js";
 
 // ---------------------------------------------------------------------------
 // Shapes
@@ -583,13 +584,16 @@ const toLinkString = (value: LinkLike): string => {
  * Reads a `relationships[key]` value as a relationship object. Bare
  * identifier shapes (`{ type, id }`, an identifier array) are tolerated.
  */
-const readRelationship = (resource: ResourceLike, key: string): RelationshipObject | undefined => {
+const readRelationship = (
+  resource: ResourceLike,
+  key: string,
+): Option.Option<RelationshipObject> => {
   const value = resource.relationships?.[key];
-  if (!P.isObjectKeyword(value) || P.isFunction(value)) return undefined;
-  if (Array.isArray(value)) return { data: value as ReadonlyArray<Ref> };
-  if ("data" in value) return value as RelationshipObject;
-  if ("type" in value && "id" in value) return { data: value as Ref };
-  return undefined;
+  if (!P.isObjectKeyword(value) || P.isFunction(value)) return Option.none();
+  if (Array.isArray(value)) return Option.some({ data: value as ReadonlyArray<Ref> });
+  if ("data" in value) return Option.some(value as RelationshipObject);
+  if ("type" in value && "id" in value) return Option.some({ data: value as Ref });
+  return Option.none();
 };
 
 /**
@@ -619,9 +623,13 @@ const readRelationship = (resource: ResourceLike, key: string): RelationshipObje
  * @category utils
  */
 export const relationshipRefs = (resource: ResourceLike, key: string): ReadonlyArray<Ref> => {
-  const data = readRelationship(resource, key)?.data;
-  if (data === null || data === undefined) return [];
-  return Array.isArray(data) ? (data as ReadonlyArray<Ref>) : [data as Ref];
+  return Option.match(
+    Option.flatMapNullishOr(readRelationship(resource, key), ({ data }) => data),
+    {
+      onNone: () => [],
+      onSome: (data) => (Array.isArray(data) ? (data as ReadonlyArray<Ref>) : [data as Ref]),
+    },
+  );
 };
 
 /** A relationship object's link block with every member a wire string. */
@@ -810,7 +818,7 @@ const asValue = (resource: ResourceLike): Handlers.ResourceValue =>
   resource as Handlers.ResourceValue;
 
 /**
- * Validates the requested paths, then walks them. `undefined` means the
+ * Validates the requested paths, then walks them. `None` means the
  * request carried no `include`, and only that: a request that did — even a
  * bare `?include=`, which decodes to `[]` — gets an array, `[]` when there is
  * no registry to walk through or no path to walk, so the document keeps its
@@ -820,14 +828,14 @@ const walk = <V, Targets extends Handlers.IncludeTargets>(
   primary: ReadonlyArray<ResourceLike>,
   options: Options<V, Targets>,
 ): Effect.Effect<
-  ReadonlyArray<ResourceLike> | undefined,
+  Option.Option<ReadonlyArray<ResourceLike>>,
   | ApiError.UnsupportedIncludeDepth
   | ApiError.UnsupportedIncludePath
   | Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>
 > => {
   const include = options.include;
-  if (include === undefined) return Effect.undefined;
+  if (include === undefined) return Effect.succeedNone;
   const depth = options.depth ?? MAX_INCLUDE_DEPTH;
   return Query.validateIncludePaths(include, {
     includable: options.includable ?? [],
@@ -841,8 +849,9 @@ const walk = <V, Targets extends Handlers.IncludeTargets>(
             concurrency: options.concurrency,
           }),
     ),
+    Effect.asSome,
   ) as Effect.Effect<
-    ReadonlyArray<ResourceLike> | undefined,
+    Option.Option<ReadonlyArray<ResourceLike>>,
     | ApiError.UnsupportedIncludeDepth
     | ApiError.UnsupportedIncludePath
     | Handlers.IncludeTargetError<Targets>,
@@ -909,9 +918,9 @@ export const resource = <
       const built = Handlers.data(asValue(wired), {
         ...definedMember("self", wired.links?.self),
         // An empty walk keeps the key: the request carried `include` (#232).
-        ...definedMember(
+        ...someMember(
           "included",
-          included === undefined ? undefined : included.map((r) => asValue(stringifyLinks(r))),
+          Option.map(included, (resources) => resources.map((r) => asValue(stringifyLinks(r)))),
         ),
         onResource: onResourceFor(options, [wired]),
       });
@@ -958,9 +967,9 @@ const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets, X ext
   const wired = resources.map(stringifyLinks);
   return walk(wired, options).pipe(
     Effect.map((resolved) => {
-      // `resolved` is an array exactly when the request carried `include`.
-      const requested = resolved !== undefined;
-      const included = [...(options.included ?? []), ...(resolved ?? [])];
+      // `resolved` is `Some` exactly when the request carried `include`.
+      const requested = Option.isSome(resolved);
+      const included = [...(options.included ?? []), ...Option.getOrElse(resolved, () => [])];
       const built = Handlers.collection(wired.map(asValue), {
         ...top,
         included: included.map((r) => asValue(stringifyLinks(r))),
@@ -1290,11 +1299,20 @@ export const relationship = <R extends ResourceLike, I extends ResourceLike = R,
     { onResource: onResourceFor(input, []) },
   );
   const rel = readRelationship(input.parent, input.key);
-  const related = rel?.links?.related === undefined ? undefined : toLinkString(rel.links.related);
+  const related = Option.filter(
+    Option.map(
+      Option.flatMapNullishOr(rel, ({ links }) => links?.related),
+      toLinkString,
+    ),
+    (related) => related !== "",
+  );
   return {
-    data: rel?.data ?? null,
+    data: Option.match(rel, { onNone: () => null, onSome: ({ data }) => data ?? null }),
     included: included as ReadonlyArray<WireResource<I>>,
-    ...definedMember("links", related === undefined || related === "" ? undefined : { related }),
+    ...someMember(
+      "links",
+      Option.map(related, (related) => ({ related })),
+    ),
     jsonapi: JSONAPI_MEMBER,
   };
 };

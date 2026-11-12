@@ -72,25 +72,42 @@ export const isJsonObject = (json: Schema.Json): json is Schema.JsonObject => P.
  */
 export const idKey = (type: string, id: string): string => stringify(["id", type, id]);
 
+const lidKey = (type: string, lid: string): string => stringify(["lid", type, lid]);
+
+// Appends a resource object's identity key to `out` when it has one. The
+// allocation-free form of `identity`, for the per-element linkage walk.
+const pushIdentity = (resource: Parameters<typeof identity>[0], out: Array<string>): void => {
+  const type = resource["type"];
+  if (!P.isString(type)) return;
+  const id = resource["id"];
+  if (P.isString(id)) out.push(idKey(type, id));
+  else {
+    const lid = resource["lid"];
+    if (P.isString(lid)) out.push(lidKey(type, lid));
+  }
+};
+
 /**
  * A resource object's `(type, id)` identity as a comparable string, or
- * `undefined` when it carries no usable identity.
+ * `None` when it carries no usable identity.
  *
  * @internal
  */
-export const identity = (resource: R.ReadonlyRecord<string, unknown>): string | undefined => {
+export const identity = (resource: R.ReadonlyRecord<string, unknown>): Option.Option<string> => {
   const type = resource["type"];
-  if (!P.isString(type)) return undefined;
+  if (!P.isString(type)) return Option.none();
   const id = resource["id"];
-  if (P.isString(id)) return idKey(type, id);
+  if (P.isString(id)) return Option.some(idKey(type, id));
   const lid = resource["lid"];
-  if (P.isString(lid)) return stringify(["lid", type, lid]);
-  return undefined;
+  return P.isString(lid) ? Option.some(lidKey(type, lid)) : Option.none();
 };
 
 // A resource object's identity as zero or one keys.
-const identities = (resource: Parameters<typeof identity>[0]): ReadonlyArray<string> =>
-  Arr.fromOption(Option.fromUndefinedOr(identity(resource)));
+const identities = (resource: Parameters<typeof identity>[0]): ReadonlyArray<string> => {
+  const out: Array<string> = [];
+  pushIdentity(resource, out);
+  return out;
+};
 
 /**
  * Whether a primary-data element is a resource identifier object rather than
@@ -151,10 +168,7 @@ export const linkageOf = (resource: R.ReadonlyRecord<string, unknown>): Readonly
   const relationships = resource["relationships"];
   if (!isRecord(relationships)) return [];
   const out: Array<string> = [];
-  const take = (value: Parameters<typeof identity>[0]): void => {
-    const key = identity(value);
-    if (key !== undefined) out.push(key);
-  };
+  const take = (value: Parameters<typeof identity>[0]): void => pushIdentity(value, out);
   Arr.forEach(R.keys(relationships), (name) => {
     const relationship = relationships[name];
     if (!isRecord(relationship)) return;
@@ -227,7 +241,7 @@ export const unlinkedIncluded = (
   const reached = [
     ...(asLinkage ? [] : primaries),
     ...Arr.filter(members, (resource) =>
-      Option.match(Option.fromUndefinedOr(identity(resource)), {
+      Option.match(identity(resource), {
         onNone: () => false,
         onSome: (key) => HashSet.has(linked, key),
       }),
@@ -235,7 +249,7 @@ export const unlinkedIncluded = (
   ];
   if (Arr.some(reached, fieldsetOn)) return [];
   return Arr.filter(members, (resource) =>
-    Option.match(Option.fromUndefinedOr(identity(resource)), {
+    Option.match(identity(resource), {
       onNone: () => true,
       onSome: (key) => !HashSet.has(linked, key),
     }),

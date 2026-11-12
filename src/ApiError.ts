@@ -33,6 +33,7 @@ import * as R from "effect/Record";
 import type * as Cause from "effect/Cause";
 import * as Arr from "effect/Array";
 import { cast } from "effect/Function";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
@@ -41,7 +42,7 @@ import { HttpApiSchema } from "effect/http-api";
 import { ErrorDocument, ErrorObject } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
 import { asJsonApi } from "./internal/httpMedia.js";
-import { definedMember } from "./internal/members.js";
+import { definedMember, someMember } from "./internal/members.js";
 import { declarationError } from "./internal/errors.js";
 
 /**
@@ -218,12 +219,10 @@ const makeWire = <Fields extends Schema.Struct.Fields>(
     readonly tag: string;
     readonly status: number;
     readonly code: string;
-    readonly title: string | undefined;
+    readonly title: Option.Option<string>;
     readonly fieldKeys: ReadonlyArray<string>;
-    readonly detail: ((fields: Schema.Struct.Encoded<Fields>) => string | undefined) | undefined;
-    readonly source:
-      | ((fields: Schema.Struct.Encoded<Fields>) => ErrorSource | undefined)
-      | undefined;
+    readonly detail: (fields: Schema.Struct.Encoded<Fields>) => Option.Option<string>;
+    readonly source: (fields: Schema.Struct.Encoded<Fields>) => Option.Option<ErrorSource>;
   },
 ) => {
   const cached = wireCache.get(klass);
@@ -273,16 +272,15 @@ const makeWire = <Fields extends Schema.Struct.Fields>(
           // encoded members (the schema this transformation decodes into).
           const fields = encoded as Schema.Struct.Encoded<Fields> &
             R.ReadonlyRecord<string, unknown>;
-          const detail = options.detail?.(fields);
-          const source = options.source?.(fields);
+          const detail = options.detail(fields);
           return {
             errors: [
               {
                 status: String(options.status),
                 code: options.code,
-                ...definedMember("title", options.title),
-                ...definedMember("detail", detail),
-                ...definedMember("source", source),
+                ...someMember("title", options.title),
+                ...someMember("detail", detail),
+                ...someMember("source", options.source(fields)),
                 // A `detail` field the error object's own `detail` already
                 // carries is not copied into `meta`, and an empty `meta` —
                 // every field optional and absent — is left out rather than
@@ -291,7 +289,8 @@ const makeWire = <Fields extends Schema.Struct.Fields>(
                   "meta",
                   Arr.match(
                     options.fieldKeys.flatMap((key) =>
-                      fields[key] === undefined || (key === "detail" && fields[key] === detail)
+                      fields[key] === undefined ||
+                      (key === "detail" && Option.contains(detail, fields[key]))
                         ? []
                         : [[key, fields[key]] as const],
                     ),
@@ -357,16 +356,14 @@ export const make =
     const fields = (config.fields ?? {}) as Fields;
     const fieldKeys = R.keys(fields);
     const code = config.code ?? snakeCase(tag);
-    const detail = P.isFunction(config.detail)
-      ? config.detail
-      : config.detail !== undefined
-        ? () => config.detail as string
-        : undefined;
-    const source = P.isFunction(config.source)
-      ? config.source
-      : config.source !== undefined
-        ? () => config.source as ErrorSource
-        : undefined;
+    // `detail` and `source`, constant or per occurrence, as functions of the
+    // encoded fields: `None` when this occurrence carries none.
+    const detailOf = config.detail;
+    const detail = (encoded: Schema.Struct.Encoded<Fields>): Option.Option<string> =>
+      Option.fromUndefinedOr(P.isFunction(detailOf) ? detailOf(encoded) : detailOf);
+    const sourceOf = config.source;
+    const source = (encoded: Schema.Struct.Encoded<Fields>): Option.Option<ErrorSource> =>
+      Option.fromUndefinedOr(P.isFunction(sourceOf) ? sourceOf(encoded) : sourceOf);
 
     // The conditional `MissingSelfGeneric` branch only matters at the user's
     // `extends` clause, where `Self` is concrete — cast it away here.
@@ -391,7 +388,7 @@ export const make =
           tag,
           status: config.status,
           code,
-          title: config.title,
+          title: Option.fromUndefinedOr(config.title),
           fieldKeys,
           detail,
           source,

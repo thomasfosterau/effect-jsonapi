@@ -60,6 +60,7 @@ import {
   succeeded,
   withQuery,
   topLevel,
+  joinNotes,
 } from "./core.js";
 import {
   answeredFrom,
@@ -709,13 +710,13 @@ const runSuite = <A>(suite: Suite<A>): RuleImpl => ({
       const notes = [
         ...suite.notes(probed),
         ...(Arr.isReadonlyArrayEmpty(undecided) ? [] : [`not decided: ${undecided.join("; ")}`]),
-        ...Option.toArray(Option.fromUndefinedOr(coverageNote(unresolved))),
+        ...Option.toArray(coverageNote(unresolved)),
       ];
       return settle(
         suite.rule,
         budget.spent,
         Arr.flatMap(probed, ({ findings }) => findings),
-        Arr.isReadonlyArrayEmpty(notes) ? undefined : notes.join("; "),
+        joinNotes(notes),
       );
     }),
 });
@@ -894,8 +895,11 @@ const positionsOf = (
 ): HashMap.HashMap<string, { readonly at: number; readonly label: string }> =>
   HashMap.fromIterable(
     Arr.flatMap(data, (resource, at) => {
-      const key = isJsonObject(resource) ? identity(resource) : undefined;
-      return key === undefined ? [] : [[key, { at, label: labelAt(data, at) }] as const];
+      if (!isJsonObject(resource)) return [];
+      return Arr.map(
+        Arr.fromOption(identity(resource)),
+        (key) => [key, { at, label: labelAt(data, at) }] as const,
+      );
     }),
   );
 
@@ -909,10 +913,9 @@ interface TiedPair {
 /** Every pair of identified resources tying on `field` in `data`, in the order listed. */
 const tiedPairsOf = (data: ReadonlyArray<Schema.Json>, field: string): ReadonlyArray<TiedPair> =>
   Arr.flatMap(tiesOf(data, field), (group) => {
-    const keys = Arr.flatMap(group, (resource) => {
-      const key = isJsonObject(resource) ? identity(resource) : undefined;
-      return key === undefined ? [] : [key];
-    });
+    const keys = Arr.flatMap(group, (resource) =>
+      isJsonObject(resource) ? Option.toArray(identity(resource)) : [],
+    );
     const key = Option.match(Arr.head(group), {
       onNone: () => NULL,
       onSome: (resource) => keyOf(resource, field),
