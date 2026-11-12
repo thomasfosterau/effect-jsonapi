@@ -1322,7 +1322,7 @@ describe("Conformance: detects a deliberately broken server", () => {
       const report = yield* verifyCanned((request) =>
         withData(conformantServe(request), (body) =>
           Array.isArray(body["included"]) && Arr.isArrayEmpty(body["included"])
-            ? Rec.remove(body, "included")
+            ? R.remove(body, "included")
             : body,
         ),
       );
