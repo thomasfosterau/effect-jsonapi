@@ -58,6 +58,7 @@
  * @see {@link https://jsonapi.org/ext/atomic/}
  * @since 0.1.0
  */
+import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { AnyMeta, JsonApiObject, TopLevelLinks } from "./Document.js";
@@ -356,25 +357,24 @@ const maxUndeclaredMemberErrorsOf = (operation: string, resource: Any): number =
 // Runtime construction of the add / update operation relationship members.
 const addRelationshipMembers = (relationships: Relationships, cap: number) => {
   const fields: Record<string, Schema.Top> = {};
-  let required = false;
-  for (const [key, descriptor] of Object.entries(relationships)) {
-    if (descriptor.kind === "paginated") continue;
-    if (descriptor.kind === "one") {
-      required = true;
-      fields[key] = refSchemaFor(descriptor);
-    } else {
-      fields[key] = Schema.optionalKey(refSchemaFor(descriptor));
-    }
-  }
+  const entries = Object.entries(relationships);
+  Arr.forEach(entries, ([key, descriptor]) => {
+    if (descriptor.kind === "paginated") return;
+    fields[key] =
+      descriptor.kind === "one"
+        ? refSchemaFor(descriptor)
+        : Schema.optionalKey(refSchemaFor(descriptor));
+  });
+  const required = Arr.some(entries, ([, descriptor]) => descriptor.kind === "one");
   return { struct: closedStruct(fields, cap), required };
 };
 
 const updateRelationshipFields = (relationships: Relationships, cap: number): Schema.Top => {
   const fields: Record<string, Schema.Top> = {};
-  for (const [key, descriptor] of Object.entries(relationships)) {
-    if (descriptor.kind === "paginated") continue;
+  Arr.forEach(Object.entries(relationships), ([key, descriptor]) => {
+    if (descriptor.kind === "paginated") return;
     fields[key] = Schema.optionalKey(refSchemaFor(descriptor));
-  }
+  });
   return closedStruct(fields, cap);
 };
 
@@ -693,7 +693,7 @@ export interface ResourceOperations<R extends Any> {
  */
 export const operationsFor = <R extends Any>(resource: R): ResourceOperations<R> => {
   const relationships: Record<string, Record<string, Schema.Top>> = {};
-  for (const [key, descriptor] of Object.entries(resource.relationships)) {
+  Arr.forEach(Object.entries(resource.relationships), ([key, descriptor]) => {
     const ref = RelationshipRef(resource, key as RelationshipName<R>);
     if (Relationship.isToOne(descriptor)) {
       relationships[key] = {
@@ -719,7 +719,7 @@ export const operationsFor = <R extends Any>(resource: R): ResourceOperations<R>
         ]),
       );
     }
-  }
+  });
   return {
     add: AddOperation(resource),
     update: UpdateOperation(resource),

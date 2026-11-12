@@ -350,10 +350,10 @@ const selectMembers = <V>(
   requested: ReadonlySet<string>,
 ) => {
   const projected: Record<string, V> = {};
-  for (const name of Object.keys(members)) {
+  Arr.forEach(Object.keys(members), (name) => {
     // An own `__proto__` member (as `JSON.parse` gives) stays a member.
     if (requested.has(name)) assign(projected, name, members[name]);
-  }
+  });
   return projected;
 };
 
@@ -865,13 +865,12 @@ const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
   // `included`: the one-resource-object-per-pair rule is document-wide.
   // Linkage is no resource object, so there is nothing to dedupe against.
   const seen = new Set<string>(asLinkage ? [] : primary.map(key));
-  const deduped: Array<Included> = [];
-  for (const resource of included) {
+  const deduped = Arr.filter(included, (resource) => {
     const k = key(resource);
-    if (seen.has(k)) continue;
+    if (seen.has(k)) return false;
     seen.add(k);
-    deduped.push(resource);
-  }
+    return true;
+  });
 
   // One transform pass over the survivors.
   const mapped = mapResources(deduped, options?.onResource);
@@ -897,7 +896,7 @@ const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
     const linked = reachable(start, (k) =>
       Option.getOrElse(HashMap.get(members, k), (): ReadonlyArray<string> => []),
     );
-    for (const resource of mapped) {
+    Arr.forEach(mapped, (resource) => {
       if (!HashSet.has(linked, key(resource))) {
         throw new Error(
           `JSON:API full linkage violation: included resource "${resource.type}:${resource.id}" ` +
@@ -905,7 +904,7 @@ const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
             `(https://jsonapi.org/format/1.1/#document-compound-documents)`,
         );
       }
-    }
+    });
   }
 
   return mapped;
@@ -1031,18 +1030,20 @@ interface PathNode {
 // it walks the paths in the order the client asked for them.
 const pathTrie = (paths: ReadonlyArray<string>): Map<string, PathNode> => {
   const root = new Map<string, PathNode>();
-  for (const path of paths) {
-    let level = root;
-    for (const segment of path.split(".")) {
-      if (segment === "") continue;
-      let node = level.get(segment);
-      if (node === undefined) {
-        node = { segment, children: new Map() };
-        level.set(segment, node);
-      }
-      level = node.children;
-    }
-  }
+  Arr.forEach(paths, (path) => {
+    Arr.reduce(
+      Arr.filter(path.split("."), (segment) => segment !== ""),
+      root,
+      (level, segment) => {
+        let node = level.get(segment);
+        if (node === undefined) {
+          node = { segment, children: new Map() };
+          level.set(segment, node);
+        }
+        return node.children;
+      },
+    );
+  });
   return root;
 };
 
@@ -1082,7 +1083,9 @@ const resolve = (
     // id)` rule spans the whole document), but the walk still steps *through*
     // it, which is what makes a cycle terminate instead of looping.
     const known = new Map<string, ResourceValue>();
-    for (const resource of primary) known.set(key(resource), resource);
+    Arr.forEach(primary, (resource) => {
+      known.set(key(resource), resource);
+    });
 
     // `included`, in walk order.
     const included: Array<ResourceValue> = [];
@@ -1090,90 +1093,95 @@ const resolve = (
     let level: ReadonlyArray<Level> = [{ nodes: pathTrie(paths), parents: primary }];
     let hops = depth;
 
-    while (Arr.isReadonlyArrayNonEmpty(level) && hops > 0) {
-      hops--;
+    yield* Effect.whileLoop({
+      while: () => Arr.isReadonlyArrayNonEmpty(level) && hops > 0,
+      body: () =>
+        Effect.gen(function* () {
+          hops--;
+          // Every identifier this level reaches, deduplicated across paths, parents
+          // and rows, in walk order — and, per branch that has further segments,
+          // the keys it reached, so the next level knows its parents.
+          const levelIdentifiers = new Map<string, ResourceIdentifierValue>();
+          const branches: Array<{
+            readonly nodes: Map<string, PathNode>;
+            readonly keys: ReadonlyArray<string>;
+          }> = [];
+          Arr.forEach(level, ({ nodes, parents }) => {
+            Arr.forEach(nodes.values(), (node) => {
+              const keys: Array<string> = [];
+              const reached = new Set<string>();
+              Arr.forEach(parents, (parent) => {
+                Arr.forEach(linkageIdentifiers(parent, node.segment), (identifier) => {
+                  const k = key(identifier);
+                  if (reached.has(k)) return;
+                  reached.add(k);
+                  keys.push(k);
+                  if (!levelIdentifiers.has(k)) levelIdentifiers.set(k, identifier);
+                });
+              });
+              if (node.children.size > 0) branches.push({ nodes: node.children, keys });
+            });
+          });
 
-      // Every identifier this level reaches, deduplicated across paths, parents
-      // and rows, in walk order — and, per branch that has further segments,
-      // the keys it reached, so the next level knows its parents.
-      const levelIdentifiers = new Map<string, ResourceIdentifierValue>();
-      const branches: Array<{
-        readonly nodes: Map<string, PathNode>;
-        readonly keys: ReadonlyArray<string>;
-      }> = [];
-      for (const { nodes, parents } of level) {
-        for (const node of nodes.values()) {
-          const keys: Array<string> = [];
-          const reached = new Set<string>();
-          for (const parent of parents) {
-            for (const identifier of linkageIdentifiers(parent, node.segment)) {
-              const k = key(identifier);
-              if (reached.has(k)) continue;
-              reached.add(k);
-              keys.push(k);
-              if (!levelIdentifiers.has(k)) levelIdentifiers.set(k, identifier);
+          // One batch per distinct type, holding only the ids the document doesn't
+          // already have. A type with no target is not loadable: its references are
+          // dropped here.
+          const batches: Array<{
+            readonly load: IncludeTarget<ResourceValue, any, any>;
+            readonly ids: Array<string>;
+          }> = [];
+          const byType = new Map<string, Array<string>>();
+          Arr.forEach(levelIdentifiers, ([k, identifier]) => {
+            if (known.has(k)) return;
+            if (!Object.hasOwn(targets, identifier.type)) return;
+            const ids = byType.get(identifier.type);
+            if (ids === undefined) {
+              const fresh = [identifier.id];
+              byType.set(identifier.type, fresh);
+              batches.push({ load: targets[identifier.type], ids: fresh });
+            } else {
+              ids.push(identifier.id);
             }
-          }
-          if (node.children.size > 0) branches.push({ nodes: node.children, keys });
-        }
-      }
+          });
 
-      // One batch per distinct type, holding only the ids the document doesn't
-      // already have. A type with no target is not loadable: its references are
-      // dropped here.
-      const batches: Array<{
-        readonly load: IncludeTarget<ResourceValue, any, any>;
-        readonly ids: Array<string>;
-      }> = [];
-      const byType = new Map<string, Array<string>>();
-      for (const [k, identifier] of levelIdentifiers) {
-        if (known.has(k)) continue;
-        if (!Object.hasOwn(targets, identifier.type)) continue;
-        const ids = byType.get(identifier.type);
-        if (ids === undefined) {
-          const fresh = [identifier.id];
-          byType.set(identifier.type, fresh);
-          batches.push({ load: targets[identifier.type], ids: fresh });
-        } else {
-          ids.push(identifier.id);
-        }
-      }
+          const rows = yield* Effect.forEach(batches, ({ ids, load }) => load(ids), {
+            concurrency,
+          });
 
-      const rows = yield* Effect.forEach(batches, ({ ids, load }) => load(ids), { concurrency });
+          // Index what came back. A row nobody referenced is ignored: adding it
+          // would break the full linkage `buildIncluded` checks.
+          const loaded = new Map<string, ResourceValue>();
+          Arr.forEach(rows, (batch) => {
+            Arr.forEach(batch, (row) => {
+              const k = key(row);
+              if (!levelIdentifiers.has(k) || known.has(k) || loaded.has(k)) return;
+              loaded.set(k, row);
+            });
+          });
 
-      // Index what came back. A row nobody referenced is ignored: adding it
-      // would break the full linkage `buildIncluded` checks.
-      const loaded = new Map<string, ResourceValue>();
-      for (const batch of rows) {
-        for (const row of batch) {
-          const k = key(row);
-          if (!levelIdentifiers.has(k) || known.has(k) || loaded.has(k)) continue;
-          loaded.set(k, row);
-        }
-      }
+          // Emit in walk order, not in whichever order the batches completed.
+          Arr.forEach(levelIdentifiers.keys(), (k) => {
+            const resource = loaded.get(k);
+            if (resource === undefined) return;
+            known.set(k, resource);
+            included.push(resource);
+          });
 
-      // Emit in walk order, not in whichever order the batches completed.
-      for (const k of levelIdentifiers.keys()) {
-        const resource = loaded.get(k);
-        if (resource === undefined) continue;
-        known.set(k, resource);
-        included.push(resource);
-      }
-
-      // Step. A branch's parents are the resources its keys resolved to —
-      // whether this level loaded them or an earlier one did — so a shared
-      // prefix costs no second query and a diamond is traversed once.
-      const next: Array<Level> = [];
-      for (const branch of branches) {
-        const parents: Array<ResourceValue> = [];
-        for (const k of branch.keys) {
-          const resource = known.get(k);
-          if (resource !== undefined) parents.push(resource);
-        }
-        if (Arr.isReadonlyArrayNonEmpty(parents)) next.push({ nodes: branch.nodes, parents });
-      }
-      level = next;
-    }
+          // Step. A branch's parents are the resources its keys resolved to —
+          // whether this level loaded them or an earlier one did — so a shared
+          // prefix costs no second query and a diamond is traversed once.
+          const next: Array<Level> = [];
+          Arr.forEach(branches, (branch) => {
+            const parents = branch.keys.flatMap((k) => {
+              const resource = known.get(k);
+              return resource === undefined ? [] : [resource];
+            });
+            if (Arr.isReadonlyArrayNonEmpty(parents)) next.push({ nodes: branch.nodes, parents });
+          });
+          level = next;
+        }),
+      step: () => undefined,
+    });
 
     return included;
   });

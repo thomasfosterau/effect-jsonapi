@@ -361,7 +361,7 @@ const spellingEquivalence: RuleImpl = {
       const accepted = observations.filter((observation) => observation.status === 200);
       const reference = accepted[0];
       if (reference !== undefined) {
-        for (const observation of accepted.slice(1)) {
+        Arr.forEach(accepted.slice(1), (observation) => {
           if (observation.body !== reference.body) {
             findings.push(
               finding(spellingEquivalence.rule, {
@@ -375,7 +375,7 @@ const spellingEquivalence: RuleImpl = {
               }),
             );
           }
-        }
+        });
       }
       return settle(spellingEquivalence.rule, spellings.length, findings);
     }),

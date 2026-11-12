@@ -709,10 +709,10 @@ const toWireValue = <A>(value: A): WireValue => {
     const toJson = P.hasProperty(value, "toJSON") ? value.toJSON : undefined;
     if (P.isFunction(toJson)) return toWireValue(toJson.call(value));
     const out: { [key: string]: WireValue } = {};
-    for (const [key, entry] of Object.entries(value)) {
+    Arr.forEach(Object.entries(value), ([key, entry]) => {
       // An own `__proto__` member (as `JSON.parse` gives) stays a member.
       if (entry !== undefined) assign(out, key, toWireValue(entry));
-    }
+    });
     return out;
   }
   // SAFETY: what is left is not an object — a JSON primitive or one of the

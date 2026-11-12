@@ -27,6 +27,7 @@
 import * as Bounded from "@thomasfosterau/effect-ext/Bounded";
 import * as Ids from "@thomasfosterau/effect-ext/Ids";
 import * as TriState from "@thomasfosterau/effect-ext/TriState";
+import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
@@ -205,13 +206,13 @@ const SortFields = Schema.Array(
 const parseSortFields = (value: string): ReadonlyArray<SortField> => {
   const seen = new Set<string>();
   const fields: Array<SortField> = [];
-  for (const key of value.split(",")) {
+  Arr.forEach(value.split(","), (key) => {
     const descending = key.startsWith("-");
     const field = descending ? key.slice(1) : key;
-    if (seen.has(field)) continue;
+    if (seen.has(field)) return;
     seen.add(field);
     fields.push({ field, direction: descending ? "desc" : "asc" });
-  }
+  });
   return fields;
 };
 

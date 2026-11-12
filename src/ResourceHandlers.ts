@@ -926,14 +926,14 @@ const loadRefs = <Targets extends Handlers.IncludeTargets>(
   Handlers.IncludeTargetServices<Targets>
 > => {
   const byType = new Map<string, Array<string>>();
-  for (const ref of refs) {
+  Arr.forEach(refs, (ref) => {
     // An own entry only, as `Handlers` loads: a ref typed `constructor` or
     // `toString` names no target, not an `Object.prototype` member.
-    if (!Object.hasOwn(targets, ref.type)) continue;
+    if (!Object.hasOwn(targets, ref.type)) return;
     const ids = byType.get(ref.type) ?? [];
     if (!ids.includes(ref.id)) ids.push(ref.id);
     byType.set(ref.type, ids);
-  }
+  });
   return Effect.forEach(
     [...byType],
     ([type, ids]) => (targets[type] as Handlers.IncludeTarget)(ids),
@@ -941,10 +941,11 @@ const loadRefs = <Targets extends Handlers.IncludeTargets>(
   ).pipe(
     Effect.map((batches) => {
       const loaded = new Map<string, Assemble.ResourceLike>();
-      for (const batch of batches) {
-        for (const resource of batch)
+      Arr.forEach(batches, (batch) => {
+        Arr.forEach(batch, (resource) => {
           loaded.set(`${resource.type}\0${resource.id}`, resource as Assemble.ResourceLike);
-      }
+        });
+      });
       // In linkage order, dropping a ref that didn't resolve.
       return refs.flatMap((ref) => {
         const resource = loaded.get(`${ref.type}\0${ref.id}`);

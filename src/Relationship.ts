@@ -678,14 +678,14 @@ export const paginated = <
       );
     }
     const seen = new Set<string>();
-    for (const term of order) {
+    Arr.forEach(order, (term) => {
       if (seen.has(term.field)) {
         throw new Error(
           `Relationship.paginated: \`order\` names "${term.field}" more than once; each term must order by a distinct field`,
         );
       }
       seen.add(term.field);
-    }
+    });
   }
   return {
     kind: "paginated",

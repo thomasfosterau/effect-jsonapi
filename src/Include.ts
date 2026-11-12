@@ -475,10 +475,10 @@ const walk = (
   depth: number,
   out: Array<Entry>,
 ): void => {
-  for (const [key, value] of Object.entries(spec)) {
+  Arr.forEach(Object.entries(spec), ([key, value]) => {
     // `Spec` marks every key optional, so an explicitly-undefined key is
     // representable; it declares nothing.
-    if (value === undefined) continue;
+    if (value === undefined) return;
     const path = prefix === "" ? key : `${prefix}.${key}`;
     if (depth > MAX_DEPTH) {
       throw new Error(
@@ -490,7 +490,7 @@ const walk = (
     if (owner !== undefined) checkHop(owner, key, target, path);
     out.push({ path, target });
     if (branch) walk(target, value.children, path, depth + 1, out);
-  }
+  });
 };
 
 const entriesOf = (owner: Any | undefined, spec: AnySpec): ReadonlyArray<Entry> => {
@@ -533,11 +533,11 @@ const entriesOf = (owner: Any | undefined, spec: AnySpec): ReadonlyArray<Entry> 
 export const paths = <const S extends AnySpec>(spec: S): ReadonlyArray<Paths<S>> => {
   const seen = new Set<string>();
   const out: Array<string> = [];
-  for (const entry of entriesOf(undefined, spec)) {
-    if (seen.has(entry.path)) continue;
+  Arr.forEach(entriesOf(undefined, spec), (entry) => {
+    if (seen.has(entry.path)) return;
     seen.add(entry.path);
     out.push(entry.path);
-  }
+  });
   return out as unknown as ReadonlyArray<Paths<S>>;
 };
 
@@ -759,11 +759,11 @@ export function included(
   if (Schema.isSchema(source)) return endpointIncluded([source], options?.include ?? false);
   const seen = new Set<Any>();
   const members: Array<Any> = [];
-  for (const entry of entriesOf(undefined, source)) {
-    if (seen.has(entry.target)) continue;
+  Arr.forEach(entriesOf(undefined, source), (entry) => {
+    if (seen.has(entry.target)) return;
     seen.add(entry.target);
     members.push(entry.target);
-  }
+  });
   return Schema.Union(members);
 }
 
@@ -839,7 +839,7 @@ export const make = <R extends Any, const S extends Spec<R>>(
   const declared: Array<string> = [];
   const seenTarget = new Set<Any>();
   const members: Array<Any> = [];
-  for (const entry of entries) {
+  Arr.forEach(entries, (entry) => {
     if (!seenPath.has(entry.path)) {
       seenPath.add(entry.path);
       declared.push(entry.path);
@@ -849,7 +849,7 @@ export const make = <R extends Any, const S extends Spec<R>>(
       seenTarget.add(entry.target);
       members.push(entry.target);
     }
-  }
+  });
 
   // Built against the erased shape first — which pins `TAG` to the discriminant
   // the interfaces declare — then widened to the precise one, whose `paths` and

@@ -247,10 +247,10 @@ const makeWire = (
           const first = doc.errors[0];
           const meta = first?.meta ?? {};
           const fields: Record<string, unknown> = {};
-          for (const key of options.fieldKeys) {
+          Arr.forEach(options.fieldKeys, (key) => {
             if (key in meta) fields[key] = meta[key];
             else if (key === "detail" && first?.detail !== undefined) fields[key] = first.detail;
-          }
+          });
           return { _tag: options.tag, ...fields };
         },
         // class encoded form -> document. An optional field the instance

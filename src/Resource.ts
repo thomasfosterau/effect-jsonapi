@@ -732,10 +732,10 @@ const isInputOnly = (field: Schema.Top): boolean => descriptorOf(field)?.resourc
 // by `make` for the resource `Schema.Struct`.
 const resourceAttributeFields = (fields: Schema.Struct.Fields) => {
   const result: Record<string, Schema.Top> = {};
-  for (const [key, field] of Object.entries(fields)) {
-    if (isInputOnly(field as Schema.Top)) continue;
+  Arr.forEach(Object.entries(fields), ([key, field]) => {
+    if (isInputOnly(field as Schema.Top)) return;
     result[key] = field as Schema.Top;
-  }
+  });
   return result;
 };
 
@@ -768,17 +768,17 @@ const strictOptionalInner = (field: Schema.Top): Schema.Top | undefined => {
  */
 export const createAttributeFields = (fields: Schema.Struct.Fields) => {
   const result: Record<string, Schema.Top> = {};
-  for (const [key, field] of Object.entries(fields)) {
+  Arr.forEach(Object.entries(fields), ([key, field]) => {
     const descriptor = descriptorOf(field as Schema.Top);
     if (!descriptor) {
       const inner = strictOptionalInner(field as Schema.Top);
       result[key] = inner === undefined ? (field as Schema.Top) : Schema.optional(inner);
-      continue;
+      return;
     }
-    if (descriptor.create === false) continue;
+    if (descriptor.create === false) return;
     result[key] =
       descriptor.create === "optional" ? Schema.optional(descriptor.schema) : descriptor.schema;
-  }
+  });
   return result;
 };
 
@@ -794,18 +794,19 @@ export const createAttributeFields = (fields: Schema.Struct.Fields) => {
  */
 export const updateAttributeFields = (fields: Schema.Struct.Fields) => {
   const result: Record<string, Schema.Top> = {};
-  for (const [key, field] of Object.entries(fields)) {
-    const descriptor = descriptorOf(field as Schema.Top);
-    if (!descriptor) {
-      result[key] = Schema.optional(field as Schema.Top);
-      continue;
+  Arr.forEach(Object.entries(fields), ([key, field]) => {
+    const attribute = field as Schema.Top;
+    const descriptor = descriptorOf(attribute);
+    if (descriptor === undefined) {
+      result[key] = Schema.optional(attribute);
+      return;
     }
-    if (descriptor.update === false) continue;
+    if (descriptor.update === false) return;
     const base = descriptor.clearable
       ? ensureNullable(descriptor.schema)
       : nonNullableBase(descriptor.schema);
     result[key] = Schema.optional(base);
-  }
+  });
   return result;
 };
 
@@ -1985,9 +1986,9 @@ export const declaredAttributes = <R extends Any>(resource: R): DeclaredAttribut
 export const attributeAnnotations = <R extends Any>(resource: R): AttributeAnnotationsOf<R> => {
   const fields = resource.fields.attributes.fields as Record<string, Schema.Top>;
   const result: Record<string, Schema.Annotations.Annotations | undefined> = {};
-  for (const key of Object.keys(fields)) {
+  Arr.forEach(Object.keys(fields), (key) => {
     result[key] = Schema.resolveAnnotations(fields[key]);
-  }
+  });
   return result as AttributeAnnotationsOf<R>;
 };
 
@@ -2081,12 +2082,12 @@ export const includePaths = (resource: Any, maxDepth: number = 3): ReadonlyArray
   const paths: Array<string> = [];
   const visit = (current: Any, prefix: string, depth: number): void => {
     if (depth > maxDepth) return;
-    for (const [key, descriptor] of Object.entries(current.relationships)) {
-      if (descriptor.kind === "paginated") continue;
+    Arr.forEach(Object.entries(current.relationships), ([key, descriptor]) => {
+      if (descriptor.kind === "paginated") return;
       const path = prefix === "" ? key : `${prefix}.${key}`;
       paths.push(path);
       visit(descriptor.ref(), path, depth + 1);
-    }
+    });
   };
   visit(resource, "", 1);
   return paths;
@@ -2510,9 +2511,9 @@ const isSortAnnotation = (u: unknown): u is true => u === true;
 // error naming the attribute, as a malformed filter annotation is.
 const sortableKeys = (type: string, fields: Schema.Struct.Fields): ReadonlyArray<string> => {
   const keys: Array<string> = [];
-  for (const [key, field] of Object.entries(fields)) {
+  Arr.forEach(Object.entries(fields), ([key, field]) => {
     const declared = declarationOf(field as Schema.Top, Sort.AnnotationId, isSortAnnotation);
-    if (declared.kind === "absent") continue;
+    if (declared.kind === "absent") return;
     if (declared.kind === "malformed") {
       throw new Error(
         `Resource.make("${type}"): attribute "${key}" carries a malformed sort declaration under ` +
@@ -2520,7 +2521,7 @@ const sortableKeys = (type: string, fields: Schema.Struct.Fields): ReadonlyArray
       );
     }
     keys.push(key);
-  }
+  });
   return keys;
 };
 
@@ -2574,9 +2575,9 @@ const filterableFields = (
       literal: idDeclaration.value.literal ?? deriveFilterLiteral(type, "id", id),
     };
   }
-  for (const [key, field] of Object.entries(fields)) {
+  Arr.forEach(Object.entries(fields), ([key, field]) => {
     const declared = filterDeclarationOf(type, `attribute "${key}"`, field as Schema.Top);
-    if (Option.isNone(declared)) continue;
+    if (Option.isNone(declared)) return;
     const declaration = declared.value;
     result[key] = {
       operators: declaration.operators,
@@ -2584,9 +2585,9 @@ const filterableFields = (
         declaration.literal ??
         deriveFilterLiteral(type, key, attributeSchemaOf(field as Schema.Top)),
     };
-  }
-  for (const [key, descriptor] of Object.entries(relationships)) {
-    if (!Relationship.isToOne(descriptor) || !descriptor.filter) continue;
+  });
+  Arr.forEach(Object.entries(relationships), ([key, descriptor]) => {
+    if (!Relationship.isToOne(descriptor) || !descriptor.filter) return;
     result[key] = {
       operators: resolveOperators(
         descriptor.filter,
@@ -2598,7 +2599,7 @@ const filterableFields = (
         string
       >,
     };
-  }
+  });
   return result;
 };
 
@@ -2766,9 +2767,9 @@ export const sortable = <R extends Any>(resource: R): ReadonlyArray<SortableKeys
 // `sort`: an attribute absent from the resource object cannot be filtered or
 // sorted on.
 const validateDescriptors = (type: string, fields: Schema.Struct.Fields): void => {
-  for (const [key, field] of Object.entries(fields)) {
+  Arr.forEach(Object.entries(fields), ([key, field]) => {
     const descriptor = descriptorOf(field as Schema.Top);
-    if (descriptor === undefined || descriptor.resource !== false) continue;
+    if (descriptor === undefined || descriptor.resource !== false) return;
     if (descriptor.create === false && descriptor.update === false) {
       throw new Error(
         `Resource.make("${type}"): attribute "${key}" declares resource: false with create: false and update: false, ` +
@@ -2789,7 +2790,7 @@ const validateDescriptors = (type: string, fields: Schema.Struct.Fields): void =
           "an attribute absent from the resource object cannot be sorted on",
       );
     }
-  }
+  });
 };
 
 // The compile-time half of `validateFieldNames`: intersected with an
@@ -2820,15 +2821,15 @@ const validateFieldNames = (
   attributes: Schema.Struct.Fields,
   relationships: Relationships,
 ): void => {
-  for (const key of Object.keys(attributes)) {
+  Arr.forEach(Object.keys(attributes), (key) => {
     if (reservedFieldNames.has(key)) {
       throw new Error(
         `${context}: attribute "${key}" uses a name JSON:API reserves; ` +
           'a resource can not have an attribute or relationship named "type" or "id"',
       );
     }
-  }
-  for (const key of Object.keys(relationships)) {
+  });
+  Arr.forEach(Object.keys(relationships), (key) => {
     if (reservedFieldNames.has(key)) {
       throw new Error(
         `${context}: relationship "${key}" uses a name JSON:API reserves; ` +
@@ -2841,7 +2842,7 @@ const validateFieldNames = (
           "JSON:API fields share one namespace, so rename one of them",
       );
     }
-  }
+  });
   validateStorageKeys(context, attributes, relationships);
 };
 
@@ -2855,8 +2856,8 @@ const validateStorageKeys = (
   relationships: Relationships,
 ): void => {
   const claimed = new Map<string, string>();
-  for (const [name, descriptor] of Object.entries(relationships)) {
-    if (!Relationship.isToOne(descriptor) || descriptor.key === undefined) continue;
+  Arr.forEach(Object.entries(relationships), ([name, descriptor]) => {
+    if (!Relationship.isToOne(descriptor) || descriptor.key === undefined) return;
     const key = descriptor.key;
     if (Object.hasOwn(attributes, key)) {
       throw new Error(
@@ -2872,7 +2873,7 @@ const validateStorageKeys = (
       );
     }
     claimed.set(key, name);
-  }
+  });
 };
 
 // ---------------------------------------------------------------------------
@@ -3122,16 +3123,16 @@ export const make = <
   // Create payload relationships: `one` required, `optional`/`many` optional,
   // `paginated` excluded. The member itself is required iff a `one` exists.
   const createRelationshipFields: Record<string, Schema.Top> = {};
-  let hasRequiredRelationship = false;
-  for (const [key, descriptor] of Object.entries(relationships)) {
-    if (descriptor.kind === "paginated") continue;
-    if (descriptor.kind === "one") {
-      hasRequiredRelationship = true;
-      createRelationshipFields[key] = schemaByKey[key]!;
-    } else {
-      createRelationshipFields[key] = Schema.optionalKey(schemaByKey[key]);
-    }
-  }
+  const relationshipEntries = Object.entries(relationships);
+  Arr.forEach(relationshipEntries, ([key, descriptor]) => {
+    if (descriptor.kind === "paginated") return;
+    createRelationshipFields[key] =
+      descriptor.kind === "one" ? schemaByKey[key] : Schema.optionalKey(schemaByKey[key]);
+  });
+  const hasRequiredRelationship = Arr.some(
+    relationshipEntries,
+    ([, descriptor]) => descriptor.kind === "one",
+  );
   const createRelationshipsStruct = closedStruct(
     createRelationshipFields,
     maxUndeclaredMemberErrors,
@@ -3155,10 +3156,10 @@ export const make = <
 
   // Update payload relationships: every non-`paginated` relationship, optional.
   const updateRelationshipFields: Record<string, Schema.Top> = {};
-  for (const [key, descriptor] of Object.entries(relationships)) {
-    if (descriptor.kind === "paginated") continue;
+  Arr.forEach(Object.entries(relationships), ([key, descriptor]) => {
+    if (descriptor.kind === "paginated") return;
     updateRelationshipFields[key] = Schema.optionalKey(schemaByKey[key]);
-  }
+  });
 
   // The update payload's attributes are the tri-state `Schema.optional`
   // projection (set / unset / leave-unchanged), with per-attribute descriptors
@@ -3827,7 +3828,7 @@ const intersectRelationships = (members: ReadonlyArray<Any>): Relationships => {
   const [first, ...rest] = members;
   if (first === undefined) return {};
   const result: Record<string, Relationship.Descriptor> = {};
-  for (const [key, descriptor] of Object.entries(first.relationships)) {
+  Arr.forEach(Object.entries(first.relationships), ([key, descriptor]) => {
     const shared = rest.every((member) => {
       const other = member.relationships[key];
       return (
@@ -3837,7 +3838,7 @@ const intersectRelationships = (members: ReadonlyArray<Any>): Relationships => {
       );
     });
     if (shared) result[key] = descriptor;
-  }
+  });
   return result;
 };
 
@@ -3846,9 +3847,9 @@ const intersectAttributes = (members: ReadonlyArray<Any>): Schema.Struct.Fields 
   const [first, ...rest] = members;
   if (first === undefined) return {};
   const result: Record<string, Schema.Struct.Fields[string]> = {};
-  for (const [key, schema] of Object.entries(first.fields.attributes.fields)) {
+  Arr.forEach(Object.entries(first.fields.attributes.fields), ([key, schema]) => {
     if (rest.every((member) => key in member.fields.attributes.fields)) result[key] = schema;
-  }
+  });
   return result;
 };
 
