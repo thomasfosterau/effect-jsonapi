@@ -185,7 +185,7 @@ type SuccessOf<E> = HttpApiEndpoint.Success<E>["Type"];
 type DataOf<E> = SuccessOf<E> extends { readonly data: infer D } ? D : never;
 type IncludedOf<E> =
   SuccessOf<E> extends { readonly included?: ReadonlyArray<infer M> } ? M : never;
-type AttributesOf<R> = R extends { readonly attributes: infer A } ? A : never;
+type AttributesOf<Res> = Res extends { readonly attributes: infer A } ? A : never;
 
 export const get = Endpoint.get(Holder, { fields: true });
 assertType<Equals<IncludedOf<typeof get>["type"], "editors" | "reviewers">>(true);

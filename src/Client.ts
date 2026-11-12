@@ -205,17 +205,20 @@ export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> 
  * @since 0.1.0
  * @category combinators
  */
-export function narrowIncluded<R extends Any, const Paths extends ReadonlyArray<IncludePath<R>>>(
-  resource: R,
+export function narrowIncluded<
+  Res extends Any,
+  const Paths extends ReadonlyArray<IncludePath<Res>>,
+>(
+  resource: Res,
   include: Paths,
 ): <Doc extends AnyDocument, E, Req>(
   effect: Effect.Effect<Doc, E, Req>,
-) => Effect.Effect<NarrowedDocument<Doc, IncludedFor<R, Paths>>, E, Req>;
+) => Effect.Effect<NarrowedDocument<Doc, IncludedFor<Res, Paths>>, E, Req>;
 export function narrowIncluded<
-  R extends Any,
-  const Paths extends ReadonlyArray<IncludePath<R>>,
+  Res extends Any,
+  const Paths extends ReadonlyArray<IncludePath<Res>>,
   Doc extends AnyDocument,
->(resource: R, include: Paths, document: Doc): NarrowedDocument<Doc, IncludedFor<R, Paths>>;
+>(resource: Res, include: Paths, document: Doc): NarrowedDocument<Doc, IncludedFor<Res, Paths>>;
 export function narrowIncluded(...args: ReadonlyArray<unknown>) {
   return args.length >= 3
     ? // data-first: the document itself
@@ -417,7 +420,7 @@ export const jsonApiHeaders: (
  */
 export const transformWith = (
   options?: NegotiationOptions,
-): (<E, R>(client: HttpClient.HttpClient.With<E, R>) => HttpClient.HttpClient.With<E, R>) => {
+): (<E, Res>(client: HttpClient.HttpClient.With<E, Res>) => HttpClient.HttpClient.With<E, Res>) => {
   const headers = jsonApiHeadersWith(options);
   return (client) => HttpClient.mapRequest(client, headers);
 };
@@ -449,9 +452,9 @@ export const transformWith = (
  * @since 0.15.0
  * @category combinators
  */
-export const transform: <E, R>(
-  client: HttpClient.HttpClient.With<E, R>,
-) => HttpClient.HttpClient.With<E, R> = transformWith();
+export const transform: <E, Res>(
+  client: HttpClient.HttpClient.With<E, Res>,
+) => HttpClient.HttpClient.With<E, Res> = transformWith();
 
 /**
  * Options for {@link make}: the negotiation options, plus the options
@@ -802,9 +805,9 @@ export const toErrorResponse = (cause: unknown): Effect.Effect<Option.Option<Err
  * @since 0.16.0
  * @category combinators
  */
-export const failWithErrorResponse = <A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E | ErrorResponse, R> =>
+export const failWithErrorResponse = <A, E, Res>(
+  effect: Effect.Effect<A, E, Res>,
+): Effect.Effect<A, E | ErrorResponse, Res> =>
   Effect.catch(effect, (cause) =>
     toErrorResponse(cause).pipe(
       Effect.flatMap((response): Effect.Effect<never, E | ErrorResponse> =>
@@ -851,26 +854,26 @@ export interface DocumentMembers {
 }
 
 /**
- * A single-resource document for `R` as the client reads it — the wire form
+ * A single-resource document for `Res` as the client reads it — the wire form
  * (`Document.Wire`: string links), `included` narrowed to `Included` when
  * the endpoint's include targets are a known union.
  *
  * @since 0.16.0
  * @category models
  */
-export interface ResourceDocument<R, Included = IncludedResource> extends DocumentMembers {
-  readonly data: Wire<R>;
+export interface ResourceDocument<Res, Included = IncludedResource> extends DocumentMembers {
+  readonly data: Wire<Res>;
   readonly included?: ReadonlyArray<Included>;
 }
 
 /**
- * A collection document for `R` as the client reads it.
+ * A collection document for `Res` as the client reads it.
  *
  * @since 0.16.0
  * @category models
  */
-export interface CollectionDocument<R, Included = IncludedResource> extends DocumentMembers {
-  readonly data: ReadonlyArray<Wire<R>>;
+export interface CollectionDocument<Res, Included = IncludedResource> extends DocumentMembers {
+  readonly data: ReadonlyArray<Wire<Res>>;
   readonly included?: ReadonlyArray<Included>;
 }
 
@@ -1051,10 +1054,10 @@ const lookup = (
  * @since 0.16.0
  * @category type-level
  */
-export type Related<R extends Any, K> =
-  R["relationships"][K & keyof R["relationships"]] extends Relationship.ToOne<Any>
-    ? Option.Option<Target<R, K>["Type"]>
-    : ReadonlyArray<Target<R, K>["Type"]>;
+export type Related<Res extends Any, K> =
+  Res["relationships"][K & keyof Res["relationships"]] extends Relationship.ToOne<Any>
+    ? Option.Option<Target<Res, K>["Type"]>
+    : ReadonlyArray<Target<Res, K>["Type"]>;
 
 /**
  * The resource definition at the **end** of a dotted include path — what
@@ -1064,9 +1067,9 @@ export type Related<R extends Any, K> =
  * @since 0.16.0
  * @category type-level
  */
-export type PathTarget<R extends Any, Path> = Path extends `${infer Head}.${infer Rest}`
-  ? PathTarget<Target<R, Head>, Rest>
-  : Target<R, Path>;
+export type PathTarget<Res extends Any, Path> = Path extends `${infer Head}.${infer Rest}`
+  ? PathTarget<Target<Res, Head>, Rest>
+  : Target<Res, Path>;
 
 /**
  * Resolves one relationship of a resource value through the document's
@@ -1103,12 +1106,12 @@ export type PathTarget<R extends Any, Path> = Path extends `${infer Head}.${infe
  * @since 0.16.0
  * @category accessors
  */
-export const related = <R extends Any, const K extends RelationshipName<R>>(
-  resource: R,
+export const related = <Res extends Any, const K extends RelationshipName<Res>>(
+  resource: Res,
   data: LinkedResource,
   key: K,
   index: IncludedIndex,
-): Related<R, K> => {
+): Related<Res, K> => {
   const resolved = data === undefined ? [] : lookup(refsOf(data, key), index);
   // The values in the index are the target's decoded resources; the
   // definition says which type each key resolves to.
@@ -1116,7 +1119,7 @@ export const related = <R extends Any, const K extends RelationshipName<R>>(
     Option.exists(R.get(relationships(resource), key), Relationship.isToOne)
       ? Arr.head(resolved)
       : resolved
-  ) as Related<R, K>;
+  ) as Related<Res, K>;
 };
 
 /**
@@ -1129,12 +1132,12 @@ export const related = <R extends Any, const K extends RelationshipName<R>>(
  * @since 0.16.0
  * @category accessors
  */
-export const walk = <R extends Any, const P extends IncludePathsTo<R, 3>>(
-  _resource: R,
+export const walk = <Res extends Any, const P extends IncludePathsTo<Res, 3>>(
+  _resource: Res,
   data: LinkedResource,
   path: P,
   index: IncludedIndex,
-): ReadonlyArray<PathTarget<R, P>["Type"]> => {
+): ReadonlyArray<PathTarget<Res, P>["Type"]> => {
   const roots: ReadonlyArray<LinkedResource> = data === undefined ? [] : [data];
   const level = Arr.reduce(path.split("."), roots, (parents, segment) => {
     const seen = MutableHashSet.empty<string>();
@@ -1147,23 +1150,23 @@ export const walk = <R extends Any, const P extends IncludePathsTo<R, 3>>(
       }),
     );
   });
-  return level as ReadonlyArray<PathTarget<R, P>["Type"]>;
+  return level as ReadonlyArray<PathTarget<Res, P>["Type"]>;
 };
 
 /**
- * What {@link hydrate} returns for a document over resource `R`: the index of
+ * What {@link hydrate} returns for a document over resource `Res`: the index of
  * its `included` resources, and the `related` and `walk` readers over its
  * primary data.
  *
  * @since 0.20.0
  * @category models
  */
-export interface Hydrated<R extends Any> {
+export interface Hydrated<Res extends Any> {
   readonly index: IncludedIndex;
-  readonly related: <const K extends RelationshipName<R>>(key: K) => Related<R, K>;
-  readonly walk: <const P extends IncludePathsTo<R, 3>>(
+  readonly related: <const K extends RelationshipName<Res>>(key: K) => Related<Res, K>;
+  readonly walk: <const P extends IncludePathsTo<Res, 3>>(
     path: P,
-  ) => ReadonlyArray<PathTarget<R, P>["Type"]>;
+  ) => ReadonlyArray<PathTarget<Res, P>["Type"]>;
 }
 
 /**
@@ -1209,13 +1212,13 @@ export interface Hydrated<R extends Any> {
  * @since 0.16.0
  * @category constructors
  */
-export const hydrate = <R extends Any>(
-  resource: R,
+export const hydrate = <Res extends Any>(
+  resource: Res,
   document: {
     readonly data: Schema.NullOr<Schema.Schema<LinkedResource>>["Type"];
     readonly included?: ReadonlyArray<IncludedResource>;
   },
-): Hydrated<R> => {
+): Hydrated<Res> => {
   const index = indexIncluded(document.included);
   // A document whose primary data is `null` links nothing: a resource with
   // no `relationships` member resolves every key and path to nothing.

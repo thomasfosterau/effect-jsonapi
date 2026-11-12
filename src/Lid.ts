@@ -109,16 +109,16 @@ export interface RefLinkageValue {
  * @since 0.1.0
  * @category models
  */
-export type ResolvedLinkage<R extends Any> = {
+export type ResolvedLinkage<Res extends Any> = {
   readonly [
-    K in keyof R["relationships"] as R["relationships"][K] extends Relationship.Paginated<Any>
+    K in keyof Res["relationships"] as Res["relationships"][K] extends Relationship.Paginated<Any>
       ? never
       : K
-  ]?: R["relationships"][K] extends Relationship.One<infer T>
+  ]?: Res["relationships"][K] extends Relationship.One<infer T>
     ? { readonly data: T["identifier"]["Type"]; readonly meta?: MetaValue }
-    : R["relationships"][K] extends Relationship.Optional<infer T>
+    : Res["relationships"][K] extends Relationship.Optional<infer T>
       ? { readonly data: Schema.NullOr<T["identifier"]>["Type"]; readonly meta?: MetaValue }
-      : R["relationships"][K] extends Relationship.Many<infer T>
+      : Res["relationships"][K] extends Relationship.Many<infer T>
         ? { readonly data: ReadonlyArray<T["identifier"]["Type"]>; readonly meta?: MetaValue }
         : never;
 };
@@ -143,17 +143,17 @@ export interface LidMap {
    * Resolves a ref (id- or lid-based) to the resource's typed identifier.
    * Throws {@link UnknownLidError} for unassigned lids.
    */
-  readonly identifier: <R extends Any>(resource: R, ref: RefValue) => R["identifier"]["Type"];
+  readonly identifier: <Res extends Any>(resource: Res, ref: RefValue) => Res["identifier"]["Type"];
   /**
    * Resolves every lid-based identifier inside relationship linkage to an
    * id-based identifier — the shape the resource's own relationship schemas
    * expect. Absent linkage resolves to an empty record. Throws
    * {@link UnknownLidError} for unassigned lids.
    */
-  readonly resolveLinkage: <R extends Any>(
-    resource: R,
+  readonly resolveLinkage: <Res extends Any>(
+    resource: Res,
     relationships?: RefLinkageValue,
-  ) => ResolvedLinkage<R>;
+  ) => ResolvedLinkage<Res>;
 }
 
 // A reference with its `lid` swapped for the server-assigned `id`.

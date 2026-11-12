@@ -554,11 +554,11 @@ const includedMember = <Included extends Schema.Top>(included?: Included) => ({
  * @category models
  */
 export interface DataDocument<
-  R extends Schema.Top,
+  Res extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
   M extends Schema.Top = typeof AnyMeta,
 > extends Schema.Struct<{
-  readonly data: R;
+  readonly data: Res;
   readonly included: Schema.optionalKey<Schema.$Array<Included>>;
   readonly links: Schema.optionalKey<typeof TopLevelLinks>;
   readonly meta: Schema.optionalKey<M>;
@@ -583,8 +583,8 @@ export interface DataDocument<
  * It generalises to linkage with no special case, e.g.
  * `DataDocument(Schema.NullOr(Comment.identifier))`.
  *
- * **Nullable data:** use `Schema.NullOr(R)` for `R | null`, or the spec-clean
- * `R.nullable()` / `Schema.OptionFromNullOr(R)` for `Option<R>`. Do *not* reach
+ * **Nullable data:** use `Schema.NullOr(R)` for `Res | null`, or the spec-clean
+ * `R.nullable()` / `Schema.OptionFromNullOr(R)` for `Option<Res>`. Do *not* reach
  * for effect's *structural* `Schema.Option` (`{ _tag, value }`): it serialises a
  * non-conformant body, and `DataDocument` cannot tell the two codecs apart.
  *
@@ -610,16 +610,16 @@ export interface DataDocument<
  * @category constructors
  */
 export const DataDocument = <
-  R extends Schema.Top,
+  Res extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
   M extends Schema.Top = typeof AnyMeta,
 >(
-  data: R,
+  data: Res,
   options?: {
     readonly included?: Included;
     readonly meta?: M;
   },
-): DataDocument<R, Included, M> =>
+): DataDocument<Res, Included, M> =>
   Schema.Struct({
     data,
     ...includedMember(options?.included),
@@ -627,7 +627,7 @@ export const DataDocument = <
   });
 
 /**
- * The decoded *value* type of a single-resource data document for `R` — the
+ * The decoded *value* type of a single-resource data document for `Res` — the
  * value side of {@link DataDocument}, including the optional top-level
  * `jsonapi` member.
  *
@@ -641,10 +641,10 @@ export const DataDocument = <
  * @category models
  */
 export type Value<
-  R extends Schema.Top,
+  Res extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
   M extends Schema.Top = typeof AnyMeta,
-> = DataDocument<R, Included, M>["Type"];
+> = DataDocument<Res, Included, M>["Type"];
 
 /**
  * A collection document: `data` is an array of resources (possibly empty).
@@ -653,11 +653,11 @@ export type Value<
  * @category models
  */
 export interface CollectionDocument<
-  R extends Schema.Top,
+  Res extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
   M extends Schema.Top = typeof AnyMeta,
 > extends Schema.Struct<{
-  readonly data: Schema.$Array<R>;
+  readonly data: Schema.$Array<Res>;
   readonly included: Schema.optionalKey<Schema.$Array<Included>>;
   readonly links: Schema.optionalKey<typeof TopLevelLinks>;
   readonly meta: Schema.optionalKey<M>;
@@ -684,16 +684,16 @@ export interface CollectionDocument<
  * @category constructors
  */
 export const CollectionDocument = <
-  R extends Schema.Top,
+  Res extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
   M extends Schema.Top = typeof AnyMeta,
 >(
-  resource: R,
+  resource: Res,
   options?: {
     readonly included?: Included;
     readonly meta?: M;
   },
-): CollectionDocument<R, Included, M> =>
+): CollectionDocument<Res, Included, M> =>
   Schema.Struct({
     data: Schema.Array(resource),
     ...includedMember(options?.included),
@@ -878,12 +878,12 @@ export const MetaDocument = <M extends Schema.Top = typeof AnyMeta>(meta?: M): M
  * @category models
  */
 export interface Document<
-  R extends Schema.Top,
+  Res extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
   M extends Schema.Top = typeof AnyMeta,
   E extends Schema.Top = typeof ErrorObject,
 > extends Schema.Union<
-  readonly [DataDocument<R, Included, M>, ErrorDocument<E>, MetaDocument<M>]
+  readonly [DataDocument<Res, Included, M>, ErrorDocument<E>, MetaDocument<M>]
 > {}
 
 /**
@@ -907,18 +907,18 @@ export interface Document<
  * @category constructors
  */
 export const Document = <
-  R extends Schema.Top,
+  Res extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
   M extends Schema.Top = typeof AnyMeta,
   E extends Schema.Top = typeof ErrorObject,
 >(
-  resource: R,
+  resource: Res,
   options?: {
     readonly included?: Included;
     readonly meta?: M;
     readonly error?: E;
   },
-): Document<R, Included, M, E> =>
+): Document<Res, Included, M, E> =>
   Schema.Union([
     DataDocument(resource, options),
     ErrorDocument(options?.error),

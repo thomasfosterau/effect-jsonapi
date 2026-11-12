@@ -120,13 +120,13 @@ export interface ResourceLike {
 
 /**
  * The **wire** form of a resource — what {@link stringifyLinks} produces:
- * `Document.Wire<R>` (every `URL` a string) with `links.self` narrowed to a
+ * `Document.Wire<Res>` (every `URL` a string) with `links.self` narrowed to a
  * plain string, since a link object's `href` is flattened too.
  *
  * @since 0.16.0
  * @category models
  */
-export type WireResource<R extends ResourceLike> = Document.Wire<R> & {
+export type WireResource<Res extends ResourceLike> = Document.Wire<Res> & {
   readonly links?: { readonly self?: string };
 };
 
@@ -168,8 +168,8 @@ export const JSONAPI_MEMBER = { version: "1.1" } as const;
  * @since 0.16.0
  * @category models
  */
-export interface ResourceDocument<R extends ResourceLike, I extends ResourceLike = ResourceLike> {
-  readonly data: WireResource<R> & { readonly meta?: R.ReadonlyRecord<string, unknown> };
+export interface ResourceDocument<Res extends ResourceLike, I extends ResourceLike = ResourceLike> {
+  readonly data: WireResource<Res> & { readonly meta?: R.ReadonlyRecord<string, unknown> };
   readonly included?: ReadonlyArray<WireResource<I>>;
   readonly links?: { readonly self?: string };
   readonly meta?: R.ReadonlyRecord<string, unknown>;
@@ -183,9 +183,12 @@ export interface ResourceDocument<R extends ResourceLike, I extends ResourceLike
  * @since 0.16.0
  * @category models
  */
-export interface CollectionDocument<R extends ResourceLike, I extends ResourceLike = ResourceLike> {
+export interface CollectionDocument<
+  Res extends ResourceLike,
+  I extends ResourceLike = ResourceLike,
+> {
   readonly data: ReadonlyArray<
-    WireResource<R> & { readonly meta?: R.ReadonlyRecord<string, unknown> }
+    WireResource<Res> & { readonly meta?: R.ReadonlyRecord<string, unknown> }
   >;
   readonly included?: ReadonlyArray<WireResource<I>>;
   readonly links: Handlers.LinksValue;
@@ -214,12 +217,12 @@ export interface CollectionDocument<R extends ResourceLike, I extends ResourceLi
  * @category models
  */
 export type UnpaginatedCollectionDocument<
-  R extends ResourceLike,
+  Res extends ResourceLike,
   Self extends string = never,
   M extends Handlers.MetaValue = never,
   I extends ResourceLike = ResourceLike,
 > = {
-  readonly data: ReadonlyArray<WireResource<R> & { readonly meta?: Handlers.MetaValue }>;
+  readonly data: ReadonlyArray<WireResource<Res> & { readonly meta?: Handlers.MetaValue }>;
   readonly included?: ReadonlyArray<WireResource<I>>;
   readonly jsonapi: typeof JSONAPI_MEMBER;
 } & ([Self] extends [never] ? unknown : { readonly links: { readonly self: string } }) &
@@ -232,7 +235,7 @@ export type UnpaginatedCollectionDocument<
  * @since 0.16.0
  * @category models
  */
-export interface RelationshipDocument<R extends ResourceLike, I extends ResourceLike = R> {
+export interface RelationshipDocument<Res extends ResourceLike, I extends ResourceLike = Res> {
   readonly data: Schema.NullOr<Schema.Schema<Ref | ReadonlyArray<Ref>>>["Type"];
   readonly included: ReadonlyArray<WireResource<I>>;
   readonly links?: { readonly related: string };
@@ -648,7 +651,7 @@ const wireRelationshipLinks = (value: RelationshipObject): RelationshipObject =>
  * @since 0.16.0
  * @category utils
  */
-export const stringifyLinks = <R extends ResourceLike>(resource: R): WireResource<R> => {
+export const stringifyLinks = <Res extends ResourceLike>(resource: Res): WireResource<Res> => {
   const self = resource.links?.self;
   const relationships = resource.relationships;
   const out: ResourceLike = {
@@ -674,9 +677,9 @@ export const stringifyLinks = <R extends ResourceLike>(resource: R): WireResourc
           ),
     ),
   };
-  // The honest assertion: the value differs from `R` only in the link fields
+  // The honest assertion: the value differs from `Res` only in the link fields
   // just coerced, which `Document.Wire` mirrors at the type level.
-  return out as WireResource<R>;
+  return out as WireResource<Res>;
 };
 
 /**
@@ -743,10 +746,10 @@ const toWireValue = <A>(value: A): WireValue => {
  * @since 0.16.0
  * @category utils
  */
-export function toWireSafeResource<R extends ResourceLike>(resource: R): R;
+export function toWireSafeResource<Res extends ResourceLike>(resource: Res): Res;
 // SAFETY (the implementation signature): the walk keeps every member of the
 // resource, coercing only the runtime-only leaves above; the overload promises
-// `R` by design, since the response encoder reads the coerced members as their
+// `Res` by design, since the response encoder reads the coerced members as their
 // own wire forms.
 export function toWireSafeResource(resource: ResourceLike): WireValue {
   return toWireValue(resource);
@@ -876,14 +879,14 @@ export type IncludeError = ApiError.UnsupportedIncludeDepth | ApiError.Unsupport
  * @category constructors
  */
 export const resource = <
-  R extends ResourceLike,
+  Res extends ResourceLike,
   V = unknown,
   Targets extends Handlers.IncludeTargets = never,
 >(
-  resource: R,
+  resource: Res,
   options: Options<V, Targets> = {},
 ): Effect.Effect<
-  ResourceDocument<R, TargetsIncluded<Targets>>,
+  ResourceDocument<Res, TargetsIncluded<Targets>>,
   IncludeError | Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>
 > => {
@@ -899,7 +902,10 @@ export const resource = <
         ),
         onResource: onResourceFor(options, [wired]),
       });
-      return { ...built, jsonapi: JSONAPI_MEMBER } as ResourceDocument<R, TargetsIncluded<Targets>>;
+      return { ...built, jsonapi: JSONAPI_MEMBER } as ResourceDocument<
+        Res,
+        TargetsIncluded<Targets>
+      >;
     }),
   );
 };
@@ -1032,20 +1038,20 @@ const paginationLinks = (pagination: Pagination): Handlers.LinksValue => {
  * @category constructors
  */
 export const collection = <
-  R extends ResourceLike,
+  Res extends ResourceLike,
   V = unknown,
   Targets extends Handlers.IncludeTargets = never,
   X extends ResourceLike = never,
 >(
-  resources: ReadonlyArray<R>,
+  resources: ReadonlyArray<Res>,
   pagination: Pagination,
   options: CollectionOptions<V, Targets, X> = {},
 ): Effect.Effect<
-  CollectionDocument<R, TargetsIncluded<Targets> | X>,
+  CollectionDocument<Res, TargetsIncluded<Targets> | X>,
   IncludeError | Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>
 > =>
-  assembleCollection<CollectionDocument<R, TargetsIncluded<Targets> | X>, V, Targets, X>(
+  assembleCollection<CollectionDocument<Res, TargetsIncluded<Targets> | X>, V, Targets, X>(
     resources,
     options,
     {
@@ -1127,20 +1133,20 @@ export const collection = <
  * @category constructors
  */
 export const unpaginatedCollection = <
-  R extends ResourceLike,
+  Res extends ResourceLike,
   V = unknown,
   Targets extends Handlers.IncludeTargets = never,
   Self extends string = never,
   const M extends Handlers.MetaValue = never,
   X extends ResourceLike = never,
 >(
-  resources: ReadonlyArray<R>,
+  resources: ReadonlyArray<Res>,
   options: UnpaginatedCollectionOptions<V, Targets, Self, M, X> = {},
 ): Effect.Effect<
   // `Self` is widened to `string`, so a literal `self` doesn't leak into the
   // type; `M` is not, since the document emits that very value.
   UnpaginatedCollectionDocument<
-    R,
+    Res,
     [Self] extends [never] ? never : string,
     M,
     TargetsIncluded<Targets> | X
@@ -1156,7 +1162,7 @@ export const unpaginatedCollection = <
         : { self: options.self, query: options.query };
   return assembleCollection<
     UnpaginatedCollectionDocument<
-      R,
+      Res,
       [Self] extends [never] ? never : string,
       M,
       TargetsIncluded<Targets> | X
@@ -1173,9 +1179,9 @@ export const unpaginatedCollection = <
  * @since 0.16.0
  * @category models
  */
-export interface RelationshipInput<R extends ResourceLike, I extends ResourceLike, V> {
+export interface RelationshipInput<Res extends ResourceLike, I extends ResourceLike, V> {
   /** The (post-mutation) parent resource, whose linkage is the document's `data`. */
-  readonly parent: R;
+  readonly parent: Res;
   /** The relationship key under `parent.relationships`. */
   readonly key: string;
   readonly viewer?: V;
@@ -1259,9 +1265,9 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
  * @since 0.16.0 (`fields` since 0.18.0)
  * @category constructors
  */
-export const relationship = <R extends ResourceLike, I extends ResourceLike = R, V = unknown>(
-  input: RelationshipInput<R, I, V>,
-): RelationshipDocument<R, I> => {
+export const relationship = <Res extends ResourceLike, I extends ResourceLike = Res, V = unknown>(
+  input: RelationshipInput<Res, I, V>,
+): RelationshipDocument<Res, I> => {
   // Deduplicated, stamped and projected, and checked for full linkage from
   // the identifiers, as `Handlers.linkage` checks it (#498) — with the
   // sparse-fieldset exemption the projection carries (#494).
@@ -1323,9 +1329,9 @@ export const relationship = <R extends ResourceLike, I extends ResourceLike = R,
  * @since 0.16.0 (`input.query` since 0.21.0, `input.linkTotal` and `input.lastUnknown` since 0.22.0)
  * @category constructors
  */
-export const edgePage = <R extends ResourceLike, V = unknown>(
+export const edgePage = <Res extends ResourceLike, V = unknown>(
   segment: string,
-  page: { readonly items: ReadonlyArray<R>; readonly totalCount: number },
+  page: { readonly items: ReadonlyArray<Res>; readonly totalCount: number },
   input: {
     readonly limit: number;
     readonly offset: number;
@@ -1335,7 +1341,7 @@ export const edgePage = <R extends ResourceLike, V = unknown>(
   },
   base: string,
   viewer?: V,
-): Effect.Effect<CollectionDocument<R>> =>
+): Effect.Effect<CollectionDocument<Res>> =>
   // No `include` is passed, so the walk's validation can't fail: the error
   // channel really is empty.
   Effect.orDie(
