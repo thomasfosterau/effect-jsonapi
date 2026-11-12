@@ -22,7 +22,7 @@ catalogs:
       specifier: 0.10.0
       version: 0.10.0
     '@thomasfosterau/effect-ext':
-      specifier: ^0.1.0 || ^0.2.0
+      specifier: ^0.2.0
       version: 0.2.0
     '@types/node':
       specifier: ^26.4.1

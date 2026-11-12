@@ -79,11 +79,10 @@ catalog:
   # workspace's own install by a nested copy of the *published*
   # effect-jsonapi under node_modules/@thomasfosterau/effect-ext/ (overrides
   # cannot drop a peer edge). Nothing loads it: the subpaths imported here
-  # never import this package. A consumer's install is unaffected. Both 0.x
-  # minors are admitted (#585): none of the subpaths used here changed
-  # incompatibly in 0.2.0, and an app already on 0.2 must not get a nested
-  # 0.1 copy. The lockfile, and so every gate, resolves the newer.
-  "@thomasfosterau/effect-ext": ^0.1.0 || ^0.2.0
+  # never import this package. A consumer's install is unaffected. The floor
+  # is 0.2.0 (#555): `ServerErrors.schemaIssueToErrors` walks with its
+  # `Issues.leaves` / `Issues.message`, which 0.1.0 lacks.
+  "@thomasfosterau/effect-ext": ^0.2.0
   "@types/node": ^26.4.1
   # `vp run test:coverage`'s provider. Must equal the vitest that vite-plus
   # bundles (see `vitest` below); vite-plus refuses to run coverage on a

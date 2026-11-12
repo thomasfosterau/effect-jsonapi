@@ -32,8 +32,7 @@
  *
  * @since 0.16.0
  */
-import { pathToJsonPointer as toPointer } from "@thomasfosterau/effect-ext/Issues";
-import * as Arr from "effect/Array";
+import * as Issues from "@thomasfosterau/effect-ext/Issues";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
@@ -44,7 +43,6 @@ import { HttpServerResponse } from "effect/http";
 import * as ApiError from "./ApiError.js";
 import * as Document from "./Document.js";
 import { MEDIA_TYPE } from "./internal/media.js";
-import { issueLeaves } from "./internal/schemaExt.js";
 import { definedMember } from "./internal/members.js";
 
 // ---------------------------------------------------------------------------
@@ -218,7 +216,8 @@ export class JsonapiError extends Schema.TaggedError<JsonapiError>()("JsonapiErr
  * @since 0.16.0
  * @category utils
  */
-export const pathToJsonPointer: (path: ReadonlyArray<PropertyKey>) => string = toPointer;
+export const pathToJsonPointer: (path: ReadonlyArray<PropertyKey>) => string =
+  Issues.pathToJsonPointer;
 
 /** The pointer prefix a flat attribute-keyed input maps onto. */
 const ATTRIBUTES_PREFIX: ReadonlyArray<PropertyKey> = ["data", "attributes"];
@@ -226,23 +225,6 @@ const ATTRIBUTES_PREFIX: ReadonlyArray<PropertyKey> = ["data", "attributes"];
 // Effect's default formatter renders a whole issue tree, paths included: the
 // `detail` of an error object that carries no pointer of its own.
 const formatDefault = SchemaIssue.makeFormatterDefault();
-const formatStandard = SchemaIssue.makeFormatterStandardSchemaV1();
-
-/**
- * A leaf's message as Effect's formatters render it. An issue node has no
- * `toString` of its own — `String(issue)` renders `[object Object]` — so every
- * `detail` drawn from a schema issue goes through this. It reads the Standard
- * Schema formatter's message, not the default formatter's text: since effect
- * 4.1 the default formatter appends the path (`\n  at ["confirm"]`) to a check
- * that points at a field, which the error carries as `source.pointer` (#530).
- * Every leaf below one node shares its message here (a check's own, or the
- * leaf's), so the first is the one.
- */
-const leafMessage = (issue: SchemaIssue.Issue): string =>
-  Option.getOrElse(
-    Option.map(Arr.head(formatStandard(issue).issues), ({ message }) => message),
-    () => formatDefault(issue),
-  );
 
 /**
  * Options of {@link schemaIssueToErrors}.
@@ -294,12 +276,15 @@ export const schemaIssueToErrors = (
 ): ReadonlyArray<ErrorObject> => {
   const status = String(options?.status ?? 400);
   const prefix = options?.prefix ?? ATTRIBUTES_PREFIX;
-  return issueLeaves(issue).map(({ path, issue: leaf, describedBy }) => {
-    const pointer = pathToJsonPointer([...prefix, ...path]);
+  return Issues.leaves(issue).map((leaf) => {
+    const pointer = pathToJsonPointer([...prefix, ...leaf.path]);
     return {
       status,
-      code: leaf._tag,
-      detail: leafMessage(describedBy),
+      code: leaf.issue._tag,
+      // A check's own message for the leaves it points at, without the path
+      // effect 4.1's default formatter appends (the error carries it as
+      // `source.pointer`, #530).
+      detail: Issues.message(leaf),
       ...definedMember("source", pointer === "" ? undefined : { pointer }),
     };
   });
