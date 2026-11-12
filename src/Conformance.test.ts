@@ -3224,7 +3224,7 @@ describe("Conformance: the filter evaluation oracle", () => {
 
   const Product = Resource.make("products", {
     attributes: {
-      price: Resource.attribute(Schema.Number, { filter: true }),
+      price: Resource.attribute(Schema.Finite, { filter: true }),
       name: Resource.attribute(Schema.String, { filter: true }),
       colour: Resource.attribute(Schema.NullOr(Schema.String), { filter: true }),
     },

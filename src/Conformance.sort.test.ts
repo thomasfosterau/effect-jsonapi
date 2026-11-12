@@ -30,7 +30,7 @@ const RULE = "profile/sort/ordering";
 const Task = Resource.make("tasks", {
   attributes: {
     title: Schema.NonEmptyString,
-    rank: Schema.Number,
+    rank: Schema.Finite,
     due: Schema.optionalKey(Schema.NullOr(Schema.String)),
   },
 });

@@ -138,7 +138,7 @@ export interface OffsetPageOptions {
   readonly defaultOffset?: number;
   /**
    * `true` (default): fields decode from query strings (`FiniteFromString`, as `Page.Offset`).
-   * `false`: plain numbers (`Schema.Number`) — for hosts that coerce strings at the transport layer
+   * `false`: plain numbers (`Schema.Finite`) — for hosts that coerce strings at the transport layer
    * and reuse the schema as a numeric input.
    */
   readonly fromString?: boolean;
@@ -163,7 +163,7 @@ export interface NumberPageOptions {
   readonly defaultNumber?: number;
   /**
    * `true` (default): fields decode from query strings (`FiniteFromString`, as `Page.Number`).
-   * `false`: plain numbers (`Schema.Number`) — for hosts that coerce strings at the transport layer.
+   * `false`: plain numbers (`Schema.Finite`) — for hosts that coerce strings at the transport layer.
    */
   readonly fromString?: boolean;
 }
@@ -173,7 +173,7 @@ export interface NumberPageOptions {
 type PageLeaf<O extends { readonly fromString?: boolean }> = O extends {
   readonly fromString: false;
 }
-  ? typeof Schema.Number
+  ? typeof Schema.Finite
   : typeof Schema.FiniteFromString;
 
 // `true` when `O` carries a concrete (non-`undefined`) value for key `K`.
@@ -230,7 +230,7 @@ const offsetPage = <const O extends OffsetPageOptions = Record<never, never>>(
   options?: O,
 ): OffsetPageFields<O> => {
   const { maxLimit, minLimit = 1, defaultLimit, defaultOffset, fromString = true } = options ?? {};
-  const base = fromString ? Schema.FiniteFromString : Schema.Number;
+  const base = fromString ? Schema.FiniteFromString : Schema.Finite;
   const offsetLeaf = base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0));
   const limitLeaf =
     maxLimit === undefined
@@ -250,7 +250,7 @@ const numberPage = <const O extends NumberPageOptions = Record<never, never>>(
   options?: O,
 ): NumberPageFields<O> => {
   const { maxSize, minSize = 1, defaultSize, defaultNumber, fromString = true } = options ?? {};
-  const base = fromString ? Schema.FiniteFromString : Schema.Number;
+  const base = fromString ? Schema.FiniteFromString : Schema.Finite;
   // Page numbers are 1-based.
   const numberLeaf = base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1));
   const sizeLeaf =
@@ -322,7 +322,7 @@ export const Page = {
    * - **Bounded** — `maxLimit` caps `limit` (a DoS guard); `minLimit` (default 1) floors it.
    * - **Defaulted** — `defaultLimit` / `defaultOffset` fill in on decode when the wire key is
    *   absent, so downstream code sees concrete numbers; omit one to leave that field optional.
-   * - **Coercion-flexible** — `fromString: false` builds the fields from plain `Schema.Number`
+   * - **Coercion-flexible** — `fromString: false` builds the fields from plain `Schema.Finite`
    *   (encoded = number) instead of `FiniteFromString` (encoded = string), so the same schema
    *   works both as a numeric call-site input and behind a transport that coerces query strings.
    *
@@ -1389,7 +1389,7 @@ const messageOf = (cause: unknown): string => (P.isError(cause) ? cause.message 
  * const Article = Resource.make("articles", {
  *   attributes: {
  *     status: Resource.attribute(Schema.Literals(["open", "done"]), { filter: ["eq", "in"] }),
- *     age: Resource.attribute(Schema.Number, { filter: true })
+ *     age: Resource.attribute(Schema.Finite, { filter: true })
  *   }
  * })
  *

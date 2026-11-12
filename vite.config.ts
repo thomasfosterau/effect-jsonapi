@@ -168,6 +168,7 @@ export default defineConfig({
       "effecttsgo/schema-class-missing-brand": "error",
       "effecttsgo/unnecessary-typeof-type": "error",
       "effecttsgo/prefer-typed-schema-decoder": "error",
+      "effecttsgo/schema-number": "error",
       // tsconfig.json keeps `unstableApiUsage` at "suggestion" so the HTTP
       // surface this library is built on (`effect/http`, `effect/http-api`,
       // much of it `@stability unstable`) does not flood the gates (#205):

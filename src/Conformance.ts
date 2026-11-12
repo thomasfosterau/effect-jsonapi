@@ -680,7 +680,7 @@ export class ContractViolation extends Schema.TaggedError<
     }),
   ),
   /** How many further findings the report carries beyond this one. */
-  remaining: Schema.Number,
+  remaining: Schema.Int,
 }) {
   /**
    * The rule, its requirement and its citation, then the observation — in that

@@ -236,7 +236,7 @@ const Contest = Resource.make("contests", {
   attributes: { name: Schema.String },
   relationships: {
     ballots: Relationship.many(() => Ballot, {
-      meta: Schema.Struct({ totalCount: Schema.Number }),
+      meta: Schema.Struct({ totalCount: Schema.Finite }),
     }),
   },
 });
@@ -606,7 +606,7 @@ AnyNode.collection(); // data: Array<Person | Organisation>
 // As a relationship target — linkage decodes for ANY member (keyed on the member
 // `type`, never the family name):
 const Edge = Resource.make("edges", {
-  attributes: { weight: Schema.Number },
+  attributes: { weight: Schema.Finite },
   relationships: { to: Relationship.one(() => AnyNode) },
 });
 // Edge.to.data is { type: "people"; id } | { type: "organisations"; id }
@@ -1913,7 +1913,7 @@ const Product = Resource.make("products", {
       Schema.DateFromString.pipe(Filter.able(["gte", "lt"]), Sort.able()),
     ),
     // nullable: declare the member and wrap it — `isnull` names NULL, the literal is the number
-    rating: Schema.NullOr(Schema.Number.pipe(Filter.able(["gte", "isnull"]))),
+    rating: Schema.NullOr(Schema.Finite.pipe(Filter.able(["gte", "isnull"]))),
   },
   relationships: {
     // a to-one relationship is a filter field too, valued by the related id
@@ -2102,7 +2102,7 @@ Because the derivation recurses over the **declaration** rather than the relatio
 
 A resource that declares no surface advertises no parameter, and `include: true` / `Query.IncludeOptions` behave exactly as before.
 
-`Page.Offset` / `Page.Number` / `Page.Cursor` are the ready-made constants. For a **bounded, defaulted, dual-use** variant, call `Query.Page.offset(options)` (and, for page-number pagination, `Query.Page.number(options)`): it returns the same `{ offset, limit }` field-map but lets you cap `limit` with `maxLimit` (a DoS guard every JSON:API server wants), fill in `defaultLimit` / `defaultOffset` on decode, and — with `fromString: false` — build the fields from plain `Schema.Number` instead of `FiniteFromString`, so the one schema works both as a numeric call-site input and behind a transport that coerces query strings to numbers (e.g. raw `HttpApiEndpoint` wrapped in `Schema.toCodecStringTree`).
+`Page.Offset` / `Page.Number` / `Page.Cursor` are the ready-made constants. For a **bounded, defaulted, dual-use** variant, call `Query.Page.offset(options)` (and, for page-number pagination, `Query.Page.number(options)`): it returns the same `{ offset, limit }` field-map but lets you cap `limit` with `maxLimit` (a DoS guard every JSON:API server wants), fill in `defaultLimit` / `defaultOffset` on decode, and — with `fromString: false` — build the fields from plain `Schema.Finite` instead of `FiniteFromString`, so the one schema works both as a numeric call-site input and behind a transport that coerces query strings to numbers (e.g. raw `HttpApiEndpoint` wrapped in `Schema.toCodecStringTree`).
 
 ```ts
 // caps page size at 100, defaults to 25, still decodes from query strings

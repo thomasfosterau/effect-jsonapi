@@ -3,6 +3,7 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
+import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaGetter from "effect/SchemaGetter";
 import * as Endpoint from "./Endpoint.js";
 import * as Filter from "./Filter.js";
@@ -35,7 +36,7 @@ const Product = Resource("products", {
     // the full operator core, sortable — the pipeable form
     priceCents: Schema.Int.pipe(Filter.able(), Sort.able()),
     // a subset, in the order given (duplicates dropped) — the options sugar
-    stock: attribute(Schema.Number, { filter: ["gte", "eq", "lte", "eq"] }),
+    stock: attribute(Schema.Finite, { filter: ["gte", "eq", "lte", "eq"] }),
     // declared, but neither filterable nor sortable
     sku: attribute(Schema.String, { create: "required", update: false }),
     // sortable only
@@ -52,7 +53,7 @@ const Product = Resource("products", {
 describe("Resource.filterable / Resource.sortable", () => {
   it("declares nothing by default", () => {
     const Plain = Resource("plains", {
-      attributes: { name: Schema.String, n: attribute(Schema.Number) },
+      attributes: { name: Schema.String, n: attribute(Schema.Finite) },
       relationships: {
         supplier: Relationship.one(() => Supplier),
         other: Relationship.optional(() => Supplier),
@@ -150,7 +151,7 @@ describe("Resource.filterable / Resource.sortable", () => {
 
   it("allows `isnull` on a non-nullable attribute", () => {
     const res = Resource("nn", {
-      attributes: { n: attribute(Schema.Number, { filter: ["isnull"] }) },
+      attributes: { n: attribute(Schema.Finite, { filter: ["isnull"] }) },
     });
     expect(filterable(res).n.operators).toEqual(["isnull"]);
   });
@@ -268,10 +269,10 @@ describe("Resource.filterable / Resource.sortable", () => {
     it("resolves a forward-referenced target only when the literal is used", () => {
       // `Late` is defined after `Early`, which references it; nothing is forced at `make`.
       const Early = Resource("earlies", {
-        attributes: { n: Schema.Number },
+        attributes: { n: Schema.Finite },
         relationships: { late: Relationship.one((): typeof Late => Late, { filter: ["eq"] }) },
       });
-      const Late = Resource("lates", { attributes: { m: Schema.Number } });
+      const Late = Resource("lates", { attributes: { m: Schema.Finite } });
       expect(Schema.decodeSync(filterable(Early).late.literal)("7")).toBe("7");
     });
 
@@ -374,14 +375,14 @@ describe("Resource.filterable / Resource.sortable", () => {
   });
 
   describe("literal codec", () => {
-    const Cents = Schema.Number.pipe(Schema.brand("Cents"));
+    const Cents = Schema.Finite.pipe(Schema.brand("Cents"));
     const res = Resource("literals", {
       attributes: {
         title: attribute(Schema.NonEmptyString, { filter: true }),
-        count: attribute(Schema.Number, { filter: true }),
+        count: attribute(Schema.Finite, { filter: true }),
         whole: attribute(Schema.Int, { filter: true }),
         flag: attribute(Schema.Boolean, { filter: true }),
-        rating: attribute(Schema.NullOr(Schema.Number), { filter: true }),
+        rating: attribute(Schema.NullOr(Schema.Finite), { filter: true }),
         publishedAt: attribute(Schema.DateFromString, { filter: ["gte", "lte"] }),
         status: attribute(Schema.Literals(["draft", "published"]), { filter: ["eq", "in"] }),
         priority: attribute(Schema.NullOr(Schema.Literals([1, 2, 3])), { filter: ["eq"] }),
@@ -498,7 +499,7 @@ describe("Resource.filterable / Resource.sortable", () => {
 
     it("uses an explicit `filterLiteral` in place of the derived codec", () => {
       // an attribute whose encoded form is a struct — no derivation possible
-      const Point = Schema.Struct({ x: Schema.Number, y: Schema.Number });
+      const Point = Schema.Struct({ x: Schema.Finite, y: Schema.Finite });
       const PointFromString = Schema.String.pipe(
         Schema.decodeTo(Point, {
           decode: SchemaGetter.transform((s: string) => {
@@ -531,7 +532,7 @@ describe("Resource.filterable / Resource.sortable", () => {
       ).toThrow(/attribute "tags"/);
       expect(() =>
         Resource("bad-struct", {
-          attributes: { point: attribute(Schema.Struct({ x: Schema.Number }), { filter: ["eq"] }) },
+          attributes: { point: attribute(Schema.Struct({ x: Schema.Finite }), { filter: ["eq"] }) },
         }),
       ).toThrow(/filterLiteral/);
       expect(() =>
@@ -564,12 +565,12 @@ describe("Resource.filterable / Resource.sortable", () => {
 
     it("rejects `filterLiteral` without `filter`", () => {
       const PointFromString = Schema.String.pipe(
-        Schema.decodeTo(Schema.Number, {
+        Schema.decodeTo(Schema.Finite, {
           decode: SchemaGetter.transform((s: string) => Number(s)),
           encode: SchemaGetter.transform((n: number) => String(n)),
         }),
       );
-      expect(() => attribute(Schema.Number, { filterLiteral: PointFromString })).toThrow(
+      expect(() => attribute(Schema.Finite, { filterLiteral: PointFromString })).toThrow(
         /`filterLiteral` given without `filter`/,
       );
     });
@@ -592,11 +593,11 @@ describe("Resource.filterable / Resource.sortable", () => {
     });
 
     it("rejects a malformed hand-stamped filter annotation at Resource.make", () => {
-      const bad = Schema.Number.annotate({ [Filter.AnnotationId]: { operators: ["like"] } });
+      const bad = Schema.Finite.annotate({ [Filter.AnnotationId]: { operators: ["like"] } });
       expect(() => Resource("bad-annotation", { attributes: { n: bad } })).toThrow(
         /Resource\.make\("bad-annotation"\): attribute "n" carries a malformed filter declaration/,
       );
-      const empty = Schema.Number.annotate({ [Filter.AnnotationId]: { operators: [] } });
+      const empty = Schema.Finite.annotate({ [Filter.AnnotationId]: { operators: [] } });
       expect(() => Resource("empty-annotation", { attributes: { n: empty } })).toThrow(
         /malformed filter declaration/,
       );
@@ -605,7 +606,7 @@ describe("Resource.filterable / Resource.sortable", () => {
     it("admits a template-literal attribute as a string literal", () => {
       const Coded = Resource("coded", {
         attributes: {
-          code: attribute(Schema.TemplateLiteral(["X-", Schema.Number]), { filter: ["eq"] }),
+          code: attribute(Schema.TemplateLiteral(["X-", Schema.Finite]), { filter: ["eq"] }),
         },
       });
       const literal = filterable(Coded).code.literal;
@@ -614,7 +615,14 @@ describe("Resource.filterable / Resource.sortable", () => {
     });
 
     it("refuses to encode a non-finite number, so decode ∘ encode stays total", () => {
-      const literal = filterable(Product).stock.literal;
+      // `Schema.Finite` rejects non-finite numbers before the literal's encoder
+      // sees them; the encoder's own guard is for an attribute that admits them,
+      // so build the unchecked number schema from its AST. The type says `Finite` only so `attribute` accepts it.
+      const AnyNumber = Schema.make<typeof Schema.Finite>(SchemaAST.number);
+      const Gauge = Resource("gauges", {
+        attributes: { stock: attribute(AnyNumber, { filter: ["eq"] }) },
+      });
+      const literal = filterable(Gauge).stock.literal;
       // the message names the value as written, not as `JSON.stringify` renders
       // it ("null"), so it cannot be mistaken for a NULL literal
       expect(() => Schema.encodeUnknownSync(literal)(Number.NaN)).toThrow(
@@ -627,7 +635,7 @@ describe("Resource.filterable / Resource.sortable", () => {
         "Expected a finite number to encode as a filter literal, got -Infinity",
       );
       // the same message reaches a tree's encoder
-      expect(() => Filter.normalise(Filter.eq("stock", Number.NaN), filterable(Product))).toThrow(
+      expect(() => Filter.normalise(Filter.eq("stock", Number.NaN), filterable(Gauge))).toThrow(
         "Expected a finite number to encode as a filter literal, got NaN",
       );
       expect(Schema.encodeUnknownSync(literal)(1.5)).toBe("1.5");
@@ -640,8 +648,8 @@ describe("Resource.filterable / Resource.sortable", () => {
       const Nullables = Resource("nullables", {
         attributes: {
           title: attribute(Schema.String, { filter: ["eq", "in"] }),
-          age: attribute(Schema.Number, { filter: ["eq"] }),
-          rating: attribute(Schema.NullOr(Schema.Number), { filter: ["eq", "isnull"] }),
+          age: attribute(Schema.Finite, { filter: ["eq"] }),
+          rating: attribute(Schema.NullOr(Schema.Finite), { filter: ["eq", "isnull"] }),
           deletedAt: attribute(Schema.NullOr(Schema.DateFromString), { filter: ["gte"] }),
           flag: attribute(Schema.Boolean, { filter: ["eq"] }),
           // an explicit codec: the hint does not depend on derivation
@@ -709,13 +717,13 @@ describe("Resource.filterable / Resource.sortable", () => {
 
     it("makes the pipeable form, the sugar on a descriptor and the bare sugar indistinguishable", () => {
       const Piped = Resource("piped", {
-        attributes: { n: Schema.Number.pipe(Filter.able(["eq"]), Sort.able()) },
+        attributes: { n: Schema.Finite.pipe(Filter.able(["eq"]), Sort.able()) },
       });
       const Wrapped = Resource("wrapped", {
-        attributes: { n: attribute(Schema.Number.pipe(Filter.able(["eq"]), Sort.able())) },
+        attributes: { n: attribute(Schema.Finite.pipe(Filter.able(["eq"]), Sort.able())) },
       });
       const Sugar = Resource("sugar", {
-        attributes: { n: attribute(Schema.Number, { filter: ["eq"], sort: true }) },
+        attributes: { n: attribute(Schema.Finite, { filter: ["eq"], sort: true }) },
       });
       Arr.forEach([Piped, Wrapped, Sugar], (res) => {
         expect(Object.keys(filterable(res))).toEqual(["n"]);
@@ -740,16 +748,16 @@ describe("Resource.filterable / Resource.sortable", () => {
       expectTypeOf<SortableKeys<typeof Sugar>>().toEqualTypeOf<"n">();
       expectTypeOf(filterable(Piped)).toEqualTypeOf(filterable(Sugar));
       expectTypeOf(filterable(Wrapped)).toEqualTypeOf(filterable(Sugar));
-      expectTypeOf(attribute(Schema.Number, { filter: ["eq"], sort: true })).toEqualTypeOf(
-        attribute(Schema.Number.pipe(Filter.able(["eq"]), Sort.able())),
+      expectTypeOf(attribute(Schema.Finite, { filter: ["eq"], sort: true })).toEqualTypeOf(
+        attribute(Schema.Finite.pipe(Filter.able(["eq"]), Sort.able())),
       );
-      expectTypeOf(attribute(Schema.Number, { filter: true })).toEqualTypeOf(
-        attribute(Schema.Number.pipe(Filter.able())),
+      expectTypeOf(attribute(Schema.Finite, { filter: true })).toEqualTypeOf(
+        attribute(Schema.Finite.pipe(Filter.able())),
       );
     });
 
     it("stamps only the projection config on the descriptor; the inner schema carries the declaration", () => {
-      const field = attribute(Schema.Number, { filter: ["eq"], sort: true });
+      const field = attribute(Schema.Finite, { filter: ["eq"], sort: true });
       const descriptor = Schema.resolveAnnotations(field)?.[AttributeDescriptorAnnotationId] as {
         readonly schema: Schema.Top;
       };
@@ -765,16 +773,16 @@ describe("Resource.filterable / Resource.sortable", () => {
         sort: true,
       });
       // a descriptor without declarations stamps the schema untouched
-      const plain = Schema.resolveAnnotations(attribute(Schema.Number))?.[
+      const plain = Schema.resolveAnnotations(attribute(Schema.Finite))?.[
         AttributeDescriptorAnnotationId
       ] as {
         readonly schema: Schema.Top;
       };
-      expect(plain.schema).toBe(Schema.Number);
+      expect(plain.schema).toBe(Schema.Finite);
     });
 
     it("uses an explicit literal codec in the pipeable form, as `filterLiteral` does in the sugar", () => {
-      const Point = Schema.Struct({ x: Schema.Number, y: Schema.Number });
+      const Point = Schema.Struct({ x: Schema.Finite, y: Schema.Finite });
       const PointFromString = Schema.String.pipe(
         Schema.decodeTo(Point, {
           decode: SchemaGetter.transform((s: string) => {
@@ -804,7 +812,7 @@ describe("Resource.filterable / Resource.sortable", () => {
     });
 
     describe("reads the annotation through the wrappers an attribute field may carry", () => {
-      const declared = Schema.Number.pipe(Filter.able(["eq", "gte"]), Sort.able());
+      const declared = Schema.Finite.pipe(Filter.able(["eq", "gte"]), Sort.able());
 
       it('an optionalKey wrapper — `resource: "optional"`, or a bare Schema.optionalKey', () => {
         const res = Resource("optionals", {
@@ -844,7 +852,7 @@ describe("Resource.filterable / Resource.sortable", () => {
       });
 
       it("the descriptor's inner schema, for a descriptor stamped by hand", () => {
-        const byHand = Schema.Number.annotate({
+        const byHand = Schema.Finite.annotate({
           [AttributeDescriptorAnnotationId]: {
             schema: declared,
             create: "required",
@@ -975,7 +983,7 @@ describe("Resource.filterable / Resource.sortable", () => {
     it("carries the declaration through Resource.attributes spreads and Resource.extend", () => {
       const Base = Resource("bases", {
         attributes: {
-          n: Schema.Number.pipe(Filter.able(["eq"]), Sort.able()),
+          n: Schema.Finite.pipe(Filter.able(["eq"]), Sort.able()),
           s: attribute(Schema.String, { filter: true }),
           plain: Schema.String,
         },
@@ -1032,14 +1040,14 @@ describe("Resource.filterable / Resource.sortable", () => {
     });
 
     it("rejects a hand-stamped filter annotation whose literal is not a schema", () => {
-      const bad = Schema.Number.annotate({
+      const bad = Schema.Finite.annotate({
         [Filter.AnnotationId]: { operators: ["eq"], literal: "nope" },
       });
       expect(() => Resource("bad-literal", { attributes: { n: bad } })).toThrow(
         /Resource\.make\("bad-literal"\): attribute "n" carries a malformed filter declaration/,
       );
       // a schema literal is fine
-      const ok = Schema.Number.annotate({
+      const ok = Schema.Finite.annotate({
         [Filter.AnnotationId]: { operators: ["eq"], literal: Schema.String },
       });
       expect(filterable(Resource("ok-literal", { attributes: { n: ok } }))).toHaveProperty("n");
@@ -1047,7 +1055,7 @@ describe("Resource.filterable / Resource.sortable", () => {
 
     it("recognises the nullable union once, so a re-annotated NullOr still reads through", () => {
       // rebuilt after wrapping: the union node is new, its non-null member still carries the declaration
-      const s = Schema.NullOr(Schema.Number.pipe(Filter.able(["eq"]), Sort.able())).annotate({
+      const s = Schema.NullOr(Schema.Finite.pipe(Filter.able(["eq"]), Sort.able())).annotate({
         title: "rating",
       });
       const res = Resource("nullable-annotated", {
@@ -1066,19 +1074,19 @@ describe("Resource.filterable / Resource.sortable", () => {
     });
 
     it("rejects a malformed hand-stamped sort annotation at Resource.make", () => {
-      const bad = Schema.Number.annotate({ [Sort.AnnotationId]: "yes" });
+      const bad = Schema.Finite.annotate({ [Sort.AnnotationId]: "yes" });
       expect(() => Resource("bad-sort", { attributes: { n: bad } })).toThrow(
         /Resource\.make\("bad-sort"\): attribute "n" carries a malformed sort declaration/,
       );
-      const falsy = Schema.Number.annotate({ [Sort.AnnotationId]: false });
+      const falsy = Schema.Finite.annotate({ [Sort.AnnotationId]: false });
       expect(() => Resource("false-sort", { attributes: { n: falsy } })).toThrow(
         /malformed sort declaration/,
       );
     });
 
     it("refuses the sugar on a schema already declared, rather than overriding it", () => {
-      const filterDeclared = Schema.Number.pipe(Filter.able(["eq"]));
-      const sortDeclared = Schema.Number.pipe(Sort.able());
+      const filterDeclared = Schema.Finite.pipe(Filter.able(["eq"]));
+      const sortDeclared = Schema.Finite.pipe(Sort.able());
       // a compile error at the `schema` argument (test/rejected-calls.types.ts),
       // and a definition-time throw, reached here through a widened schema
       // SAFETY: widened on purpose, to reach the definition-time check.

@@ -25,7 +25,7 @@ type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 const assertTrue = <T extends true>(): T[] => [];
 
-const Count = Schema.Struct({ totalCount: Schema.Number });
+const Count = Schema.Struct({ totalCount: Schema.Finite });
 const Ballot = Resource.make("ballots", { attributes: { label: Schema.String } });
 const Contest = Resource.make("contests", {
   attributes: { name: Schema.String },

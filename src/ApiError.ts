@@ -608,7 +608,7 @@ export class UnsupportedIncludeDepth extends make<UnsupportedIncludeDepth>()(
     title: "Unsupported Include Depth",
     fields: {
       path: Schema.String,
-      maxDepth: Schema.Number,
+      maxDepth: Schema.Int,
       includablePaths: Schema.Array(Schema.String),
     },
     detail: (e) =>

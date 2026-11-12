@@ -736,7 +736,7 @@ export class ErrorResponse extends Schema.TaggedError<
   ErrorResponse,
   { readonly brand: unique symbol }
 >()("ErrorResponse", {
-  status: Schema.Number,
+  status: Schema.Int,
   message: Schema.String,
   document: Schema.Option(WireDocument),
 }) {}

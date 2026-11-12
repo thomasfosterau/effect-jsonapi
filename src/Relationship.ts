@@ -455,7 +455,7 @@ export interface ToOneOptions<
 export interface MetaOptions<M extends Schema.Top = Schema.Top> {
   /**
    * The schema of the relationship object's `meta` member, such as
-   * `Schema.Struct({ totalCount: Schema.Number })` for a to-many arm whose
+   * `Schema.Struct({ totalCount: Schema.Finite })` for a to-many arm whose
    * linkage is capped per parent. Defaults to `Document.AnyMeta`.
    */
   readonly meta?: M;

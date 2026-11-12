@@ -35,20 +35,20 @@ type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 const Play = Resource.make("plays", {
-  attributes: { playedAt: Schema.String, seconds: Schema.Number },
+  attributes: { playedAt: Schema.String, seconds: Schema.Finite },
   // Reached through the paginated `plays` on its own relationship endpoint
   // (#483). Declared before `Track`, so behind a thunk.
   relationships: { track: Relationship.one(() => Track) },
 });
 const Label = Resource.make("labels", {
-  attributes: { title: Schema.String, founded: Schema.Number },
+  attributes: { title: Schema.String, founded: Schema.Finite },
 });
 const Artist = Resource.make("artists", {
   attributes: { stageName: Schema.String },
   relationships: { label: Relationship.one(() => Label) },
 });
 const Track = Resource.make("tracks", {
-  attributes: { title: Schema.String, seconds: Schema.Number },
+  attributes: { title: Schema.String, seconds: Schema.Finite },
   relationships: { artist: Relationship.one(() => Artist) },
 });
 const Playlist = Resource.make("playlists", {

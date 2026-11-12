@@ -2628,11 +2628,11 @@ describe("Endpoint constructors with an injected id schema", () => {
   });
   const Line = Resource("lines", {
     id: LineId,
-    attributes: { amount: Schema.Number },
+    attributes: { amount: Schema.Finite },
   });
   const Invoice = Resource("invoices", {
     id: InvoiceId,
-    attributes: { total: Schema.Number },
+    attributes: { total: Schema.Finite },
     relationships: {
       account: Relationship.one(() => Account),
       lines: Relationship.many(() => Line),
