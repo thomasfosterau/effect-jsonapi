@@ -35,6 +35,7 @@ import { make as Resource } from "./Resource.js";
 import { platformLayer } from "./Registry.js";
 import { SERVER_ERROR } from "./ServerErrors.js";
 import { MEDIA_TYPE } from "./internal/media.js";
+import { stringify } from "./internal/json.js";
 
 describe("contentTypeIsAcceptable", () => {
   it("accepts a missing or plain JSON:API content type", () => {
@@ -502,7 +503,7 @@ describe("tracing", () => {
     expect(span?.attributes.get("jsonapi.negotiation.outcome")).toBe("rejected");
     expect(span?.attributes.get("jsonapi.negotiation.rule")).toBe("content_type");
     // the raw header value is never captured as an attribute
-    expect(JSON.stringify([...span!.attributes.values()])).not.toContain("charset");
+    expect(stringify([...span!.attributes.values()])).not.toContain("charset");
   });
 
   it("tags Span.negotiate with the accept rule on a 406", async () => {
@@ -526,7 +527,7 @@ describe("tracing", () => {
     // only the fixed request-part enum is attached — never the offending
     // parameter name, the decode failure message, or anything else per-request
     expect([...span!.attributes.keys()]).toEqual(["jsonapi.request_part"]);
-    expect(JSON.stringify([...span!.attributes.values()])).not.toContain("limit");
+    expect(stringify([...span!.attributes.values()])).not.toContain("limit");
   });
 
   it("does not emit Span.schemaError for a request that never fails validation", async () => {

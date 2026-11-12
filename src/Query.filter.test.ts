@@ -23,6 +23,7 @@ import * as Relationship from "./Relationship.js";
 import { attribute, filterable, make as Resource, readOnlyAttribute } from "./Resource.js";
 import type { FilterableKeys } from "./Resource.js";
 import { definedMember } from "./internal/members.js";
+import { parse } from "./internal/json.js";
 
 const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
 
@@ -1323,7 +1324,7 @@ describe("Query.schema with filter: true", () => {
         })),
       ).toEqual([{ key: `filter[${name}]`, message: `Unknown filter field "${name}"` }]);
       // An own `__proto__` key, as `UrlParams.toRecord` writes one.
-      const wire = JSON.parse(
+      const wire = parse(
         `{"${name}": "x", "${name}[polluted]": "yes", "filter[status]": "open", "page[limit]": "5"}`,
       );
       expect(decodeQuery(wire)).toEqual({ filter: eq("status", "open"), page: { limit: 5 } });

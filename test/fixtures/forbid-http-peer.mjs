@@ -38,7 +38,7 @@ const NAMESPACES = [
 register(
   `data:text/javascript,
     export async function resolve (specifier, context, next) {
-      const namespaces = ${JSON.stringify(NAMESPACES)};
+      const namespaces = [${NAMESPACES.map((name) => `"${name}"`).join(",")}];
       if (namespaces.some((n) => specifier === "effect/" + n || specifier.startsWith("effect/" + n + "/"))) {
         throw new Error("FORBIDDEN_PEER:" + specifier)
       }

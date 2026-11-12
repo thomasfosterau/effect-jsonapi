@@ -8,6 +8,7 @@
  */
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
+import { render } from "./json.js";
 
 /** The six comparison operators: one literal against the field. */
 export const compareOperators = ["eq", "ne", "lt", "lte", "gt", "gte"] as const;
@@ -52,7 +53,7 @@ export const resolveOperators = <const L extends ReadonlyArray<string>>(
   for (const operator of filter) {
     if (!isAllowed(operator)) {
       throw new Error(
-        `${subject} declares filter operator ${JSON.stringify(operator)}; expected one of ${allowed.literals.join(", ")}`,
+        `${subject} declares filter operator ${render(operator)}; expected one of ${allowed.literals.join(", ")}`,
       );
     }
     if (!operators.includes(operator)) operators.push(operator);

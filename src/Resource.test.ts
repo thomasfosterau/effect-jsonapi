@@ -30,6 +30,7 @@ import {
   sortable,
 } from "./Resource.js";
 import * as Sort from "./Sort.js";
+import { parse } from "./internal/json.js";
 
 const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
 
@@ -1111,11 +1112,11 @@ describe("Resource.updatePayload tri-state semantics", () => {
   it("over a JSON wire: null clears a nullable attribute, absent leaves it unchanged", () => {
     // A real HTTP body is JSON (no `undefined`): null is the wire clear signal.
     const cleared = Schema.decodeUnknownSync(Widget.updatePayload)(
-      JSON.parse('{"data":{"type":"widgets","id":"1","attributes":{"note":null}}}'),
+      parse('{"data":{"type":"widgets","id":"1","attributes":{"note":null}}}'),
     );
     expect(cleared.data.attributes?.note).toBeNull();
     const unchanged = Schema.decodeUnknownSync(Widget.updatePayload)(
-      JSON.parse('{"data":{"type":"widgets","id":"1","attributes":{}}}'),
+      parse('{"data":{"type":"widgets","id":"1","attributes":{}}}'),
     );
     expect(unchanged.data.attributes && "note" in unchanged.data.attributes).toBe(false);
   });

@@ -43,6 +43,7 @@ import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "./internal/media.js";
 import { definedMember } from "./internal/members.js";
+import { stringify } from "./internal/json.js";
 
 // ---------------------------------------------------------------------------
 // A tiny api, used for endpoint discovery by both the real and canned targets
@@ -126,7 +127,7 @@ const cannedClient = (serve: (request: CannedRequest) => Canned): HttpClient.Htt
       const hasBody = canned.body !== undefined && status !== 204;
       return HttpClientResponse.fromWeb(
         request,
-        new Response(hasBody ? JSON.stringify(canned.body) : null, {
+        new Response(hasBody ? stringify(canned.body) : null, {
           status,
           headers: hasBody
             ? { ...canned.headers, "content-type": contentType }

@@ -34,6 +34,8 @@ const now = (): Date => DateTime.toDateUtc(DateTime.nowUnsafe());
 
 const buildClient = HttpApiTest.groups(Api, ["articles", "search"]);
 
+const jsonText = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+
 const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
@@ -819,7 +821,7 @@ describe("blog example: spec compliance on the wire", () => {
 
   it("OpenAPI generation reflects the JSON:API media type and statuses", () => {
     const spec = OpenApi.fromApi(Api);
-    const json = JSON.stringify(spec);
+    const json = jsonText(spec);
     expect(json).toContain("application/vnd.api+json");
     // create → 201, remove → 204, fetch errors → 404
     expect(spec.paths["/articles"]?.post?.responses).toHaveProperty("201");

@@ -242,7 +242,7 @@ describe("3. Handlers.compose(project, withMeta) replaces projectFields / withVi
 
 describe("4. Client.errorDocument / errorMessage replace decodeErrorBody / errorDocumentMessage", () => {
   it("decodes a conformant body and degrades on anything else", () => {
-    const body = JSON.stringify(
+    const body = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
       ApiError.toDocument(new ApiError.Conflict({ detail: "Title taken" })),
     );
     const decoded = Client.decodeErrorDocument(body);

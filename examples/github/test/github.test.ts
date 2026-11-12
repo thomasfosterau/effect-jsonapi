@@ -46,6 +46,8 @@ const now = (): Date => DateTime.toDateUtc(DateTime.nowUnsafe());
 
 const buildClient = HttpApiTest.groups(Api, ["users", "repositories", "issues", "pulls", "search"]);
 
+const jsonText = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+
 const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
   Effect.runPromise(effect.pipe(Effect.scoped, Effect.provide(GitHubLive)) as Effect.Effect<A, E>);
 
@@ -1023,7 +1025,7 @@ describe("github example: spec compliance on the wire", () => {
 
   it("OpenAPI generation reflects the JSON:API media type, statuses and query parameters", () => {
     const spec = OpenApi.fromApi(Api);
-    const json = JSON.stringify(spec);
+    const json = jsonText(spec);
     expect(json).toContain("application/vnd.api+json");
 
     // create → 201 + 422, remove → 204, fetch errors → 404, update locked → 403

@@ -103,6 +103,7 @@ import {
   viaCreateEndpoint,
   withCreated,
 } from "./write.js";
+import { render } from "../json.js";
 
 const SPEC = "https://jsonapi.org/format/1.1";
 
@@ -794,7 +795,7 @@ const resourceIdentification: RuleImpl = {
               finding(resourceIdentification.rule, {
                 detail: `${where} answered a resource object at ${pointer} with no string \`type\``,
                 expected: "`type` present and a non-empty string",
-                observed: `type: ${JSON.stringify(type)}`,
+                observed: `type: ${render(type)}`,
                 probe: observation.probe,
               }),
             );
@@ -805,7 +806,7 @@ const resourceIdentification: RuleImpl = {
               finding(resourceIdentification.rule, {
                 detail: `${where} answered a resource object at ${pointer} with no string \`id\``,
                 expected: "`id` present and a non-empty string",
-                observed: `id: ${JSON.stringify(id)}`,
+                observed: `id: ${render(id)}`,
                 probe: observation.probe,
               }),
             );
@@ -836,7 +837,7 @@ const jsonApiObject: RuleImpl = {
             finding(jsonApiObject.rule, {
               detail: `${where} answered a non-object \`jsonapi\` member`,
               expected: "a jsonapi object",
-              observed: JSON.stringify(value),
+              observed: render(value),
               probe: observation.probe,
             }),
           ];
@@ -847,7 +848,7 @@ const jsonApiObject: RuleImpl = {
             finding(jsonApiObject.rule, {
               detail: `${where} answered a non-string \`jsonapi.version\``,
               expected: "a string",
-              observed: JSON.stringify(value["version"]),
+              observed: render(value["version"]),
               probe: observation.probe,
             }),
           );
@@ -860,7 +861,7 @@ const jsonApiObject: RuleImpl = {
               finding(jsonApiObject.rule, {
                 detail: `${where} answered a \`jsonapi.${member}\` that is not an array of strings`,
                 expected: "an array of URI strings",
-                observed: JSON.stringify(list),
+                observed: render(list),
                 probe: observation.probe,
               }),
             );
@@ -968,7 +969,7 @@ const errorMemberTypes: RuleImpl = {
               finding(errorMemberTypes.rule, {
                 detail: `a ${observation.status} error object's \`${member}\` is not a string`,
                 expected: "a string",
-                observed: JSON.stringify(error[member]),
+                observed: render(error[member]),
                 probe: observation.probe,
               }),
             );
@@ -980,7 +981,7 @@ const errorMemberTypes: RuleImpl = {
               finding(errorMemberTypes.rule, {
                 detail: `a ${observation.status} error object's \`${member}\` is not an object`,
                 expected: "an object",
-                observed: JSON.stringify(error[member]),
+                observed: render(error[member]),
                 probe: observation.probe,
               }),
             );
@@ -1022,7 +1023,7 @@ const errorSourceDiscrimination: RuleImpl = {
               finding(errorSourceDiscrimination.rule, {
                 detail: `a ${observation.status} error object's \`source\` carries the member \`${key}\``,
                 expected: "only `pointer`, `parameter` or `header`",
-                observed: JSON.stringify(source),
+                observed: render(source),
                 probe: observation.probe,
               }),
             );
@@ -1034,7 +1035,7 @@ const errorSourceDiscrimination: RuleImpl = {
               finding(errorSourceDiscrimination.rule, {
                 detail: `a ${observation.status} error object's \`source.${key}\` is not a string`,
                 expected: "a string",
-                observed: JSON.stringify(value),
+                observed: render(value),
                 probe: observation.probe,
               }),
             );
@@ -1045,7 +1046,7 @@ const errorSourceDiscrimination: RuleImpl = {
               finding(errorSourceDiscrimination.rule, {
                 detail: `a ${observation.status} error object's \`source.pointer\` is not a JSON Pointer`,
                 expected: "the empty string or a value beginning with `/`",
-                observed: JSON.stringify(value),
+                observed: render(value),
                 probe: observation.probe,
               }),
             );
@@ -1080,7 +1081,7 @@ const errorStatusMatches: RuleImpl = {
             finding(errorStatusMatches.rule, {
               detail: "a single-error document's `status` disagrees with the response status",
               expected: `"${observation.status}"`,
-              observed: JSON.stringify(status),
+              observed: render(status),
               probe: observation.probe,
             }),
           );

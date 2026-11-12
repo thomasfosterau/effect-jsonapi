@@ -34,6 +34,8 @@ const buildClient = HttpApiTest.groups(Api, ["articles", "operations"]);
 
 const middleware = Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] });
 
+const jsonText = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+
 const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
@@ -618,7 +620,7 @@ describe("atomic operations: the wire format", () => {
   it("OpenAPI documents the operations endpoint with the extension media type", () => {
     const spec = OpenApi.fromApi(Api);
     expect(spec.paths["/operations"]?.post).toBeDefined();
-    const json = JSON.stringify(spec.paths["/operations"]);
+    const json = jsonText(spec.paths["/operations"]);
     expect(json).toContain("atomic");
   });
 
