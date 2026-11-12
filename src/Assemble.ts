@@ -40,12 +40,14 @@
  * rung comparison), {@link ownedCapabilities} (the owner, or a moderator
  * acting for them) and {@link noCapabilities} (a family with no write
  * surface). No hook means no stamp: a family that publishes the pair passes
- * one.
+ * one. Members of `included` are stamped too; pass
+ * `capabilitiesOnIncluded: false` to stamp the primary data only.
  *
  * @since 0.16.0
  */
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
+import * as HashSet from "effect/HashSet";
 import * as P from "effect/Predicate";
 import type * as ApiError from "./ApiError.js";
 import type * as Document from "./Document.js";
@@ -126,6 +128,25 @@ export type WireResource<R extends ResourceLike> = Document.Wire<R> & {
 };
 
 /**
+ * The type of the `included` members a walk through `Targets` resolves to:
+ * what the registry's loaders return (`Handlers.IncludeTargetResource`).
+ * With no registry nothing is walked, so nothing can be included: `never`,
+ * which is also what lets such a document (a write's, say) satisfy a success
+ * schema whose `included` is an include surface's precise union (#595). A
+ * registry whose loaders' types aren't visible (annotated as
+ * `Handlers.IncludeTargets` rather than checked with `satisfies`) gives the
+ * loose {@link ResourceLike}.
+ *
+ * @since 0.22.0
+ * @category type-level
+ */
+export type TargetsIncluded<Targets extends Handlers.IncludeTargets> = [Targets] extends [never]
+  ? never
+  : [Extract<Handlers.IncludeTargetResource<Targets>, ResourceLike>] extends [never]
+    ? ResourceLike
+    : Extract<Handlers.IncludeTargetResource<Targets>, ResourceLike>;
+
+/**
  * The `jsonapi` member every assembled document carries.
  *
  * @since 0.16.0
@@ -135,15 +156,18 @@ export const JSONAPI_MEMBER = { version: "1.1" } as const;
 
 /**
  * A single-resource document as {@link resource} assembles it, with the
- * `jsonapi` member always present. `included` is the loose {@link ResourceLike}
- * because the walk resolves through an untyped-by-type registry.
+ * `jsonapi` member always present. `I` is the `included` members' type:
+ * {@link resource} sets it to what the include registry's loaders return
+ * ({@link TargetsIncluded}), so a document is assignable to a success schema
+ * whose `included` is the include surface's precise union (#595). Written by
+ * hand, it defaults to the loose {@link ResourceLike}.
  *
  * @since 0.16.0
  * @category models
  */
-export interface ResourceDocument<R extends ResourceLike> {
+export interface ResourceDocument<R extends ResourceLike, I extends ResourceLike = ResourceLike> {
   readonly data: WireResource<R> & { readonly meta?: { readonly [key: string]: unknown } };
-  readonly included?: ReadonlyArray<WireResource<ResourceLike>>;
+  readonly included?: ReadonlyArray<WireResource<I>>;
   readonly links?: { readonly self?: string };
   readonly meta?: { readonly [key: string]: unknown };
   readonly jsonapi: typeof JSONAPI_MEMBER;
@@ -156,11 +180,11 @@ export interface ResourceDocument<R extends ResourceLike> {
  * @since 0.16.0
  * @category models
  */
-export interface CollectionDocument<R extends ResourceLike> {
+export interface CollectionDocument<R extends ResourceLike, I extends ResourceLike = ResourceLike> {
   readonly data: ReadonlyArray<
     WireResource<R> & { readonly meta?: { readonly [key: string]: unknown } }
   >;
-  readonly included?: ReadonlyArray<WireResource<ResourceLike>>;
+  readonly included?: ReadonlyArray<WireResource<I>>;
   readonly links: Handlers.LinksValue;
   readonly meta: { readonly totalCount: number; readonly [key: string]: unknown };
   readonly jsonapi: typeof JSONAPI_MEMBER;
@@ -193,9 +217,10 @@ export type UnpaginatedCollectionDocument<
   Self extends string | undefined = undefined,
   // oxlint-disable-next-line effect/prefer-option-over-null -- a type-level switch on the `meta` option's type, not a runtime value: `undefined` selects the document with no `meta`
   M extends Handlers.MetaValue | undefined = undefined,
+  I extends ResourceLike = ResourceLike,
 > = {
   readonly data: ReadonlyArray<WireResource<R> & { readonly meta?: Handlers.MetaValue }>;
-  readonly included?: ReadonlyArray<WireResource<ResourceLike>>;
+  readonly included?: ReadonlyArray<WireResource<I>>;
   readonly jsonapi: typeof JSONAPI_MEMBER;
 } & ([Self] extends [undefined]
   ? unknown
@@ -395,6 +420,17 @@ export interface Options<V = unknown, Targets extends Handlers.IncludeTargets = 
    * document mixing families stamps each member honestly. Omit for no stamp.
    */
   readonly capabilities?: CapabilitiesHook<V> | undefined;
+  /**
+   * Whether `included` members are stamped with the {@link capabilities}
+   * rule too. Defaults to `true` — every emitted resource, primary and
+   * included alike. `false` stamps the primary data only; `included` members
+   * carry no capability `meta`. A relationship document's primary data is
+   * linkage, which carries no `meta`, so there `false` stamps nothing.
+   *
+   * @since 0.22.0
+   * @category models
+   */
+  readonly capabilitiesOnIncluded?: boolean;
 }
 
 /**
@@ -409,8 +445,10 @@ export interface Options<V = unknown, Targets extends Handlers.IncludeTargets = 
 export interface CollectionOptions<
   V = unknown,
   Targets extends Handlers.IncludeTargets = never,
+  X extends ResourceLike = never,
 > extends Options<V, Targets> {
-  readonly included?: ReadonlyArray<ResourceLike> | undefined;
+  /** Members the caller already resolved; `X` is their type, part of the document's `included` type. */
+  readonly included?: ReadonlyArray<X> | undefined;
 }
 
 /**
@@ -437,7 +475,8 @@ export interface UnpaginatedCollectionOptions<
   Self extends string | undefined = undefined,
   // oxlint-disable-next-line effect/prefer-option-over-null -- inferred from the `meta` option as passed; an `Option` there would stop a caller forwarding its own optional `meta`
   M extends Handlers.MetaValue | undefined = undefined,
-> extends CollectionOptions<V, Targets> {
+  X extends ResourceLike = never,
+> extends CollectionOptions<V, Targets, X> {
   /**
    * The collection's own absolute URL, emitted as the document's
    * `links.self`. Supplied by the handler, as {@link Pagination.baseUrl} is,
@@ -683,10 +722,10 @@ const toWireValue = <A>(value: A): WireValue => {
     const toJson = P.hasProperty(value, "toJSON") ? value.toJSON : undefined;
     if (P.isFunction(toJson)) return toWireValue(toJson.call(value));
     const out: { [key: string]: WireValue } = {};
-    for (const [key, entry] of Object.entries(value)) {
+    Arr.forEach(Object.entries(value), ([key, entry]) => {
       // An own `__proto__` member (as `JSON.parse` gives) stays a member.
       if (entry !== undefined) assign(out, key, toWireValue(entry));
-    }
+    });
     return out;
   }
   // SAFETY: what is left is not an object — a JSON primitive or one of the
@@ -733,10 +772,21 @@ export const toWireSafeResource = <R extends ResourceLike>(resource: R): R =>
 // ---------------------------------------------------------------------------
 
 /** The resource-level transform every emitted resource goes through. */
-const onResourceFor = <V>(options: Options<V, any>) =>
-  Handlers.compose(
+const onResourceFor = <V>(
+  options: Pick<Options<V, any>, "capabilities" | "capabilitiesOnIncluded" | "viewer" | "fields">,
+  primary: ReadonlyArray<ResourceLike>,
+) => {
+  // With `capabilitiesOnIncluded: false` only the primary data is stamped. The
+  // one transform shapes both slots, so primary membership is by `(type, id)`;
+  // a resource that is both is shaped once, for the primary slot (#567).
+  const primaryKeys =
+    options.capabilitiesOnIncluded === false
+      ? HashSet.fromIterable(primary.map((r) => `${r.type}\0${r.id}`))
+      : undefined;
+  return Handlers.compose(
     Handlers.withMeta((resource) =>
-      options.capabilities === undefined
+      options.capabilities === undefined ||
+      (primaryKeys !== undefined && !HashSet.has(primaryKeys, `${resource.type}\0${resource.id}`))
         ? undefined
         : // The viewer is handed to the hook exactly as it was given: an
           // omitted option is `undefined`, which is then what `V` is.
@@ -744,6 +794,7 @@ const onResourceFor = <V>(options: Options<V, any>) =>
     ),
     Handlers.project(options.fields),
   );
+};
 
 // `ResourceLike`'s `relationships` values widen to `unknown`, which the
 // builders' stricter `ResourceValue` rejects; the builders only read
@@ -841,7 +892,7 @@ export const resource = <
   resource: R,
   options: Options<V, Targets> = {},
 ): Effect.Effect<
-  ResourceDocument<R>,
+  ResourceDocument<R, TargetsIncluded<Targets>>,
   IncludeError | Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>
 > => {
@@ -855,9 +906,12 @@ export const resource = <
           "included",
           included === undefined ? undefined : included.map((r) => asValue(stringifyLinks(r))),
         ),
-        onResource: onResourceFor(options),
+        onResource: onResourceFor(options, [wired]),
       });
-      return { ...built, jsonapi: JSONAPI_MEMBER } as unknown as ResourceDocument<R>;
+      return { ...built, jsonapi: JSONAPI_MEMBER } as unknown as ResourceDocument<
+        R,
+        TargetsIncluded<Targets>
+      >;
     }),
   );
 };
@@ -883,9 +937,9 @@ const withoutEmptyIncluded = <T extends { readonly included?: ReadonlyArray<unkn
  * own `self` (with the query it carries) and the caller's own `meta`, or
  * nothing — and the document type `D` that difference produces.
  */
-const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets>(
+const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets, X extends ResourceLike>(
   resources: ReadonlyArray<ResourceLike>,
-  options: CollectionOptions<V, Targets>,
+  options: CollectionOptions<V, Targets, X>,
   top: {
     readonly meta?: Handlers.MetaValue;
     readonly links?: Handlers.LinksValue;
@@ -906,7 +960,7 @@ const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets>(
       const built = Handlers.collection(wired.map(asValue), {
         ...top,
         included: included.map((r) => asValue(stringifyLinks(r))),
-        onResource: onResourceFor(options),
+        onResource: onResourceFor(options, wired),
       });
       // SAFETY: `Handlers.collection` types its value over the builders' loose
       // `ResourceValue`; the value is `D` by construction — the wired, stamped
@@ -993,19 +1047,24 @@ export const collection = <
   R extends ResourceLike,
   V = unknown,
   Targets extends Handlers.IncludeTargets = never,
+  X extends ResourceLike = never,
 >(
   resources: ReadonlyArray<R>,
   pagination: Pagination,
-  options: CollectionOptions<V, Targets> = {},
+  options: CollectionOptions<V, Targets, X> = {},
 ): Effect.Effect<
-  CollectionDocument<R>,
+  CollectionDocument<R, TargetsIncluded<Targets> | X>,
   IncludeError | Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>
 > =>
-  assembleCollection<CollectionDocument<R>, V, Targets>(resources, options, {
-    meta: { totalCount: pagination.totalCount },
-    links: paginationLinks(pagination),
-  });
+  assembleCollection<CollectionDocument<R, TargetsIncluded<Targets> | X>, V, Targets, X>(
+    resources,
+    options,
+    {
+      meta: { totalCount: pagination.totalCount },
+      links: paginationLinks(pagination),
+    },
+  );
 
 /**
  * Assembles a JSON:API document around a whole, **unpaginated** collection —
@@ -1087,13 +1146,19 @@ export const unpaginatedCollection = <
   Self extends string | undefined = undefined,
   // oxlint-disable-next-line effect/prefer-option-over-null -- see `UnpaginatedCollectionOptions`: inferred from the `meta` option as passed
   const M extends Handlers.MetaValue | undefined = undefined,
+  X extends ResourceLike = never,
 >(
   resources: ReadonlyArray<R>,
-  options: UnpaginatedCollectionOptions<V, Targets, Self, M> = {},
+  options: UnpaginatedCollectionOptions<V, Targets, Self, M, X> = {},
 ): Effect.Effect<
   // `Self` is widened to `string`, so a literal `self` doesn't leak into the
   // type; `M` is not, since the document emits that very value.
-  UnpaginatedCollectionDocument<R, Self extends string ? string : undefined, M>,
+  UnpaginatedCollectionDocument<
+    R,
+    Self extends string ? string : undefined,
+    M,
+    TargetsIncluded<Targets> | X
+  >,
   IncludeError | Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>
 > => {
@@ -1104,9 +1169,15 @@ export const unpaginatedCollection = <
         ? { self: options.self }
         : { self: options.self, query: options.query };
   return assembleCollection<
-    UnpaginatedCollectionDocument<R, Self extends string ? string : undefined, M>,
+    UnpaginatedCollectionDocument<
+      R,
+      Self extends string ? string : undefined,
+      M,
+      TargetsIncluded<Targets> | X
+    >,
     V,
-    Targets
+    Targets,
+    X
   >(resources, options, options.meta === undefined ? links : { ...links, meta: options.meta });
 };
 
@@ -1123,6 +1194,8 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
   readonly key: string;
   readonly viewer?: V | undefined;
   readonly capabilities?: CapabilitiesHook<V> | undefined;
+  /** As {@link Options.capabilitiesOnIncluded}: `false` leaves `included` unstamped. */
+  readonly capabilitiesOnIncluded?: boolean;
   /**
    * Resources to carry in `included`, typically the related resources the
    * linkage names. Full linkage applies, and is checked: each must be
@@ -1210,7 +1283,7 @@ export const relationship = <R extends ResourceLike, I extends ResourceLike = R,
   const included = Handlers.buildIncluded(
     relationshipRefs(input.parent, input.key),
     (input.included ?? []).map((r) => asValue(stringifyLinks(r))),
-    { onResource: onResourceFor(input) },
+    { onResource: onResourceFor(input, []) },
   );
   const rel = readRelationship(input.parent, input.key);
   const related = rel?.links?.related === undefined ? undefined : toLinkString(rel.links.related);

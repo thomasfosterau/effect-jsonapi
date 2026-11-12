@@ -156,13 +156,13 @@ export const linkageOf = (resource: Readonly<Record<string, unknown>>): Readonly
     const key = identity(value);
     if (key !== undefined) out.push(key);
   };
-  for (const name of Object.keys(relationships)) {
+  Arr.forEach(Object.keys(relationships), (name) => {
     const relationship = relationships[name];
-    if (!isRecord(relationship)) continue;
+    if (!isRecord(relationship)) return;
     const data = relationship["data"];
     if (Array.isArray(data)) data.filter(isRecord).forEach(take);
     else if (isRecord(data)) take(data);
-  }
+  });
   return out;
 };
 

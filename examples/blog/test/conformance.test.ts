@@ -137,16 +137,16 @@ layer(RunLive)("blog: JSON:API conformance", (it) => {
   it.effect("every failure names a rule, cites its section and shows the request", () =>
     Effect.gen(function* () {
       const report = yield* Run;
-      for (const outcome of report.outcomes) {
-        if (!P.isTagged(outcome, "Failed")) continue;
+      Arr.forEach(report.outcomes, (outcome) => {
+        if (!P.isTagged(outcome, "Failed")) return;
         expect(outcome.rule.requirement.length).toBeGreaterThan(20);
         expect(outcome.rule.reference).toMatch(/^https:\/\//);
-        for (const finding of outcome.findings) {
+        Arr.forEach(outcome.findings, (finding) => {
           expect(finding.detail).not.toBe("");
           expect(finding.expected).not.toBe("");
           expect(finding.observed).not.toBe("");
-        }
-      }
+        });
+      });
     }),
   );
 

@@ -37,7 +37,7 @@ export const summarise = (outcomes: ReadonlyArray<Outcome>): Summary => {
   let errored = 0;
   let findings = 0;
   let probes = 0;
-  for (const outcome of outcomes) {
+  Arr.forEach(outcomes, (outcome) => {
     Match.value(outcome).pipe(
       Match.tagsExhaustive({
         Passed: (outcome) => {
@@ -57,7 +57,7 @@ export const summarise = (outcomes: ReadonlyArray<Outcome>): Summary => {
         },
       }),
     );
-  }
+  });
   return { passed, failed, skipped, errored, findings, probes };
 };
 
@@ -103,14 +103,14 @@ const wrap = (text: string, width: number): ReadonlyArray<string> => {
   const words = text.split(/\s+/).filter((word) => word !== "");
   const lines: Array<string> = [];
   let line = "";
-  for (const word of words) {
+  Arr.forEach(words, (word) => {
     if (line === "") line = word;
     else if (`${line} ${word}`.length <= width) line = `${line} ${word}`;
     else {
       lines.push(line);
       line = word;
     }
-  }
+  });
   if (line !== "") lines.push(line);
   return lines;
 };
@@ -137,10 +137,11 @@ const renderOutcome = (outcome: Outcome, width: number): string => {
         lines.push(indent(`not decided — the rule died: ${outcome.message}`, "      "));
       },
       Failed: (outcome) => {
-        for (const line of wrap(outcome.rule.requirement, width - 6))
+        Arr.forEach(wrap(outcome.rule.requirement, width - 6), (line) => {
           lines.push(indent(line, "      "));
+        });
         lines.push(indent(outcome.rule.reference, "      "));
-        for (const found of outcome.findings) {
+        Arr.forEach(outcome.findings, (found) => {
           lines.push(hang(found.detail, "      · ", "        "));
           if (found.probe !== undefined) {
             const headers = Object.entries(found.probe.headers)
@@ -158,7 +159,7 @@ const renderOutcome = (outcome: Outcome, width: number): string => {
           }
           lines.push(hang(`expected: ${found.expected}`, "        ", "          "));
           lines.push(hang(`observed: ${found.observed}`, "        ", "          "));
-        }
+        });
       },
     }),
   );
@@ -272,9 +273,9 @@ export const format = (
   out.push(`  target: JSON:API v${report.version} · transport: ${report.transport}`);
   out.push("");
 
-  for (const tier of ["spec", "profile"] as const) {
+  Arr.forEach(["spec", "profile"] as const, (tier) => {
     const outcomes = report.outcomes.filter((outcome) => outcome.rule.tier === tier);
-    if (Arr.isReadonlyArrayEmpty(outcomes)) continue;
+    if (Arr.isReadonlyArrayEmpty(outcomes)) return;
     const tierSummary = summarise(outcomes);
     out.push(TIER_TITLE[tier].toUpperCase());
     out.push(
@@ -284,11 +285,11 @@ export const format = (
     const ordered = Arr.flatMap(ORDER, (tag) =>
       Arr.filter(outcomes, (outcome) => P.isTagged(outcome, tag)),
     );
-    for (const outcome of ordered) {
+    Arr.forEach(ordered, (outcome) => {
       out.push(indent(renderOutcome(outcome, width), "  "));
       out.push("");
-    }
-  }
+    });
+  });
 
   out.push(...renderSamples(report.samples, width));
   out.push(...renderWrites(report.writes ?? []));
@@ -301,12 +302,14 @@ export const format = (
     out.push("  absent above is simply unwritten — treat this list as the kit's own");
     out.push("  statement of its limits, not as a complete account of the specification.");
     out.push("");
-    for (const gap of report.gaps) {
+    Arr.forEach(report.gaps, (gap) => {
       out.push(`  · ${gap.area}`);
-      for (const line of wrap(gap.reason, width - 6)) out.push(indent(line, "      "));
+      Arr.forEach(wrap(gap.reason, width - 6), (line) => {
+        out.push(indent(line, "      "));
+      });
       if (Arr.isReadonlyArrayNonEmpty(gap.tracking))
         out.push(indent(`tracking: ${gap.tracking.join(", ")}`, "      "));
-    }
+    });
   }
   out.push("");
   out.push(

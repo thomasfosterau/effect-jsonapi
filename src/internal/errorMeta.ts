@@ -18,6 +18,7 @@
  * repeated-key list (`include[1]`) still reaches the annotation on the list's
  * element schema.
  */
+import * as Arr from "effect/Array";
 import type * as Schema from "effect/Schema";
 import type * as SchemaIssue from "effect/SchemaIssue";
 import * as Match from "effect/Match";
@@ -82,7 +83,9 @@ const collect = (
     Match.tag("Pointer", (issue) => collect(issue.issue, [...path, ...issue.path], found)),
     Match.tag("Filter", "Encoding", (issue) => collect(issue.issue, path, found)),
     Match.tag("Composite", "AnyOf", (issue) => {
-      for (const child of issue.issues) collect(child, path, found);
+      Arr.forEach(issue.issues, (child) => {
+        collect(child, path, found);
+      });
     }),
     Match.orElse(() => undefined),
   );
@@ -103,15 +106,12 @@ export const indexErrorMeta = (
   const found: Array<Found> = [];
   collect(issue, [], found);
   return (path) => {
-    let best: Found | undefined;
-    for (const candidate of found) {
-      if (
-        isPrefix(candidate.path, path) &&
-        (best === undefined || candidate.path.length >= best.path.length)
-      ) {
-        best = candidate;
-      }
-    }
+    const best = Arr.reduce<Found, Found | undefined>(found, undefined, (current, candidate) =>
+      isPrefix(candidate.path, path) &&
+      (current === undefined || candidate.path.length >= current.path.length)
+        ? candidate
+        : current,
+    );
     return best?.meta;
   };
 };

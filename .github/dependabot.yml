@@ -44,6 +44,8 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
+    assignees:
+      - "thomasfosterau"
     labels:
       - "dependencies"
     commit-message:
@@ -77,6 +79,8 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    assignees:
+      - "thomasfosterau"
     labels:
       - "dependencies"
     commit-message:
@@ -92,6 +96,8 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    assignees:
+      - "thomasfosterau"
     labels:
       - "dependencies"
     commit-message:

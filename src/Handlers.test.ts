@@ -943,20 +943,23 @@ describe("the sparse-fieldset exemption from full linkage", () => {
 
   it("is carried through `compose`, on either side", () => {
     const stamp = Handlers.withMeta(() => ({ seen: true }));
-    for (const onResource of [
-      Handlers.compose(stamp, Handlers.project({ articles: ["title"] })),
-      Handlers.compose(Handlers.project({ articles: ["title"] }), stamp),
-      Handlers.compose(
-        Handlers.project({ articles: ["title", "author"] }),
-        Handlers.project({ articles: ["title", "comments"] }),
-      ),
-    ]) {
-      const document = Handlers.data(article, { included: [author, comment], onResource });
-      expect(document.included?.map((member) => `${member.type}:${member.id}`)).toEqual([
-        "people:9",
-        "comments:5",
-      ]);
-    }
+    Arr.forEach(
+      [
+        Handlers.compose(stamp, Handlers.project({ articles: ["title"] })),
+        Handlers.compose(Handlers.project({ articles: ["title"] }), stamp),
+        Handlers.compose(
+          Handlers.project({ articles: ["title", "author"] }),
+          Handlers.project({ articles: ["title", "comments"] }),
+        ),
+      ],
+      (onResource) => {
+        const document = Handlers.data(article, { included: [author, comment], onResource });
+        expect(document.included?.map((member) => `${member.type}:${member.id}`)).toEqual([
+          "people:9",
+          "comments:5",
+        ]);
+      },
+    );
   });
 
   it("does not cover a relationship a transform drops for any other reason", () => {

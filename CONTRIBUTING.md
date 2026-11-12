@@ -22,7 +22,7 @@ Setup, commands and checklists for `@thomasfosterau/effect-jsonapi`; conventions
 
 3. Run the gates listed in [AGENTS.md → Verification](AGENTS.md#verification), in that order.
 
-Open in a Codespace or Dev Container: `.devcontainer/` provisions it with the same hook as agent sessions; see [AGENTS.md → Agent sessions](AGENTS.md#agent-sessions). The `Dev Container` workflow (`.github/workflows/devcontainer.yml`) builds it in CI whenever its inputs change; to try a change locally, `pnpm dlx @devcontainers/cli@0.89.0 up --workspace-folder .` (needs Docker).
+Open in a Codespace or Dev Container: `.devcontainer/` provisions it with the same hook as agent sessions; see [.claude/CLAUDE.md → Agent sessions](.claude/CLAUDE.md#agent-sessions). The `Dev Container` workflow (`.github/workflows/devcontainer.yml`) builds it in CI whenever its inputs change; to try a change locally, `pnpm dlx @devcontainers/cli@0.89.0 up --workspace-folder .` (needs Docker).
 
 ## Development workflow
 
@@ -112,7 +112,7 @@ The shape this repository has is the library standard every `@thomasfosterau/*` 
 - **`.github/workflows/release.yml`** + **`PUBLISHING.md`** + **`SECURITY.md`** — from here: OIDC trusted publishing via `pnpm publish --ignore-scripts` from the protected `release` environment, no `NPM_TOKEN`, `.changeset/config.json` schema 4.0.0 with `baseBranch: trunk`. Each setting and its reason: [SECURITY.md](SECURITY.md#supply-chain-hardening) and the comments in `release.yml`.
 - **`.github/dependabot.yml`** — from `effect-drizzle-ext` / here: weekly, groups only for sets that must move together (`toolchain`, `effect`), everything else its own PR, `cooldown` 1 day (whole days only; pnpm's guard is 8 hours) excluding `@thomasfosterau/*`, the npm aliases moved by hand, each GitHub Action updated on its own.
 - **`.claude/settings.json`**, **`.claude/hooks/session-start.sh`**, **`.claude/hooks/fallow-gate.sh`**, **`.fallowrc.json`**, **`.vite-hooks/pre-commit`**, **`.editorconfig`** — from `effect-drizzle-ext` / here. The session-start hook installs the global Vite+ CLI at the catalog's `vite-plus` pin and links `vp` and `vpx` into `~/.local/bin`, which is what makes `vp` resolve in a non-interactive shell (project tools such as fallow then run through `vp exec`); the devcontainer's `postCreateCommand` invokes the same file.
-- **`AGENTS.md`** as the file with `CLAUDE.md -> AGENTS.md`, a per-package `CLAUDE.md` carrying that package's import boundary in a multi-package workspace, `README.md`, `CONTRIBUTING.md`, `LICENSE` (MIT).
+- **`AGENTS.md`** (agent-agnostic guidance) with `.claude/CLAUDE.md` importing it for Claude Code (`@../AGENTS.md`), a per-package `AGENTS.md`/`CLAUDE.md` carrying that package's import boundary in a multi-package workspace, `README.md`, `CONTRIBUTING.md`, `LICENSE` (MIT).
 - **`docgen.json`** + `@effect/docgen` — from here: examples are compiled _and executed_ (`"runExamples": true`, since docgen 4.x only type-checks by default; `types: ["node"]` set explicitly; `tsx` in the catalog as its runtime); a `docgen` task and CI step of its own.
 - **The type-level test slot** — from here: `test/*.types.ts` included by the root `tsconfig.json` (package name mapped to `./src`), asserted with `@ts-expect-error` and checked by `vp run check`; TypeScript 7 anchors overload failures per property, so a directive covers exactly the next line.
 - **The reformat** — one isolated `vp fmt` commit, listed in `.git-blame-ignore-revs` and named in `CONTRIBUTING.md`.

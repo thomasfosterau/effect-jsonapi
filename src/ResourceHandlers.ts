@@ -223,6 +223,8 @@ export interface ReadOnlyConfig<
   readonly viewer?: Effect.Effect<V, never, RV> | undefined;
   /** The capability rule every emitted resource is stamped with. Omit for no stamp. */
   readonly capabilities?: Assemble.CapabilitiesHook<V> | undefined;
+  /** `false` stamps the primary data only, leaving `included` members unstamped. Defaults to `true`. */
+  readonly capabilitiesOnIncluded?: boolean;
   /** Read-through on `get`; write-through and eviction on the writes. */
   readonly cache?: Cache<TResource, RC> | undefined;
   /** The `?include=` walk on `get` and `list`. */
@@ -376,14 +378,14 @@ export type ReadOnlyHandlers<
   readonly list: (request: {
     readonly query: TQuery;
   }) => Effect.Effect<
-    Assemble.CollectionDocument<TResource>,
+    Assemble.CollectionDocument<TResource, Assemble.TargetsIncluded<Targets>>,
     ReadError<E, Targets>,
     R | RV | RL | Handlers.IncludeTargetServices<Targets>
   >;
   readonly get: (
     request: GetRequest<TId>,
   ) => Effect.Effect<
-    Assemble.ResourceDocument<TResource>,
+    Assemble.ResourceDocument<TResource, Assemble.TargetsIncluded<Targets>>,
     ReadError<E, Targets>,
     R | RV | RC | Handlers.IncludeTargetServices<Targets>
   >;
@@ -418,7 +420,7 @@ export type CrudHandlers<
   readonly create: (request: {
     readonly payload: TCreate;
   }) => Effect.Effect<
-    Assemble.ResourceDocument<TResource> | Committed,
+    Assemble.ResourceDocument<TResource, never> | Committed,
     E | ET,
     R | RV | RC | RT | Exclude<RW, Tx>
   >;
@@ -426,7 +428,7 @@ export type CrudHandlers<
     readonly params: { readonly id: TId };
     readonly payload: TUpdate;
   }) => Effect.Effect<
-    Assemble.ResourceDocument<TResource> | Committed,
+    Assemble.ResourceDocument<TResource, never> | Committed,
     E | ET | ApiError.Conflict,
     R | RV | RC | RT | Exclude<RW, Tx>
   >;
@@ -521,7 +523,7 @@ export const readOnly = <
 >(
   config: ReadOnlyConfig<TQuery, TResource, TId, V, E, R, RV, RL, RC, Targets>,
 ): ReadOnlyHandlers<TResource, TId, TQuery, E, R, RV, RL, RC, Targets> => {
-  const { ops, segment, cache, include, capabilities } = config;
+  const { ops, segment, cache, include, capabilities, capabilitiesOnIncluded } = config;
   const maxPageLimit = config.maxPageLimit ?? 100;
   const viewer = (config.viewer ?? none) as Effect.Effect<V, never, RV>;
   // Built once per family: `Query.canonicalPairs` returns the encoder-bound
@@ -529,6 +531,7 @@ export const readOnly = <
   const linkPairs = Query.canonicalPairs(config.listQuery);
   const assemble = {
     ...definedMember("capabilities", capabilities),
+    ...definedMember("capabilitiesOnIncluded", capabilitiesOnIncluded),
     ...definedMember("includable", include?.includable),
     ...definedMember("targets", include?.targets),
     ...definedMember("depth", include?.depth),
@@ -689,7 +692,7 @@ export const make = <
   RT,
   Committed<NoInfer<HType>, TId>
 > => {
-  const { ops, segment, cache, capabilities } = config;
+  const { ops, segment, cache, capabilities, capabilitiesOnIncluded } = config;
   const viewer = (config.viewer ?? none) as Effect.Effect<V, never, RV>;
   const transact = (config.transact ?? identityTransact) as Transact<Tx, ET, RT>;
   const hidden = config.hiddenWrite;
@@ -745,6 +748,7 @@ export const make = <
         if (cache !== undefined) yield* cache.set(result.id, reread.value);
         return yield* Assemble.resource(reread.value, {
           ...definedMember("capabilities", capabilities),
+          ...definedMember("capabilitiesOnIncluded", capabilitiesOnIncluded),
           viewer: yield* viewer,
         });
       }),
@@ -890,6 +894,8 @@ export interface RelatedConfig<
   readonly linkBase: Effect.Effect<string, never, RL>;
   readonly viewer?: Effect.Effect<V, never, RV> | undefined;
   readonly capabilities?: Assemble.CapabilitiesHook<V> | undefined;
+  /** `false` stamps the primary data only, leaving `included` members unstamped. Defaults to `true`. */
+  readonly capabilitiesOnIncluded?: boolean;
   /** The to-many page size when the caller names none. Defaults to `50`. */
   readonly defaultPageLimit?: number | undefined;
   /** The most related rows one page may resolve. Defaults to `100`. */
@@ -926,14 +932,14 @@ const loadRefs = <Targets extends Handlers.IncludeTargets>(
   Handlers.IncludeTargetServices<Targets>
 > => {
   const byType = new Map<string, Array<string>>();
-  for (const ref of refs) {
+  Arr.forEach(refs, (ref) => {
     // An own entry only, as `Handlers` loads: a ref typed `constructor` or
     // `toString` names no target, not an `Object.prototype` member.
-    if (!Object.hasOwn(targets, ref.type)) continue;
+    if (!Object.hasOwn(targets, ref.type)) return;
     const ids = byType.get(ref.type) ?? [];
     if (!ids.includes(ref.id)) ids.push(ref.id);
     byType.set(ref.type, ids);
-  }
+  });
   return Effect.forEach(
     [...byType],
     ([type, ids]) => (targets[type] as Handlers.IncludeTarget)(ids),
@@ -941,10 +947,11 @@ const loadRefs = <Targets extends Handlers.IncludeTargets>(
   ).pipe(
     Effect.map((batches) => {
       const loaded = new Map<string, Assemble.ResourceLike>();
-      for (const batch of batches) {
-        for (const resource of batch)
+      Arr.forEach(batches, (batch) => {
+        Arr.forEach(batch, (resource) => {
           loaded.set(`${resource.type}\0${resource.id}`, resource as Assemble.ResourceLike);
-      }
+        });
+      });
       // In linkage order, dropping a ref that didn't resolve.
       return refs.flatMap((ref) => {
         const resource = loaded.get(`${ref.type}\0${ref.id}`);
@@ -992,8 +999,10 @@ export const related = <
   R | RV | RL | Handlers.IncludeTargetServices<Targets>
 >) => {
   const viewer = (config.viewer ?? none) as Effect.Effect<V, never, RV>;
-  const capabilities =
-    config.capabilities === undefined ? {} : { capabilities: config.capabilities };
+  const capabilities = {
+    ...definedMember("capabilities", config.capabilities),
+    ...definedMember("capabilitiesOnIncluded", config.capabilitiesOnIncluded),
+  };
   const concurrency = config.concurrency ?? 6;
   const linkPairs =
     config.listQuery === undefined ? undefined : Query.canonicalPairs(config.listQuery);

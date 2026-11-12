@@ -35,6 +35,11 @@ import {
   Resource,
 } from "@thomasfosterau/effect-jsonapi";
 
+/** A tagged failure standing in for an arbitrary cause. */
+class Boom extends Schema.TaggedError<Boom, { readonly brand: unique symbol }>()("Boom", {
+  message: Schema.String,
+}) {}
+
 // ---------------------------------------------------------------------------
 // The resources of the guide: a bibliography and its entries, mutually
 // related — website's `bibliographies` family.
@@ -269,7 +274,9 @@ describe("4. Client.errorDocument / errorMessage replace decodeErrorBody / error
             onSome: Client.errorMessage,
           }),
         );
-      expect(yield* message(new Error("offline"))).toBe("Request could not be completed");
+      expect(yield* message(new Boom({ message: "offline" }))).toBe(
+        "Request could not be completed",
+      );
     }),
   );
 });

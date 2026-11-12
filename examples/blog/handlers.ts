@@ -22,12 +22,14 @@
  * reads declare no `fields`, so their clients read every attribute as
  * required.
  */
+import * as Schema from "effect/Schema";
 import * as DateTime from "effect/DateTime";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Match from "effect/Match";
 import * as Order from "effect/Order";
+import * as P from "effect/Predicate";
 import { HttpApiBuilder } from "effect/http-api";
 import { Atomic, Document, Handlers, Lid, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
 import { Api, ArticleCommentsQuery, ArticlesQuery, SearchQuery } from "./api.js";
@@ -165,10 +167,10 @@ const resolveIncluded = (article: Article, include: ReadonlyArray<string> | unde
       included.push(store.people.get(author.id)!);
   }
   if (include?.includes("tags")) {
-    for (const identifier of article.relationships?.tags.data ?? []) {
+    Arr.forEach(article.relationships?.tags.data ?? [], (identifier) => {
       const tag = store.tags.get(identifier.id);
       if (tag !== undefined) included.push(tag);
-    }
+    });
   }
   return included;
 };
@@ -231,17 +233,14 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       }
 
       // sort=-createdAt,title
-      for (const term of (query.sort ?? []).toReversed()) {
+      articles = Arr.reduce((query.sort ?? []).toReversed(), articles, (sorted, term) => {
         const ascending = Order.make<(typeof articles)[number]>((a, b) => {
           const left = a.attributes[term.field];
           const right = b.attributes[term.field];
           return left < right ? -1 : left > right ? 1 : 0;
         });
-        articles = Arr.sort(
-          articles,
-          term.direction === "desc" ? Order.flip(ascending) : ascending,
-        );
-      }
+        return Arr.sort(sorted, term.direction === "desc" ? Order.flip(ascending) : ascending);
+      });
 
       // page[offset]=0&page[limit]=10
       const total = articles.length;
@@ -265,10 +264,13 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     })
     .handle("create", ({ payload }) => {
       const title = payload.data.attributes.title;
-      for (const existing of store.articles.values()) {
-        if (existing.attributes.title === title) {
-          return Effect.fail(new TitleTaken({ title }));
-        }
+      if (
+        Arr.some(
+          Arr.fromIterable(store.articles.values()),
+          (existing) => existing.attributes.title === title,
+        )
+      ) {
+        return Effect.fail(new TitleTaken({ title }));
       }
       const id = Article.Id.make(`${store.articles.size + 1}`);
       const article = Article.make({
@@ -429,9 +431,9 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
         Effect.tap(() => requireComments(payload.data)),
         Effect.map((article) => {
           const linked = store.articleComments.get(article.id) ?? [];
-          for (const identifier of payload.data) {
+          Arr.forEach(payload.data, (identifier) => {
             if (!linked.includes(identifier.id)) linked.push(identifier.id);
-          }
+          });
           store.articleComments.set(article.id, linked);
           return Handlers.linkage(
             linked.map((id) => Comment.ref(id)),
@@ -523,6 +525,12 @@ interface Draft {
   readonly articleComments: Map<string, Array<string>>;
 }
 
+/** A malformed or dangling atomic operation, thrown inside the draft and converted to `OperationFailed`. */
+class InvalidOperation extends Schema.TaggedError<
+  InvalidOperation,
+  { readonly brand: unique symbol }
+>()("InvalidOperation", { message: Schema.String }) {}
+
 let atomicIdCounter = 0;
 const freshId = (): string => `atomic-${++atomicIdCounter}`;
 
@@ -540,7 +548,7 @@ const targetId = (
     if (id !== undefined) return id;
     throw new Lid.UnknownLidError(target.lid);
   }
-  throw new Error("operation does not identify a target resource");
+  throw new InvalidOperation({ message: "operation does not identify a target resource" });
 };
 
 const getArticle = (
@@ -550,7 +558,7 @@ const getArticle = (
 ): Article => {
   const id = targetId(lids, target);
   const article = draft.articles.get(id);
-  if (article === undefined) throw new Error(`article "${id}" not found`);
+  if (article === undefined) throw new InvalidOperation({ message: `article "${id}" not found` });
   return article;
 };
 
@@ -561,7 +569,7 @@ const getComment = (
 ): Comment => {
   const id = targetId(lids, target);
   const comment = draft.comments.get(id);
-  if (comment === undefined) throw new Error(`comment "${id}" not found`);
+  if (comment === undefined) throw new InvalidOperation({ message: `comment "${id}" not found` });
   return comment;
 };
 
@@ -810,12 +818,12 @@ const applyOperation = (
           const comment = getComment(draft, lids, remove.ref);
           draft.comments.delete(comment.id);
           // unlink it from any article's paginated comments relationship
-          for (const [articleId, ids] of draft.articleComments) {
+          Arr.forEach(draft.articleComments, ([articleId, ids]) => {
             draft.articleComments.set(
               articleId,
               ids.filter((id) => id !== comment.id),
             );
-          }
+          });
           return Atomic.emptyResult;
         }),
         Match.exhaustive,
@@ -846,7 +854,7 @@ export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers)
                 ? error
                 : new OperationFailed({
                     operation: index,
-                    reason: error instanceof Error ? error.message : String(error),
+                    reason: P.isError(error) ? error.message : String(error),
                   }),
           }),
         { concurrency: 1 },

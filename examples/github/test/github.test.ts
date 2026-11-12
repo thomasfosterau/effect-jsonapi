@@ -305,10 +305,10 @@ describe("github example: listing", () => {
         bugIssue.attributes.title,
       ]);
       // the closed attribute set decodes to its literal type
-      for (const issue of document.data) {
+      Arr.forEach(document.data, (issue) => {
         expectTypeOf(issue.attributes.state).toEqualTypeOf<"open" | "closed">();
         expect(issue.attributes.state).toBe("open");
-      }
+      });
     }),
   );
 
@@ -1021,7 +1021,7 @@ describe("github example: heterogeneous search", () => {
 
         // the union is discriminated by the `type` tag; the endpoint declares
         // `fields`, so a client reads each attribute as optional (#322)
-        for (const result of document.data) {
+        Arr.forEach(document.data, (result) => {
           if (result.type === "repositories") {
             expectTypeOf(result.attributes.stargazerCount).toEqualTypeOf<number | undefined>();
           } else if (result.type === "issues") {
@@ -1029,7 +1029,7 @@ describe("github example: heterogeneous search", () => {
           } else {
             expectTypeOf(result.attributes.login).toEqualTypeOf<string | undefined>();
           }
-        }
+        });
       }),
   );
 

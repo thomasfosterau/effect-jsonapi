@@ -129,6 +129,7 @@ import type {
 } from "./Resource.js";
 import { directTargets } from "./Resource.js";
 import { definedMember } from "./internal/members.js";
+import { declarationError } from "./internal/errors.js";
 
 // ---------------------------------------------------------------------------
 // Error classes
@@ -2112,7 +2113,7 @@ const relationshipIncludePaths = (
   if (include !== true && include.paths !== undefined) {
     const outside = include.paths.filter((path) => !rootedAt(name)(path));
     if (Arr.isReadonlyArrayNonEmpty(outside)) {
-      throw new Error(
+      throw declarationError(
         `Endpoint.getRelationship: include path(s) ${outside.map((path) => `"${path}"`).join(", ")} ` +
           `are not rooted at the relationship "${name}" of "${base.type}"`,
       );
@@ -2181,7 +2182,7 @@ const capitalize = (value: string): string => value.charAt(0).toUpperCase() + va
 const descriptorFor = (resource: Any, name: string): Relationship.Descriptor => {
   const descriptor = (resource.relationships as Record<string, Relationship.Descriptor>)[name];
   if (descriptor === undefined) {
-    throw new Error(`Unknown relationship "${name}" on resource "${resource.type}"`);
+    throw declarationError(`Unknown relationship "${name}" on resource "${resource.type}"`);
   }
   return descriptor;
 };
@@ -4382,9 +4383,9 @@ export const resource = <
       ? (relationshipsOpt as RelationshipsMap)
       : {};
     const relationships = resource.relationships as Record<string, Relationship.Descriptor>;
-    for (const name of Object.keys(relationships)) {
+    Arr.forEach(Object.keys(relationships), (name) => {
       const captured = relationshipConfig(relMap, name);
-      if (Option.isNone(captured)) continue;
+      if (Option.isNone(captured)) return;
       const relConfig = captured.value;
       const toMany = Relationship.isToMany(relationships[name]);
       // A constrained `include` names this resource's paths, not the target's:
@@ -4427,7 +4428,7 @@ export const resource = <
         endpoints.push(addRelationship(resource, name as never, { ...errorOpt } as never));
         endpoints.push(removeRelationship(resource, name as never, { ...errorOpt } as never));
       }
-    }
+    });
   }
 
   return endpoints as unknown as ResourceEndpoints<
@@ -4480,6 +4481,15 @@ export interface FlatDocumentOptions<Included extends Schema.Top, TM extends Sch
   readonly toManyMeta?: TM | undefined;
 }
 
+// `never` is what a flat group without an include surface passes as
+// `Included` (the `included` of no surface, #595). It reads as `Schema.Top`,
+// the unconstrained `included` such a group always declared, so only a group
+// that has a surface gets the narrower type, and the handlers typed against a
+// surface-less group still match.
+type IncludedOrNone<Included extends Schema.Top> = [Included] extends [never]
+  ? Schema.Top
+  : Included;
+
 /**
  * The `success:` document of a flat `get` / `create` / `update`: a
  * single-resource data document over the **wire** form of `resource`
@@ -4513,7 +4523,7 @@ export const ResourceDocument = <
 >(
   resource: S,
   options?: FlatDocumentOptions<Included, TM>,
-): DataDocument<WireSchema<S, TM>, WireSchema<Included, TM>> =>
+): DataDocument<WireSchema<S, TM>, WireSchema<IncludedOrNone<Included>, TM>> =>
   asJsonApi(
     DataDocument(
       wire(resource, { toManyMeta: options?.toManyMeta }),
@@ -4672,7 +4682,7 @@ export const FlatCollectionDocument = <
 >(
   resource: S,
   options?: FlatDocumentOptions<Included, TM>,
-): CollectionDocument<WireSchema<S, TM>, WireSchema<Included, TM>> =>
+): CollectionDocument<WireSchema<S, TM>, WireSchema<IncludedOrNone<Included>, TM>> =>
   asJsonApi(
     CollectionDocument(
       wire(resource, { toManyMeta: options?.toManyMeta }),

@@ -714,7 +714,7 @@ describe("blog example: heterogeneous search", () => {
 
       // the union is discriminated by the `type` tag; the endpoint declares
       // `fields`, so a client reads each attribute as optional (#322)
-      for (const result of document.data) {
+      Arr.forEach(document.data, (result) => {
         if (result.type === "articles") {
           expectTypeOf(result.attributes.title).toEqualTypeOf<string | undefined>();
         } else {
@@ -726,7 +726,7 @@ describe("blog example: heterogeneous search", () => {
             result.type === "articles" ? result.attributes.title : result.attributes.firstName,
           ),
         ).toBe(true);
-      }
+      });
     }),
   );
 

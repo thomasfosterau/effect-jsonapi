@@ -54,6 +54,7 @@ import { AnyMeta, PaginatedRelationshipLinks, RelationshipLinks } from "./Docume
 import type { Operator } from "./Filter.js";
 import type { Any, AttributeKeys } from "./Resource.js";
 import type * as Sort from "./Sort.js";
+import { declarationError } from "./internal/errors.js";
 
 // ---------------------------------------------------------------------------
 // Descriptors
@@ -463,7 +464,7 @@ export interface MetaOptions<M extends Schema.Top = Schema.Top> {
 // relationship with the same key) run in `Resource.make`.
 const storageKey = <K extends StorageKey>(constructor: string, key: K): K => {
   if (key === "") {
-    throw new Error(
+    throw declarationError(
       `${constructor}: \`key\` is empty; name the stored field that holds the related id, or omit the option`,
     );
   }
@@ -673,19 +674,19 @@ export const paginated = <
   const order = options?.order;
   if (order !== undefined) {
     if (Arr.isReadonlyArrayEmpty(order)) {
-      throw new Error(
+      throw declarationError(
         "Relationship.paginated: `order` declares no terms; name at least one, or omit the option",
       );
     }
     const seen = new Set<string>();
-    for (const term of order) {
+    Arr.forEach(order, (term) => {
       if (seen.has(term.field)) {
-        throw new Error(
+        throw declarationError(
           `Relationship.paginated: \`order\` names "${term.field}" more than once; each term must order by a distinct field`,
         );
       }
       seen.add(term.field);
-    }
+    });
   }
   return {
     kind: "paginated",

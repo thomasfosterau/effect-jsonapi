@@ -111,9 +111,9 @@ export const orderPairs = (
   declared: ReadonlyArray<string> = [],
 ): ReadonlyArray<Pair> => {
   const families: Array<Array<Pair>> = [[], [], [], [], [], []];
-  for (const [key, value] of Object.entries(flat)) {
+  Arr.forEach(Object.entries(flat), ([key, value]) => {
     families[rank(key)].push(...pairsOf(key, Option.fromUndefinedOr(value)));
-  }
+  });
   const [include, fields, filter, sort, page, other] = families as [
     Array<Pair>,
     Array<Pair>,
@@ -164,10 +164,10 @@ export const withPagePairs = (
 ): ReadonlyArray<Pair> => {
   const before: Array<Pair> = [];
   const after: Array<Pair> = [];
-  for (const pair of query) {
+  Arr.forEach(query, (pair) => {
     const r = rank(pair[0]);
     if (r < 4) before.push(pair);
     else if (r > 4) after.push(pair);
-  }
+  });
   return [...before, ...page, ...after];
 };

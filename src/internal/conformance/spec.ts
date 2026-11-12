@@ -524,13 +524,13 @@ const overDocuments =
       const note = coverageNote(unresolved);
       const findings: Array<Finding> = [];
       let evaluated = 0;
-      for (const { observation, where } of documents) {
-        if (Option.isNone(observation.body)) continue;
+      Arr.forEach(documents, ({ observation, where }) => {
+        if (Option.isNone(observation.body)) return;
         const body = observation.body.value;
-        if (options.applicable !== undefined && !options.applicable(body)) continue;
+        if (options.applicable !== undefined && !options.applicable(body)) return;
         evaluated += 1;
         findings.push(...options.check(body, observation, where));
-      }
+      });
       if (evaluated === 0) {
         return skip(
           impl,
@@ -678,13 +678,13 @@ const noDuplicateResources: RuleImpl = {
         const resources = resourceObjectsOf(Option.some(body));
         const seen = new Map<string, string>();
         const duplicates: Array<string> = [];
-        for (const { pointer, resource } of resources) {
+        Arr.forEach(resources, ({ pointer, resource }) => {
           const key = identity(resource);
-          if (key === undefined) continue;
+          if (key === undefined) return;
           const first = seen.get(key);
           if (first === undefined) seen.set(key, pointer);
           else duplicates.push(`${resourceLabel(resource)} at ${first} and ${pointer}`);
-        }
+        });
         return Arr.isReadonlyArrayEmpty(duplicates)
           ? []
           : [
@@ -788,7 +788,7 @@ const resourceIdentification: RuleImpl = {
       inapplicable: "no endpoint returned a document carrying a resource object",
       check: (body, observation, where) => {
         const findings: Array<Finding> = [];
-        for (const { pointer, resource } of resourcesOf(Option.some(body))) {
+        Arr.forEach(resourcesOf(Option.some(body)), ({ pointer, resource }) => {
           const type = resource["type"];
           if (!P.isString(type) || type === "") {
             findings.push(
@@ -811,7 +811,7 @@ const resourceIdentification: RuleImpl = {
               }),
             );
           }
-        }
+        });
         return findings;
       },
     })(ctx),
@@ -853,8 +853,8 @@ const jsonApiObject: RuleImpl = {
             }),
           );
         }
-        for (const member of ["ext", "profile"] as const) {
-          if (!(member in value)) continue;
+        Arr.forEach(["ext", "profile"] as const, (member) => {
+          if (!(member in value)) return;
           const list = value[member];
           if (!Array.isArray(list) || list.some((uri) => !P.isString(uri))) {
             findings.push(
@@ -866,7 +866,7 @@ const jsonApiObject: RuleImpl = {
               }),
             );
           }
-        }
+        });
         return findings;
       },
     })(ctx),
@@ -925,8 +925,8 @@ const errorDocumentStructure: RuleImpl = {
         );
       }
       const findings: Array<Finding> = [];
-      for (const observation of observations) {
-        if (observation.status === 404 && observation.text === "") continue;
+      Arr.forEach(observations, (observation) => {
+        if (observation.status === 404 && observation.text === "") return;
         const errors = topLevel(observation.body, "errors");
         if (
           !Option.exists(errors, (list) => isJsonArray(list) && Arr.isReadonlyArrayNonEmpty(list))
@@ -940,7 +940,7 @@ const errorDocumentStructure: RuleImpl = {
             }),
           );
         }
-      }
+      });
       return settle(errorDocumentStructure.rule, observations.length, findings);
     }),
 };
@@ -962,8 +962,8 @@ const errorMemberTypes: RuleImpl = {
       if (Arr.isReadonlyArrayEmpty(errors))
         return skip(errorMemberTypes.rule, "no error object could be provoked");
       const findings: Array<Finding> = [];
-      for (const { error, observation } of errors) {
-        for (const member of ["id", "status", "code", "title", "detail"] as const) {
+      Arr.forEach(errors, ({ error, observation }) => {
+        Arr.forEach(["id", "status", "code", "title", "detail"] as const, (member) => {
           if (member in error && !P.isString(error[member])) {
             findings.push(
               finding(errorMemberTypes.rule, {
@@ -974,8 +974,8 @@ const errorMemberTypes: RuleImpl = {
               }),
             );
           }
-        }
-        for (const member of ["links", "source", "meta"] as const) {
+        });
+        Arr.forEach(["links", "source", "meta"] as const, (member) => {
           if (member in error && !isRecord(error[member])) {
             findings.push(
               finding(errorMemberTypes.rule, {
@@ -986,8 +986,8 @@ const errorMemberTypes: RuleImpl = {
               }),
             );
           }
-        }
-      }
+        });
+      });
       return settle(errorMemberTypes.rule, errors.length, findings);
     }),
 };
@@ -1016,8 +1016,8 @@ const errorSourceDiscrimination: RuleImpl = {
         );
       }
       const findings: Array<Finding> = [];
-      for (const { observation, source } of sources) {
-        for (const key of Object.keys(source)) {
+      Arr.forEach(sources, ({ observation, source }) => {
+        Arr.forEach(Object.keys(source), (key) => {
           if (key !== "pointer" && key !== "parameter" && key !== "header") {
             findings.push(
               finding(errorSourceDiscrimination.rule, {
@@ -1027,7 +1027,7 @@ const errorSourceDiscrimination: RuleImpl = {
                 probe: observation.probe,
               }),
             );
-            continue;
+            return;
           }
           const value = source[key];
           if (!P.isString(value)) {
@@ -1039,7 +1039,7 @@ const errorSourceDiscrimination: RuleImpl = {
                 probe: observation.probe,
               }),
             );
-            continue;
+            return;
           }
           if (key === "pointer" && value !== "" && !value.startsWith("/")) {
             findings.push(
@@ -1051,8 +1051,8 @@ const errorSourceDiscrimination: RuleImpl = {
               }),
             );
           }
-        }
-      }
+        });
+      });
       return settle(errorSourceDiscrimination.rule, sources.length, findings);
     }),
 };
@@ -1073,7 +1073,7 @@ const errorStatusMatches: RuleImpl = {
       if (Arr.isReadonlyArrayEmpty(observations))
         return skip(errorStatusMatches.rule, "no single-error document could be provoked");
       const findings: Array<Finding> = [];
-      for (const observation of observations) {
+      Arr.forEach(observations, (observation) => {
         const error = errorObjectsOf(observation.body)[0];
         const status = error["status"];
         if (P.isString(status) && status !== String(observation.status)) {
@@ -1086,7 +1086,7 @@ const errorStatusMatches: RuleImpl = {
             }),
           );
         }
-      }
+      });
       return settle(errorStatusMatches.rule, observations.length, findings);
     }),
 };
@@ -1127,11 +1127,11 @@ const fieldNamesOf = (resource: Readonly<Record<string, unknown>>): ReadonlyArra
  */
 const fieldsByType = (body: Body, where: Slot): Map<string, ReadonlyArray<string>> => {
   const byType = new Map<string, ReadonlyArray<string>>();
-  for (const { pointer, resource } of resourcesOf(body)) {
-    if (!inSlot(pointer, where)) continue;
+  Arr.forEach(resourcesOf(body), ({ pointer, resource }) => {
+    if (!inSlot(pointer, where)) return;
     const type = resource["type"];
     if (P.isString(type) && !byType.has(type)) byType.set(type, fieldNamesOf(resource));
-  }
+  });
   return byType;
 };
 
@@ -1231,7 +1231,7 @@ const sparseFieldsets = (where: Slot): RuleImpl => {
                   // that slot proves nothing either way.
                   if (Arr.isReadonlyArrayEmpty(subjects)) return;
                   tally.evaluated += 1;
-                  for (const { pointer, resource } of subjects) {
+                  Arr.forEach(subjects, ({ pointer, resource }) => {
                     const extra = fieldNamesOf(resource).filter((key) => key !== requested);
                     if (Arr.isReadonlyArrayNonEmpty(extra)) {
                       tally.findings.push(
@@ -1243,7 +1243,7 @@ const sparseFieldsets = (where: Slot): RuleImpl => {
                         }),
                       );
                     }
-                  }
+                  });
                 }),
               { concurrency: 1, discard: true },
             );
@@ -1299,7 +1299,7 @@ const sparseFieldsetsEmpty: RuleImpl = {
                 );
                 if (Arr.isReadonlyArrayEmpty(subjects)) return;
                 tally.evaluated += 1;
-                for (const { pointer, resource } of subjects) {
+                Arr.forEach(subjects, ({ pointer, resource }) => {
                   const names = fieldNamesOf(resource);
                   if (Arr.isReadonlyArrayNonEmpty(names)) {
                     tally.findings.push(
@@ -1311,7 +1311,7 @@ const sparseFieldsetsEmpty: RuleImpl = {
                       }),
                     );
                   }
-                }
+                });
               }),
             { concurrency: 1, discard: true },
           );

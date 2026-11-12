@@ -570,28 +570,23 @@ const declaredLinkageTypes = (endpoint: HttpApiEndpoint.Top, role: Role): Readon
  * @internal
  */
 export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Discovered> => {
-  const out: Array<Discovered> = [];
   const groups = api.groups as unknown as Readonly<
     Record<string, { readonly endpoints: Readonly<Record<string, HttpApiEndpoint.Top>> }>
   >;
-  for (const group of Object.keys(groups)) {
+  return Arr.flatMap(Object.keys(groups), (group) => {
     const endpoints = groups[group].endpoints;
-    for (const name of Object.keys(endpoints)) {
+    return Arr.map(Object.keys(endpoints), (name): Discovered => {
       const endpoint = endpoints[name];
       const segments = endpoint.path.split("/").filter((segment) => segment !== "");
       const query = wireKeys(endpoint.query);
-      let responseMediaType: string | undefined;
-      for (const success of endpoint.success) {
-        const encoding = resolveEncoding(success.ast);
-        if (encoding?.contentType !== undefined) {
-          responseMediaType = encoding.contentType;
-          break;
-        }
-      }
-      const atomic =
-        responseMediaType !== undefined && responseMediaType.includes(ATOMIC_EXTENSION_URI);
+      const responseMediaType = Arr.findFirst(endpoint.success, (success) =>
+        Option.fromUndefinedOr(resolveEncoding(success.ast)?.contentType),
+      );
+      const atomic = Option.exists(responseMediaType, (mediaType) =>
+        mediaType.includes(ATOMIC_EXTENSION_URI),
+      );
       const role = atomic ? "operations" : roleOf(endpoint.method, segments);
-      out.push({
+      return {
         group,
         name,
         method: endpoint.method,
@@ -606,10 +601,9 @@ export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Disco
           .map((segment) => segment.slice(1)),
         ...query,
         idempotencyKey: idempotencyKeyOf(Option.fromUndefinedOr(endpoint.headers)),
-      });
-    }
-  }
-  return out;
+      };
+    });
+  });
 };
 
 // ---------------------------------------------------------------------------
@@ -807,10 +801,10 @@ const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
 const headerRecord = (headers: Readonly<Record<string, string | undefined>>) => {
   const out: Record<string, string> = {};
-  for (const key of Object.keys(headers)) {
+  Arr.forEach(Object.keys(headers), (key) => {
     const value = headers[key];
     if (value !== undefined) out[key.toLowerCase()] = value;
-  }
+  });
   return out;
 };
 
@@ -1816,12 +1810,12 @@ interface Probeable {
 export const probeable = (ctx: Context, roles: ReadonlyArray<Role>): Probeable => {
   const resolved: Array<{ endpoint: Discovered; path: string }> = [];
   const unresolved: Array<string> = [];
-  for (const endpoint of ctx.endpoints) {
-    if (!roles.includes(endpoint.role)) continue;
+  Arr.forEach(ctx.endpoints, (endpoint) => {
+    if (!roles.includes(endpoint.role)) return;
     const resolution = resolvePath(endpoint, ctx.options);
     if (P.isTagged(resolution, "Resolved")) resolved.push({ endpoint, path: resolution.path });
     else unresolved.push(resolution.reason);
-  }
+  });
   return { resolved, unresolved };
 };
 
