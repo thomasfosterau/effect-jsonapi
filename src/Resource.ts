@@ -67,6 +67,7 @@ import {
 import * as Relationship from "./Relationship.js";
 import type { Relationships, RelationshipSchemas } from "./Relationship.js";
 import * as Sort from "./Sort.js";
+import { render } from "./internal/json.js";
 
 // The relationship descriptor types (`Descriptor`, `Relationships`,
 // `RelationshipSchemas`) are part of the public API under the `Relationship`
@@ -2365,7 +2366,7 @@ const scalarLiteral = (kind: ScalarKind, target: Schema.Top): Schema.Codec<unkno
           return value === undefined
             ? Effect.fail(
                 new SchemaIssue.InvalidValue(
-                  { message: `Expected a ${kind} filter literal, got ${JSON.stringify(input)}` },
+                  { message: `Expected a ${kind} filter literal, got ${render(input)}` },
                   input,
                   options,
                 ),

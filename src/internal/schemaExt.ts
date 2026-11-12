@@ -15,11 +15,13 @@
 // The bare `effect` barrel: the schema-only entry point reaches this module,
 // and `test/entry-points.test.ts` pins `effect` as its only external.
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Rec from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaIssue from "effect/SchemaIssue";
+import { tryStringify } from "./json.js";
 
 /**
  * How many undeclared members a closed struct reports at their own paths
@@ -48,10 +50,7 @@ export const validateMaxUndeclaredMemberErrors = (where: string, cap: number): n
 // with `JSON.stringify` (`"12"`, `true`), or `String` again for a value JSON
 // writes as nothing (a symbol, a function).
 const showValue = (value: number): string =>
-  P.isNumber(value)
-    ? String(value)
-    : // oxlint-disable-next-line effect/avoid-direct-json -- a diagnostic rendering of an arbitrary value, not a wire boundary
-      (JSON.stringify(value) ?? String(value));
+  P.isNumber(value) ? String(value) : Option.getOrElse(tryStringify(value), () => String(value));
 
 // The summary issue's message: "9988 more undeclared members not listed". The
 // count is plain digits (`String`), so a response body never depends on the

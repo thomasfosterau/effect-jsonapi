@@ -16,6 +16,7 @@ import * as P from "effect/Predicate";
 import * as Result from "effect/Result";
 import type { Disposal, Gap, Outcome, Rule, Tier, WriteRecord } from "./core.js";
 import { resolved, type SampleRecord } from "./samples.js";
+import { render } from "../json.js";
 
 /** @internal */
 export interface Summary {
@@ -152,7 +153,7 @@ const renderOutcome = (outcome: Outcome, width: number): string => {
               ),
             );
             if (found.probe.body !== undefined) {
-              lines.push(indent(`body: ${JSON.stringify(found.probe.body)}`, "        "));
+              lines.push(indent(`body: ${render(found.probe.body)}`, "        "));
             }
           }
           lines.push(hang(`expected: ${found.expected}`, "        ", "          "));

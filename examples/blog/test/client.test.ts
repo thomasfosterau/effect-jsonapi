@@ -11,6 +11,7 @@
 import { assert, describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { ApiError, Client, MEDIA_TYPE } from "@thomasfosterau/effect-jsonapi";
@@ -25,6 +26,8 @@ import {
 } from "../client.js";
 import { ArticleNotFound } from "../errors.js";
 import { Article } from "../resources.js";
+
+const jsonText = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
   Effect.runPromise(
@@ -136,10 +139,7 @@ describe("blog client: error documents", () => {
         });
         return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
       }).pipe(
-        Effect.provideService(
-          HttpClient.HttpClient,
-          gateway(JSON.stringify(document), 503, MEDIA_TYPE),
-        ),
+        Effect.provideService(HttpClient.HttpClient, gateway(jsonText(document), 503, MEDIA_TYPE)),
         Effect.flip,
       ) as Effect.Effect<unknown>,
     );
@@ -183,7 +183,7 @@ describe("blog client: error documents", () => {
       }).pipe(
         Effect.provideService(
           HttpClient.HttpClient,
-          gateway(JSON.stringify(ApiError.toDocument(new Offline())), 503, MEDIA_TYPE),
+          gateway(jsonText(ApiError.toDocument(new Offline())), 503, MEDIA_TYPE),
         ),
         Effect.flip,
       ) as Effect.Effect<unknown>,

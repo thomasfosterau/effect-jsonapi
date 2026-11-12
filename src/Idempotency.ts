@@ -69,6 +69,7 @@ import { make as makeApiError } from "./ApiError.js";
 import type { JsonApiObject } from "./Document.js";
 import { MEDIA_TYPE } from "./internal/media.js";
 import { bodyText } from "./internal/responseBody.js";
+import { parse, stringify } from "./internal/json.js";
 
 // ---------------------------------------------------------------------------
 // Profile constants
@@ -454,7 +455,7 @@ export const canonical = (request: Fingerprinted): string => {
       ? request.body
       : // Not JSON — compare the bytes as received.
         Opt.getOrElse(
-          Opt.liftThrowable(() => JSON.stringify(canonicalValue(JSON.parse(request.body))))(),
+          Opt.liftThrowable(() => stringify(canonicalValue(parse(request.body))))(),
           () => request.body,
         );
   return `${request.method.toUpperCase()}\n${path ?? ""}\n${pairs.join("&")}\n${body}`;

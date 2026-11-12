@@ -14,6 +14,7 @@ import * as Middleware from "./Middleware.js";
 import { make as Resource } from "./Resource.js";
 import { MEDIA_TYPE } from "./internal/media.js";
 import { definedMember } from "./internal/members.js";
+import { parse, stringify } from "./internal/json.js";
 
 const Article = Resource("articles", {
   attributes: { title: Schema.NonEmptyString, body: Schema.String },
@@ -101,7 +102,7 @@ describe("Idempotency.fingerprint", () => {
       const print = yield* Idempotency.fingerprint({
         method: "POST",
         url: "/articles",
-        body: JSON.stringify(createBody),
+        body: stringify(createBody),
       });
       expect(print).toMatch(/^[0-9a-f]{64}$/);
     }),
@@ -249,7 +250,7 @@ const server = (options: {
             "content-type": init.contentType ?? MEDIA_TYPE,
             ...definedMember("idempotency-key", init.key),
           },
-          ...definedMember("body", init.body === undefined ? undefined : JSON.stringify(init.body)),
+          ...definedMember("body", init.body === undefined ? undefined : stringify(init.body)),
         }),
       );
       return {
@@ -331,9 +332,7 @@ describe("Idempotency.layer", () => {
 
     expect(calls).toBe(1);
     expect(conflicting.status).toBe(422);
-    expect(JSON.parse(conflicting.body)).toEqual(
-      ApiError.toDocument(new Idempotency.KeyMismatch()),
-    );
+    expect(parse(conflicting.body)).toEqual(ApiError.toDocument(new Idempotency.KeyMismatch()));
   });
 
   it("treats the same key on a different target as a mismatch, not a fresh slot", async () => {
@@ -371,7 +370,7 @@ describe("Idempotency.layer", () => {
     onTestFinished(() => dispose());
     const inFlight = await request({ key: "k1", body: createBody });
     expect(inFlight.status).toBe(409);
-    expect(JSON.parse(inFlight.body)).toEqual(ApiError.toDocument(new Idempotency.KeyInProgress()));
+    expect(parse(inFlight.body)).toEqual(ApiError.toDocument(new Idempotency.KeyInProgress()));
   });
 
   it("prefers the mismatch over the in-flight conflict", async () => {
@@ -480,7 +479,9 @@ describe("Idempotency.layer", () => {
     onTestFinished(() => dispose());
     const missing = await request({ body: createBody });
     expect(missing.status).toBe(400);
-    expect(JSON.parse(missing.body).errors[0].source).toEqual({ header: "idempotency-key" });
+    expect(parse(missing.body)).toMatchObject({
+      errors: [{ source: { header: "idempotency-key" } }],
+    });
   });
 
   it("replays a bodyless 204 as a 204", async () => {
@@ -581,7 +582,7 @@ describe("Idempotency and the atomic operations extension", () => {
     });
 
     expect(calls).toBe(1);
-    expect(JSON.parse(first.body)["atomic:results"][0].data.id).toBe("1");
+    expect(parse(first.body)).toMatchObject({ "atomic:results": [{ data: { id: "1" } }] });
     expect(second.body).toBe(first.body);
     expect(second.replayed).toBe("true");
   });

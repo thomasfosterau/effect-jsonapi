@@ -23,6 +23,7 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import type * as Schema from "effect/Schema";
 import { assign } from "./define.js";
+import { stringify } from "./json.js";
 
 /**
  * Every key reachable from `seeds`: the seeds themselves, then the keys
@@ -70,7 +71,7 @@ export const isJsonObject = (json: Schema.Json): json is Schema.JsonObject =>
  *
  * @internal
  */
-export const idKey = (type: string, id: string): string => JSON.stringify(["id", type, id]);
+export const idKey = (type: string, id: string): string => stringify(["id", type, id]);
 
 /**
  * A resource object's `(type, id)` identity as a comparable string, or
@@ -84,7 +85,7 @@ export const identity = (resource: Readonly<Record<string, unknown>>): string | 
   const id = resource["id"];
   if (Predicate.isString(id)) return idKey(type, id);
   const lid = resource["lid"];
-  if (Predicate.isString(lid)) return JSON.stringify(["lid", type, lid]);
+  if (Predicate.isString(lid)) return stringify(["lid", type, lid]);
   return undefined;
 };
 

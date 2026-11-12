@@ -22,6 +22,7 @@ import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
 import { orderOf } from "./internal/filter.js";
 import { MEDIA_TYPE } from "./internal/media.js";
+import { stringify } from "./internal/json.js";
 
 const RULE = "profile/sort/ordering";
 
@@ -220,7 +221,7 @@ const run = (
         const { status, body } = answer(path);
         return HttpClientResponse.fromWeb(
           request,
-          new Response(JSON.stringify(body), { status, headers: { "content-type": MEDIA_TYPE } }),
+          new Response(stringify(body), { status, headers: { "content-type": MEDIA_TYPE } }),
         );
       }),
     );

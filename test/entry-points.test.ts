@@ -18,11 +18,13 @@ import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
 import * as Rec from "effect/Record";
+import * as Schema from "effect/Schema";
 import ts from "typescript";
 import { assert, describe, expect, it } from "vite-plus/test";
 import config from "../vite.config.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
+const quoted = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.String));
 const SRC = path.join(ROOT, "src");
 const DIST = path.join(ROOT, "dist");
 
@@ -44,6 +46,10 @@ const SCHEMA_TIER = [
   // `included` union from this walk (#342); it imports neither `Query` nor
   // an `effect` subpath.
   "internal/includeGraph.ts",
+  // The JSON text codec (`Schema.fromJsonString`) the diagnostics and the
+  // schema messages render through, so no module calls `JSON` directly
+  // (`effect/avoid-direct-json`); imports only `effect` modules.
+  "internal/json.ts",
   "internal/media.ts",
   "internal/operators.ts",
   // `Resource.createPayload` refuses a client-generated `data.id` with the
@@ -547,9 +553,16 @@ describe("module subpaths, from source", { timeout: LOAD_TIMEOUT }, () => {
 });
 
 describe("package exports map", () => {
-  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
-    exports: Record<string, { types: string; default: string }>;
-  };
+  const manifest = Schema.decodeSync(
+    Schema.fromJsonString(
+      Schema.Struct({
+        exports: Schema.Record(
+          Schema.String,
+          Schema.Struct({ types: Schema.String, default: Schema.String }),
+        ),
+      }),
+    ),
+  )(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
 
   it("publishes the root and the schema subpath unchanged", () => {
     expect(manifest.exports["."]).toEqual({
@@ -725,7 +738,7 @@ describe("built artifact", () => {
         fileURLToPath(new URL("./fixtures/forbid-http-peer.mjs", import.meta.url)),
         "--input-type=module",
         "-e",
-        `${entries.map((entry) => `await import(${JSON.stringify(entry)});`).join(" ")} console.log("LOADED")`,
+        `${entries.map((entry) => `await import(${quoted(entry)});`).join(" ")} console.log("LOADED")`,
       ],
       { cwd: ROOT, encoding: "utf8" },
     );

@@ -25,6 +25,7 @@ import * as Registry from "./Registry.js";
 import * as Resource from "./Resource.js";
 import * as ResourceHandlers from "./ResourceHandlers.js";
 import * as ServerErrors from "./ServerErrors.js";
+import { stringify } from "./internal/json.js";
 
 class Store extends Context.Service<Store, Map<string, Person>>()("test/Store") {}
 
@@ -201,7 +202,7 @@ describe("the router, over HTTP", () => {
         new Request("https://example.test/people/1", {
           method: "PATCH",
           headers: { "content-type": MEDIA_TYPE, accept: MEDIA_TYPE },
-          body: JSON.stringify({ id: "2", name: "Bob" }),
+          body: stringify({ id: "2", name: "Bob" }),
         }),
         new Map([["1", personRow("1", "Ada")]]),
       ),
@@ -220,7 +221,7 @@ describe("the router, over HTTP", () => {
         new Request("https://example.test/people", {
           method: "POST",
           headers: { "content-type": MEDIA_TYPE, accept: MEDIA_TYPE },
-          body: JSON.stringify({ name: "Bob" }),
+          body: stringify({ name: "Bob" }),
         }),
         store,
       ),

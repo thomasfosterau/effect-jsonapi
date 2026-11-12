@@ -16,6 +16,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import type { Compare, Node } from "../Filter.js";
 import { conjunctions, listOperators, nullOperator, operators } from "./operators.js";
+import { render } from "./json.js";
 
 // ---------------------------------------------------------------------------
 // The per-field declaration the engine reads
@@ -96,15 +97,15 @@ export const operatorCheck =
     }
   };
 
-const unknownField = (field: string): string => `Unknown filter field ${JSON.stringify(field)}`;
+const unknownField = (field: string): string => `Unknown filter field ${render(field)}`;
 const nullLiteral = (field: string): string =>
-  `NULL is not a filter literal for field ${JSON.stringify(field)} (use the isnull operator)`;
+  `NULL is not a filter literal for field ${render(field)} (use the isnull operator)`;
 const undeclaredOperator = (
   field: string,
   operator: string,
   declared: ReadonlyArray<string>,
 ): string =>
-  `Operator ${JSON.stringify(operator)} is not declared on field ${JSON.stringify(field)}; declared operators are ${declared.join(", ")}`;
+  `Operator ${render(operator)} is not declared on field ${render(field)}; declared operators are ${declared.join(", ")}`;
 
 // The message of a literal codec's failure, for the 400's `detail`.
 const issueMessage = (error: Schema.SchemaError): string =>
@@ -217,8 +218,6 @@ export type WireValue = string | ReadonlyArray<string>;
 const pointed = (key: string, message: string, input?: WireValue): SchemaIssue.Issue =>
   new SchemaIssue.Pointer([key], new SchemaIssue.InvalidValue({ message }, input));
 
-const quote = JSON.stringify;
-
 // The keys a condition's members were read from; in shorthand all three are
 // the one key.
 interface ConditionKeys {
@@ -266,14 +265,14 @@ export const decodeFilter = (
       if (!allOperators.includes(op)) {
         return fail(
           keys.operator,
-          `Unknown filter operator ${quote(op)}; expected one of ${allOperators.join(", ")}`,
+          `Unknown filter operator ${render(op)}; expected one of ${allOperators.join(", ")}`,
           op,
         );
       }
       operator = op;
       if (op === nullOperator) {
         if (raw !== "true" && raw !== "false") {
-          return fail(keys.value, `Expected true or false for isnull, got ${quote(raw)}`, raw);
+          return fail(keys.value, `Expected true or false for isnull, got ${render(raw)}`, raw);
         }
         items = [raw];
       } else {
@@ -293,7 +292,7 @@ export const decodeFilter = (
       if (Result.isFailure(result)) {
         return fail(
           keys.value,
-          `Invalid literal ${quote(item)} for field ${quote(field)}: ${issueMessage(result.failure)}`,
+          `Invalid literal ${render(item)} for field ${render(field)}: ${issueMessage(result.failure)}`,
           raw,
         );
       }
@@ -330,7 +329,7 @@ export const decodeFilter = (
       // check the comma form already goes through below.
       raw = value.join(",");
     } else {
-      fail(key, `Repeated filter key ${quote(key)}; a filter key may appear once`, value);
+      fail(key, `Repeated filter key ${render(key)}; a filter key may appear once`, value);
       continue;
     }
     if (segments === undefined) {
@@ -358,7 +357,10 @@ export const decodeFilter = (
       const allowed =
         kind === "group" ? ["conjunction", "memberOf"] : ["path", "operator", "value", "memberOf"];
       if (!allowed.includes(member)) {
-        fail(key, `Unknown ${kind} member ${quote(member)}; expected one of ${allowed.join(", ")}`);
+        fail(
+          key,
+          `Unknown ${kind} member ${render(member)}; expected one of ${allowed.join(", ")}`,
+        );
         continue;
       }
       let draft = drafts.get(id);
@@ -368,7 +370,7 @@ export const decodeFilter = (
       } else if (draft.kind !== kind) {
         if (!conflicted.has(id)) {
           conflicted.add(id);
-          fail(key, `Filter id ${quote(id)} is used as both a group and a condition`);
+          fail(key, `Filter id ${render(id)} is used as both a group and a condition`);
         }
         continue;
       }
@@ -401,7 +403,7 @@ export const decodeFilter = (
         if (present === undefined) {
           fail(
             `filter[${id}][condition][${member}]`,
-            `Missing required condition member ${quote(member)}`,
+            `Missing required condition member ${render(member)}`,
           );
           complete = false;
         }
@@ -422,7 +424,7 @@ export const decodeFilter = (
       } else if (!isConjunction(conjunction.value)) {
         fail(
           conjunction.key,
-          `Unknown conjunction ${quote(conjunction.value)}; expected AND, OR or NOT`,
+          `Unknown conjunction ${render(conjunction.value)}; expected AND, OR or NOT`,
           conjunction.value,
         );
       }
@@ -438,13 +440,13 @@ export const decodeFilter = (
     if (target === undefined) {
       fail(
         node.memberOf.key,
-        `memberOf names an unknown group ${quote(node.memberOf.value)}`,
+        `memberOf names an unknown group ${render(node.memberOf.value)}`,
         node.memberOf.value,
       );
     } else if (target.kind !== "group") {
       fail(
         node.memberOf.key,
-        `memberOf names ${quote(node.memberOf.value)}, which is a condition, not a group`,
+        `memberOf names ${render(node.memberOf.value)}, which is a condition, not a group`,
         node.memberOf.value,
       );
     } else {
@@ -675,7 +677,7 @@ export const prepare = (
     // An untyped caller can still hand over a node outside the union.
     Match.orElse((): never => {
       throw new InvalidFilter({
-        message: `Unknown filter node ${quote((node as { readonly _tag?: unknown })._tag)}`,
+        message: `Unknown filter node ${render((node as { readonly _tag?: unknown })._tag)}`,
       });
     }),
   );

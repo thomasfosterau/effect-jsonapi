@@ -76,6 +76,7 @@ import {
 } from "./write.js";
 import { quote } from "./crawl.js";
 import { evaluation } from "./evaluation.js";
+import { render } from "../json.js";
 
 const GRAMMAR =
   "https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md";
@@ -270,7 +271,7 @@ const rejections: RuleImpl = {
                   observed: Arr.match(parameters, {
                     onEmpty: () => "no error object carried `source.parameter`",
                     onNonEmpty: (named) =>
-                      `source.parameter: ${named.map((p) => JSON.stringify(p)).join(", ")}`,
+                      `source.parameter: ${named.map((p) => render(p)).join(", ")}`,
                   }),
                   probe: observation.probe,
                 }),
@@ -347,7 +348,7 @@ const spellingEquivalence: RuleImpl = {
             if (observation.status !== 200) {
               findings.push(
                 finding(spellingEquivalence.rule, {
-                  detail: `the ${label} spelling of \`${field} eq ${JSON.stringify(learned.value)}\` was not accepted`,
+                  detail: `the ${label} spelling of \`${field} eq ${render(learned.value)}\` was not accepted`,
                   expected: "200 OK — every spelling decodes to the same tree",
                   observed: describe(observation),
                   probe: observation.probe,
@@ -595,7 +596,7 @@ const jsonApiMember: RuleImpl = {
             finding(jsonApiMember.rule, {
               detail: `${path} answered a document that does not advertise the JSON:API version`,
               expected: `jsonapi: { version: "1.1" }`,
-              observed: jsonapi === undefined ? "no `jsonapi` member" : JSON.stringify(jsonapi),
+              observed: jsonapi === undefined ? "no `jsonapi` member" : render(jsonapi),
               probe: observation.probe,
             }),
           );

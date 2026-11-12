@@ -25,6 +25,7 @@ import * as Relationship from "./Relationship.js";
 import { make as Resource } from "./Resource.js";
 import { MEDIA_TYPE } from "./internal/media.js";
 import { definedMember } from "./internal/members.js";
+import { parse, stringify } from "./internal/json.js";
 
 /**
  * Drops every `undefined` member of a payload's `attributes`. In-process — and
@@ -1489,7 +1490,7 @@ describe("Endpoint.delete success override", () => {
     return {
       status: response.status,
       contentType: response.headers.get("content-type"),
-      body: text === "" ? undefined : JSON.parse(text),
+      body: text === "" ? undefined : parse(text),
     };
   };
 
@@ -1503,10 +1504,8 @@ describe("Endpoint.delete success override", () => {
     const response = await request(TombstoneApi, TombstoneLive, "http://localhost/articles/1");
     expect(response.status).toBe(200);
     expect(response.contentType).toContain(MEDIA_TYPE);
-    expect(response.body.data).toMatchObject({
-      type: "articles",
-      id: "1",
-      attributes: { title: "Hello" },
+    expect(response.body).toMatchObject({
+      data: { type: "articles", id: "1", attributes: { title: "Hello" } },
     });
   });
 
@@ -1519,7 +1518,7 @@ describe("Endpoint.delete success override", () => {
     );
     const response = await request(AcceptedApi, AcceptedLive, "http://localhost/articles/1");
     expect(response.status).toBe(202);
-    expect(response.body.data).toMatchObject({ type: "articles", id: "1" });
+    expect(response.body).toMatchObject({ data: { type: "articles", id: "1" } });
   });
 
   it("types the overridden success as the supplied schema, and the default as void", () => {
@@ -2155,7 +2154,7 @@ describe("Endpoint.create / Endpoint.update status override", () => {
       new Request(url, {
         method,
         headers: { "content-type": MEDIA_TYPE },
-        body: JSON.stringify(body),
+        body: stringify(body),
       }),
     );
     return {
@@ -2187,7 +2186,7 @@ describe("Endpoint.create / Endpoint.update status override", () => {
 
   const roundTrip = async (createOptions?: any, updateOptions?: any) => {
     const api = writesApi(
-      `writes-${JSON.stringify(createOptions ?? {})}-${JSON.stringify(updateOptions ?? {})}`,
+      `writes-${stringify(createOptions ?? {})}-${stringify(updateOptions ?? {})}`,
       Endpoint.create(Article, createOptions),
       Endpoint.update(Article, updateOptions),
     );
@@ -2319,7 +2318,7 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
       new Request("http://localhost/articles", {
         method: "POST",
         headers: { "content-type": contentType },
-        body: JSON.stringify({
+        body: stringify({
           title: "Hello",
           body: "World",
           createdAt: "2024-01-01T00:00:00.000Z",
@@ -2350,7 +2349,7 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
     const { api, live } = apiWith("plain-media-blog", { payloadMediaType: "application/json" });
     const accepted = await post(api, live, "application/json");
     expect(accepted.status).toBe(201);
-    expect(JSON.parse(accepted.body).data).toMatchObject({ type: "articles", id: "1" });
+    expect(parse(accepted.body)).toMatchObject({ data: { type: "articles", id: "1" } });
     // the registration moved rather than widened: the JSON:API label is now the mismatch
     expect((await post(api, live, MEDIA_TYPE)).status).toBe(415);
   });
@@ -2372,7 +2371,7 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
       new Request("http://localhost/articles", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+        body: stringify({
           data: {
             type: "articles",
             attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },

@@ -42,6 +42,7 @@ import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as ApiError from "./ApiError.js";
 import { MEDIA_TYPE, parametersAreAcceptable, parseMediaType } from "./internal/media.js";
+import { stringify } from "./internal/json.js";
 
 /**
  * A JSON:API error emitted at the seam — the §5 negotiation statuses and the
@@ -552,7 +553,7 @@ export const make = (options: Options): Negotiator => {
  */
 export const errorResponse = (error: NegotiationError): Response =>
   new Response(
-    JSON.stringify({
+    stringify({
       errors: [
         {
           status: String(error.status),

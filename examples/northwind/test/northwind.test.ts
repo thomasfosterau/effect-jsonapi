@@ -67,6 +67,8 @@ const buildClient = HttpApiTest.groups(Api, [
   "search",
 ]);
 
+const jsonText = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+
 const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
   Effect.runPromise(
     effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E>,
@@ -888,7 +890,7 @@ describe("northwind example: spec compliance on the wire", () => {
 
   it("OpenAPI generation reflects the JSON:API media type, statuses and query parameters", () => {
     const spec = OpenApi.fromApi(Api);
-    expect(JSON.stringify(spec)).toContain("application/vnd.api+json");
+    expect(jsonText(spec)).toContain("application/vnd.api+json");
 
     // create → 201 + 409, remove → 204, fetch errors → 404
     expect(spec.paths["/products"]?.post?.responses).toHaveProperty("201");

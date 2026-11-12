@@ -13,6 +13,7 @@ import * as Resource from "../../Resource.js";
 import { MEDIA_TYPE } from "../media.js";
 import * as Core from "./core.js";
 import * as Samples from "./samples.js";
+import { stringify } from "../json.js";
 
 const Article = Resource.make("articles", { attributes: { title: Schema.String } });
 const Person = Resource.make("people", { attributes: { name: Schema.String } });
@@ -49,7 +50,7 @@ const server = () => {
       });
       return HttpClientResponse.fromWeb(
         request,
-        new Response(JSON.stringify(body), { status, headers: { "content-type": MEDIA_TYPE } }),
+        new Response(stringify(body), { status, headers: { "content-type": MEDIA_TYPE } }),
       );
     }),
   );

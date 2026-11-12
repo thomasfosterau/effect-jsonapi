@@ -24,6 +24,7 @@ import * as Group from "./Group.js";
 import { acceptIsAcceptable, contentTypeIsAcceptable } from "./Middleware.js";
 import { make as Resource } from "./Resource.js";
 import { MEDIA_TYPE } from "./internal/media.js";
+import { stringify } from "./internal/json.js";
 
 // ---------------------------------------------------------------------------
 // mediaType
@@ -170,7 +171,7 @@ const Api = HttpApi.make("blog").add(
   ),
 );
 
-const articleDocument = JSON.stringify({
+const articleDocument = stringify({
   data: { type: "articles", id: "1", attributes: { title: "JSON:API paints my bikeshed!" } },
 });
 
@@ -296,7 +297,7 @@ const notFound = toDocument(new ArticleNotFound());
 
 describe("Client.decodeErrorDocument", () => {
   it("decodes a conformant document from body text", () => {
-    const decoded = decodeErrorDocument(JSON.stringify(notFound));
+    const decoded = decodeErrorDocument(stringify(notFound));
     assert(Option.isSome(decoded));
     expect(decoded.value.errors[0]?.status).toBe("404");
   });
@@ -315,7 +316,7 @@ describe("Client.decodeErrorDocument", () => {
     // error for the same URL decode to the same value.
     const rendered = toDocument(new ArticleNotFound());
     const viaFacade = decodeErrorDocument(rendered);
-    const viaWire = decodeErrorDocument(JSON.stringify(rendered));
+    const viaWire = decodeErrorDocument(stringify(rendered));
     expect(viaFacade).toStrictEqual(viaWire);
   });
 
@@ -374,7 +375,7 @@ const clientError = (body: string | null, status: number): HttpClientError.HttpC
 describe("Client.errorDocument", () => {
   it.effect("reads the document off a failed call", () =>
     Effect.gen(function* () {
-      const document = yield* errorDocument(clientError(JSON.stringify(notFound), 404));
+      const document = yield* errorDocument(clientError(stringify(notFound), 404));
       assert(Option.isSome(document));
       expect(errorMessage(document.value)).toBe(ArticleNotFound.title);
     }),
@@ -382,7 +383,7 @@ describe("Client.errorDocument", () => {
 
   it.effect("decodes through the same seam as a body handed in directly", () =>
     Effect.gen(function* () {
-      const body = JSON.stringify(toDocument(new Conflict({ detail: "Title taken" })));
+      const body = stringify(toDocument(new Conflict({ detail: "Title taken" })));
       const fromCause = yield* errorDocument(clientError(body, 409));
       expect(fromCause).toStrictEqual(decodeErrorDocument(body));
     }),

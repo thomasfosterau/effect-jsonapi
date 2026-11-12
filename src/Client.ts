@@ -125,6 +125,7 @@ import type {
   Target,
 } from "./Resource.js";
 import { relationships } from "./Resource.js";
+import { parse } from "./internal/json.js";
 
 /**
  * The minimal shape of a compound document value.
@@ -622,7 +623,7 @@ export const decodeErrorDocument = (
   // value, lifts to `None`: there is no document here, and this is an error
   // path already.
   Option.flatten(
-    Option.liftThrowable(() => decodeWireDocument(P.isString(body) ? JSON.parse(body) : body))(),
+    Option.liftThrowable(() => decodeWireDocument(P.isString(body) ? parse(body) : body))(),
   );
 
 /**
