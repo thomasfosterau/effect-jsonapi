@@ -6,6 +6,7 @@
  * @internal
  */
 import * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
@@ -412,15 +413,15 @@ export const decodeFilter = (
           `Missing required condition member ${render(member)}`,
         );
       });
-      const complete = Arr.isReadonlyArrayEmpty(missing);
-      const node = complete
-        ? condition(
-            { field: path!.key, operator: operator!.key, value: value!.key },
-            path!.value,
-            operator!.value,
-            value!.value,
-          )
-        : undefined;
+      const node =
+        path !== undefined && operator !== undefined && value !== undefined
+          ? condition(
+              { field: path.key, operator: operator.key, value: value.key },
+              path.value,
+              operator.value,
+              value.value,
+            )
+          : undefined;
       built.set(id, { kind: "condition", node, memberOf });
     } else {
       const conjunction = draft.members.get("conjunction");
@@ -472,7 +473,7 @@ export const decodeFilter = (
   const collect = (id: string, cycle: Set<string>): Set<string> => {
     if (cycle.has(id)) return cycle;
     cycle.add(id);
-    return collect(parentOf.get(id)!, cycle);
+    return collect(defined(parentOf.get(id)), cycle);
   };
   Arr.forEach(Arr.fromIterable(parentOf.keys()), (start) => {
     if (cyclic.has(start)) return;
@@ -480,8 +481,10 @@ export const decodeFilter = (
     if (Option.isNone(current)) return;
     // `current` is on a cycle; report it at the first cycle member in input order.
     const cycle = collect(current.value, new Set<string>());
-    const first = Arr.findFirst(built.keys(), (id) => cycle.has(id));
-    if (Option.isSome(first)) fail(built.get(first.value)!.memberOf!.key, "memberOf forms a cycle");
+    const first = Arr.findFirst(built, ([id, node]) =>
+      cycle.has(id) ? Option.fromNullishOr(node.memberOf) : Option.none(),
+    );
+    if (Option.isSome(first)) fail(first.value.key, "memberOf forms a cycle");
     Arr.forEach(cycle, (id) => {
       cyclic.add(id);
     });
@@ -502,16 +505,13 @@ export const decodeFilter = (
     list.push(id);
   });
   const build = (id: string): Node => {
-    const node = built.get(id)!;
-    if (node.kind === "condition") return node.node!;
+    const node = defined(built.get(id));
+    if (node.kind === "condition") return defined(node.node);
     const members = (children.get(id) ?? []).map(build);
-    const conjunction = node.conjunction!.value;
+    const { key: conjunctionKey, value: conjunction } = defined(node.conjunction);
     if (conjunction === "NOT") {
       if (members.length !== 1) {
-        fail(
-          node.conjunction!.key,
-          `A NOT group must have exactly one member, got ${members.length}`,
-        );
+        fail(conjunctionKey, `A NOT group must have exactly one member, got ${members.length}`);
         return { _tag: "And", members: [] };
       }
       return { _tag: "Not", member: members[0] };
@@ -559,6 +559,16 @@ export interface PreparedGroup {
 
 const SURROGATE = /[\uD800-\uDFFF]/;
 
+/**
+ * A value an invariant guarantees is present. An absent one is a defect in
+ * this module, so reading it throws rather than letting `undefined` flow on.
+ */
+const defined = <A>(value: A): NonNullable<A> =>
+  Option.getOrThrowWith(
+    Option.fromNullishOr(value),
+    () => new Cause.NoSuchElementError("An invariant guaranteed a value that is absent"),
+  );
+
 /** Code-point order on strings (`<` on strings is code-unit order). */
 export const compareCodePoints = (a: string, b: string): number => {
   if (a === b) return 0;
@@ -570,7 +580,7 @@ export const compareCodePoints = (a: string, b: string): number => {
     Arr.findFirst(cpsA, (cp, i) => {
       const other = cpsB[i];
       if (other === undefined || cp === other) return Option.none();
-      return Option.some(cp.codePointAt(0)! < other.codePointAt(0)! ? -1 : 1);
+      return Option.some(defined(cp.codePointAt(0)) < defined(other.codePointAt(0)) ? -1 : 1);
     }),
     () => (cpsA.length > cpsB.length ? 1 : cpsA.length < cpsB.length ? -1 : 0),
   );

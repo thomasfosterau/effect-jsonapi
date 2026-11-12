@@ -183,8 +183,9 @@ describe("blog example: fetching", () => {
     // without discriminating on `type`
     const author = document.included?.[0];
     expect(author?.attributes.firstName).toBe("Dan");
-    expectTypeOf(author!.attributes.firstName).toEqualTypeOf<string>();
-    expectTypeOf(author!.type).toEqualTypeOf<"people">();
+    assert(author !== undefined);
+    expectTypeOf(author.attributes.firstName).toEqualTypeOf<string>();
+    expectTypeOf(author.type).toEqualTypeOf<"people">();
   });
 
   it("404s with a typed error for unknown articles", async () => {

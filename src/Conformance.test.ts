@@ -3017,7 +3017,8 @@ describe("Conformance: the filter grammar profile", () => {
     // §2: a repeated `filter[…]` key is a 400.
     if (raw.getAll(key).length > 1) return Option.some(key);
     const segments = [...key.matchAll(/\[([^\]]*)\]/g)].map((match) => match[1]);
-    const value = raw.get(key)!;
+    const value = raw.get(key);
+    assert.exists(value);
     // Group form: filter[id][condition][member].
     if (segments.length === 3 && segments[1] === "condition") {
       const member = segments[2];
