@@ -186,10 +186,10 @@ export const nest = <V>(flat: { readonly [key: string]: V }) => {
  */
 export const flatten = (nested: { readonly [key: string]: unknown }) => {
   const flat: Record<string, unknown> = {};
-  Arr.forEach(Object.entries(nested), ([key, value]) => {
+  Arr.forEach(R.toEntries(nested), ([key, value]) => {
     if (value === undefined) return;
     if (P.isObject(value)) {
-      Arr.forEach(Object.entries(value), ([sub, subValue]) => {
+      Arr.forEach(R.toEntries(value), ([sub, subValue]) => {
         if (subValue === undefined) return;
         define(flat, `${key}[${sub}]`, subValue);
       });

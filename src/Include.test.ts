@@ -1,3 +1,5 @@
+import * as Option from "effect/Option";
+import * as HashMap from "effect/HashMap";
 import { it } from "@effect/vitest";
 import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
@@ -152,15 +154,15 @@ describe("make", () => {
   });
 
   it("maps each accepted path to the resource it resolves to (what a resolver loads)", () => {
-    expect(surface.targets.get("author")).toBe(Person);
-    expect(surface.targets.get("comments")).toBe(Comment);
-    expect(surface.targets.get("comments.author")).toBe(Person);
+    expect(HashMap.get(surface.targets, "author")).toEqual(Option.some(Person));
+    expect(HashMap.get(surface.targets, "comments")).toEqual(Option.some(Comment));
+    expect(HashMap.get(surface.targets, "comments.author")).toEqual(Option.some(Person));
     // Every prefix of an accepted path is itself accepted, so a level-by-level
     // walk can always look up the hop it is about to load.
     Arr.forEach(surface.paths, (path) => {
       const segments = path.split(".");
       Arr.forEach(segments, (_, index) => {
-        expect(surface.targets.has(segments.slice(0, index + 1).join("."))).toBe(true);
+        expect(HashMap.has(surface.targets, segments.slice(0, index + 1).join("."))).toBe(true);
       });
     });
   });

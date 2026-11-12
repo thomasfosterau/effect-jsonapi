@@ -76,6 +76,7 @@
  *
  * @since 0.1.0
  */
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -1363,7 +1364,9 @@ export {
 // collection — GET <path>, heterogeneous collection
 // ---------------------------------------------------------------------------
 
-const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)];
+// Resource definitions are deduplicated by identity: `Arr.dedupe` compares
+// structurally, which would hash whole schema graphs.
+const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => Arr.dedupeWith(values, Object.is);
 
 /**
  * The default compound `included` union of a heterogeneous collection
@@ -4385,7 +4388,7 @@ export const resource = <
       ? (relationshipsOpt as RelationshipsMap)
       : {};
     const relationships = resource.relationships as Record<string, Relationship.Descriptor>;
-    Arr.forEach(Object.keys(relationships), (name) => {
+    Arr.forEach(R.keys(relationships), (name) => {
       const captured = relationshipConfig(relMap, name);
       if (Option.isNone(captured)) return;
       const relConfig = captured.value;

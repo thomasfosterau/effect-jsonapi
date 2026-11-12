@@ -5,6 +5,8 @@
  *
  * @internal
  */
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
 import * as Match from "effect/Match";
@@ -225,7 +227,10 @@ interface ConditionKeys {
 
 interface Draft {
   readonly kind: "group" | "condition";
-  readonly members: Map<string, { readonly key: string; readonly value: string }>;
+  readonly members: MutableHashMap.MutableHashMap<
+    string,
+    { readonly key: string; readonly value: string }
+  >;
 }
 
 /**
@@ -236,9 +241,10 @@ export const decodeFilter = (
   fields: FieldCodecs,
   input: { readonly [key: string]: WireValue },
 ): Decoded => {
-  const issues = new Map<string, SchemaIssue.Issue>();
+  const issues = MutableHashMap.empty<string, SchemaIssue.Issue>();
   const fail = (key: string, message: string, value?: WireValue): undefined => {
-    if (!issues.has(key)) issues.set(key, pointed(key, message, value));
+    if (!MutableHashMap.has(issues, key))
+      MutableHashMap.set(issues, key, pointed(key, message, value));
     return undefined;
   };
 
@@ -308,10 +314,10 @@ export const decodeFilter = (
   };
 
   const roots: Array<Node> = [];
-  const drafts = new Map<string, Draft>();
+  const drafts = MutableHashMap.empty<string, Draft>();
   // Ids seen as both a group and a condition: reported once, at the first key
   // of the second kind.
-  const conflicted = new Set<string>();
+  const conflicted = MutableHashSet.empty<string>();
 
   // The raw text of an entry's value, or `None` (after reporting) when a key
   // repeats where no comma list is possible.
@@ -347,21 +353,21 @@ export const decodeFilter = (
       fail(key, `Unknown ${kind} member ${render(member)}; expected one of ${allowed.join(", ")}`);
       return;
     }
-    let draft = drafts.get(id);
+    let draft = Option.getOrUndefined(MutableHashMap.get(drafts, id));
     if (draft === undefined) {
-      draft = { kind, members: new Map() };
-      drafts.set(id, draft);
+      draft = { kind, members: MutableHashMap.empty() };
+      MutableHashMap.set(drafts, id, draft);
     } else if (draft.kind !== kind) {
-      if (!conflicted.has(id)) {
-        conflicted.add(id);
+      if (!MutableHashSet.has(conflicted, id)) {
+        MutableHashSet.add(conflicted, id);
         fail(key, `Filter id ${render(id)} is used as both a group and a condition`);
       }
       return;
     }
-    draft.members.set(member, { key, value: raw });
+    MutableHashMap.set(draft.members, member, { key, value: raw });
   };
 
-  Arr.forEach(Object.entries(input), ([key, value]) => {
+  Arr.forEach(R.toEntries(input), ([key, value]) => {
     if (value === undefined) return;
     const segments = keySegments(key);
     const raw = rawOf(key, value, segments);
@@ -392,13 +398,13 @@ export const decodeFilter = (
     readonly conjunction?: { readonly key: string; readonly value: string } | undefined;
     readonly memberOf?: { readonly key: string; readonly value: string } | undefined;
   }
-  const built = new Map<string, Built>();
+  const built = MutableHashMap.empty<string, Built>();
   Arr.forEach(drafts, ([id, draft]) => {
-    const memberOf = draft.members.get("memberOf");
+    const memberOf = Option.getOrUndefined(MutableHashMap.get(draft.members, "memberOf"));
     if (draft.kind === "condition") {
-      const path = draft.members.get("path");
-      const operator = draft.members.get("operator");
-      const value = draft.members.get("value");
+      const path = Option.getOrUndefined(MutableHashMap.get(draft.members, "path"));
+      const operator = Option.getOrUndefined(MutableHashMap.get(draft.members, "operator"));
+      const value = Option.getOrUndefined(MutableHashMap.get(draft.members, "value"));
       const missing = Arr.filter(
         [
           ["path", path],
@@ -422,9 +428,9 @@ export const decodeFilter = (
               value.value,
             )
           : undefined;
-      built.set(id, { kind: "condition", node, memberOf });
+      MutableHashMap.set(built, id, { kind: "condition", node, memberOf });
     } else {
-      const conjunction = draft.members.get("conjunction");
+      const conjunction = Option.getOrUndefined(MutableHashMap.get(draft.members, "conjunction"));
       if (conjunction === undefined) {
         fail(`filter[${id}][group][conjunction]`, `Missing required group member "conjunction"`);
       } else if (!isConjunction(conjunction.value)) {
@@ -434,15 +440,15 @@ export const decodeFilter = (
           conjunction.value,
         );
       }
-      built.set(id, { kind: "group", conjunction, memberOf });
+      MutableHashMap.set(built, id, { kind: "group", conjunction, memberOf });
     }
   });
 
   // Parents must be declared groups, and the parent chain must be acyclic.
-  const parentOf = new Map<string, string>();
+  const parentOf = MutableHashMap.empty<string, string>();
   Arr.forEach(built, ([id, node]) => {
     if (node.memberOf === undefined) return;
-    const target = built.get(node.memberOf.value);
+    const target = Option.getOrUndefined(MutableHashMap.get(built, node.memberOf.value));
     if (target === undefined) {
       fail(
         node.memberOf.key,
@@ -456,58 +462,66 @@ export const decodeFilter = (
         node.memberOf.value,
       );
     } else {
-      parentOf.set(id, node.memberOf.value);
+      MutableHashMap.set(parentOf, id, node.memberOf.value);
     }
   });
-  const cyclic = new Set<string>();
-  const parentOfId = (id: string): Option.Option<string> =>
-    Option.fromUndefinedOr(parentOf.get(id));
+  const cyclic = MutableHashSet.empty<string>();
+  const parentOfId = (id: string): Option.Option<string> => MutableHashMap.get(parentOf, id);
   // Follows the parent chain from `id` until it runs out (`None`) or reaches a
   // node already in `seen`, which it returns.
-  const follow = (id: Option.Option<string>, seen: Set<string>): Option.Option<string> => {
-    if (Option.isNone(id) || seen.has(id.value)) return id;
-    seen.add(id.value);
+  const follow = (
+    id: Option.Option<string>,
+    seen: MutableHashSet.MutableHashSet<string>,
+  ): Option.Option<string> => {
+    if (Option.isNone(id) || MutableHashSet.has(seen, id.value)) return id;
+    MutableHashSet.add(seen, id.value);
     return follow(parentOfId(id.value), seen);
   };
   // The members of the cycle that `id` is on.
-  const collect = (id: string, cycle: Set<string>): Set<string> => {
-    if (cycle.has(id)) return cycle;
-    cycle.add(id);
-    return collect(defined(parentOf.get(id)), cycle);
+  const collect = (
+    id: string,
+    cycle: MutableHashSet.MutableHashSet<string>,
+  ): MutableHashSet.MutableHashSet<string> => {
+    if (MutableHashSet.has(cycle, id)) return cycle;
+    MutableHashSet.add(cycle, id);
+    return collect(defined(Option.getOrUndefined(MutableHashMap.get(parentOf, id))), cycle);
   };
-  Arr.forEach(Arr.fromIterable(parentOf.keys()), (start) => {
-    if (cyclic.has(start)) return;
-    const current = follow(parentOfId(start), new Set<string>([start]));
+  Arr.forEach(Arr.fromIterable(MutableHashMap.keys(parentOf)), (start) => {
+    if (MutableHashSet.has(cyclic, start)) return;
+    const current = follow(parentOfId(start), MutableHashSet.make(start));
     if (Option.isNone(current)) return;
     // `current` is on a cycle; report it at the first cycle member in input order.
-    const cycle = collect(current.value, new Set<string>());
+    const cycle = collect(current.value, MutableHashSet.empty<string>());
     const first = Arr.findFirst(built, ([id, node]) =>
-      cycle.has(id) ? Option.fromNullishOr(node.memberOf) : Option.none(),
+      MutableHashSet.has(cycle, id) ? Option.fromNullishOr(node.memberOf) : Option.none(),
     );
     if (Option.isSome(first)) fail(first.value.key, "memberOf forms a cycle");
     Arr.forEach(cycle, (id) => {
-      cyclic.add(id);
+      MutableHashSet.add(cyclic, id);
     });
   });
 
-  if (issues.size > 0) return { _tag: "Issues", issues: [...issues.values()] };
+  if (MutableHashMap.size(issues) > 0)
+    return { _tag: "Issues", issues: Arr.fromIterable(MutableHashMap.values(issues)) };
 
   // Assemble the tree from the leaves up.
-  const children = new Map<string, Array<string>>();
+  const children = MutableHashMap.empty<string, Array<string>>();
   Arr.forEach(built, ([id, node]) => {
     const parent = node.memberOf?.value;
     if (parent === undefined) return;
-    let list = children.get(parent);
+    let list = Option.getOrUndefined(MutableHashMap.get(children, parent));
     if (list === undefined) {
       list = [];
-      children.set(parent, list);
+      MutableHashMap.set(children, parent, list);
     }
     list.push(id);
   });
   const build = (id: string): Node => {
-    const node = defined(built.get(id));
+    const node = defined(Option.getOrUndefined(MutableHashMap.get(built, id)));
     if (node.kind === "condition") return defined(node.node);
-    const members = (children.get(id) ?? []).map(build);
+    const members = Option.getOrElse(MutableHashMap.get(children, id), (): Array<string> => []).map(
+      build,
+    );
     const { key: conjunctionKey, value: conjunction } = defined(node.conjunction);
     if (conjunction === "NOT") {
       if (members.length !== 1) {
@@ -521,7 +535,8 @@ export const decodeFilter = (
   Arr.forEach(built, ([id, node]) => {
     if (node.memberOf === undefined) roots.push(build(id));
   });
-  if (issues.size > 0) return { _tag: "Issues", issues: [...issues.values()] };
+  if (MutableHashMap.size(issues) > 0)
+    return { _tag: "Issues", issues: Arr.fromIterable(MutableHashMap.values(issues)) };
 
   if (Arr.isReadonlyArrayEmpty(roots)) {
     return {
@@ -737,7 +752,7 @@ const shorthand = (root: Prepared): ReadonlyArray<readonly [string, string]> | u
   const pairs = conditions.map(shorthandPair);
   // A key names one condition; two conditions on the same key (the same field
   // and operator, or a bare `eq` next to a bare `in`) need the group form.
-  if (new Set(pairs.map(([key]) => key)).size !== pairs.length) return undefined;
+  if (Arr.dedupe(pairs.map(([key]) => key)).length !== pairs.length) return undefined;
   return Arr.sort(
     pairs,
     orderOf<(typeof pairs)[number]>(([a], [b]) => compareCodePoints(a, b)),

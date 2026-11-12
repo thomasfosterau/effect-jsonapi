@@ -27,6 +27,7 @@
  *
  * @since 0.16.0
  */
+import * as R from "effect/Record";
 import type * as Context from "effect/Context";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -211,8 +212,8 @@ export const checkFamily = (api: ApiLike, family: Family): void => {
       message: `API family "${family.group}" has no group in the HttpApi`,
     });
   }
-  const endpointNames = Arr.sort(Object.keys(group.endpoints), Order.String);
-  const handlerNames = Arr.sort(Object.keys(family.handlers), Order.String);
+  const endpointNames = Arr.sort(R.keys(group.endpoints), Order.String);
+  const handlerNames = Arr.sort(R.keys(family.handlers), Order.String);
   if (endpointNames.join(",") !== handlerNames.join(",")) {
     throw new FamilyMismatch({
       group: family.group,
@@ -325,7 +326,7 @@ export const familyLayer = <R>(
     options?.respond ?? (<A, E>(effect: Effect.Effect<A, E, R>) => ServerErrors.respond(effect));
   // reason: a dynamic fold over the handler record; completeness is the runtime check above
   const fold = (handlers: any): any =>
-    Object.entries(family.handlers).reduce(
+    R.toEntries(family.handlers).reduce(
       (current: any, [name, handler]) =>
         current.handle(name, (request: never) => respond(handler(request))),
       handlers,
