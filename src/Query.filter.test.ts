@@ -21,6 +21,7 @@ import * as Group from "./Group.js";
 import { literalEncoder, operatorCheck } from "./internal/filter.js";
 import * as Middleware from "./Middleware.js";
 import * as Query from "./Query.js";
+import { platformLayer } from "./Registry.js";
 import * as Relationship from "./Relationship.js";
 import { attribute, filterable, make as Resource, readOnlyAttribute } from "./Resource.js";
 import type { FilterableKeys } from "./Resource.js";
@@ -1421,12 +1422,11 @@ describe("Endpoint.list with filter: true, end to end", () => {
   );
 
   const request = async (url: string) => {
-    // SAFETY: every middleware the api's endpoints require is provided here; the
-    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
     const appLayer = HttpApiBuilder.layer(Api).pipe(
       Layer.provide(ArticlesLive),
       Layer.provide(Middleware.layer),
-    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+      Layer.provide(platformLayer),
+    );
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
     onTestFinished(() => dispose());
     const response = await handler(new Request(url));

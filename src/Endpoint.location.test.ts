@@ -7,7 +7,6 @@
  * `Middleware.CreatedLocation`, which copies that link into the header.
  */
 import { describe, expect, it, onTestFinished } from "vite-plus/test";
-import { cast } from "effect/Function";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -15,10 +14,12 @@ import * as Stream from "effect/Stream";
 import { HttpRouter } from "effect/http";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
+import type { HttpApiGroup } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
 import * as Idempotency from "./Idempotency.js";
 import * as Middleware from "./Middleware.js";
+import { platformLayer } from "./Registry.js";
 import { make as Resource } from "./Resource.js";
 import { MEDIA_TYPE } from "./internal/media.js";
 
@@ -46,10 +47,25 @@ type CreateOptions = { readonly status?: number; readonly idempotency?: Idempote
 const createApi = (options: CreateOptions = {}) =>
   HttpApi.make("blog").add(Group.make(Article, Endpoint.create(Article, options)));
 
-// The builder's handlers reduced to the one method this harness calls.
+// The handlers a harness registers, keyed by an index signature as the erased
+// group's endpoint map is.
 interface LooseHandlers {
-  readonly handle: (name: string, handler: () => Effect.Effect<unknown>) => LooseHandlers;
+  readonly [endpoint: string]: () => Effect.Effect<unknown, unknown>;
 }
+
+// One group of the erased api: its identifier erased too, so the builder
+// matches every handler against the erased endpoint. The erased endpoint
+// leaves its middleware untyped, so the layer names the middleware `server`
+// provides.
+const liveGroup = (
+  api: HttpApi.Top,
+  group: string,
+  handlers: LooseHandlers,
+): Layer.Layer<
+  HttpApiGroup.Service<string, string>,
+  never,
+  Layer.Success<typeof Middleware.layer> | Idempotency.Middleware
+> => HttpApiBuilder.group(api, group, (builder) => builder.handleAll(handlers));
 
 // One server per test, over the package's own middleware set, so the header is
 // observed on the wire exactly as a client receives it. Disposed when the test
@@ -61,19 +77,16 @@ const server = (options: {
 }) => {
   // SAFETY: the handlers deliberately answer outside the endpoint's declared
   // success type (raw responses, malformed bodies) — this harness asserts the
-  // wire, not the types — so the group is built untyped.
-  const live = HttpApiBuilder.group(
-    options.api as HttpApi.Top,
-    "articles",
-    cast((handlers: LooseHandlers) => handlers.handle("create", options.handle)),
-  );
-  // SAFETY: every middleware the api's endpoints require is provided here; the
-  // platform services `HttpApiBuilder.layer` lists are unused by these routes.
-  const appLayer = HttpApiBuilder.layer(options.api as never).pipe(
+  // wire, not the types — so the group is built over the erased api, whose
+  // groups and endpoints the builder reads at runtime all the same.
+  const api = options.api as HttpApi.Top;
+  const live = liveGroup(api, "articles", { create: options.handle });
+  const appLayer = HttpApiBuilder.layer(api).pipe(
     Layer.provide(live),
     Layer.provide(Middleware.layer),
     Layer.provide(Idempotency.layer(options.store ?? Idempotency.memoryStore())),
-  ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+    Layer.provide(platformLayer),
+  );
   const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
   onTestFinished(() => dispose());
   return async (key?: string) => {

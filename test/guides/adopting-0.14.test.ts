@@ -32,6 +32,7 @@ import {
   MEDIA_TYPE,
   Middleware,
   Query,
+  Registry,
   Relationship,
   Resource,
 } from "@thomasfosterau/effect-jsonapi";
@@ -350,12 +351,11 @@ describe("the 400 for a rejected include path publishes the legal set", () => {
       .handle("list", () => Effect.succeed(Handlers.collection([bibliography]))),
   );
   const request = async (url: string) => {
-    // SAFETY: every middleware the api's endpoints require is provided here; the
-    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
-    const appLayer = HttpApiBuilder.layer(Api as never).pipe(
+    const appLayer = HttpApiBuilder.layer(Api).pipe(
       Layer.provide(Live),
       Layer.provide(Middleware.layer),
-    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+      Layer.provide(Registry.platformLayer),
+    );
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
     onTestFinished(() => dispose());
     const response = await handler(new Request(url, { headers: { accept: MEDIA_TYPE } }));

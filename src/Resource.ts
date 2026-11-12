@@ -2412,47 +2412,50 @@ const parseScalar = (kind: ScalarKind, input: string): Option.Option<string | nu
 // → scalar (strictly) → the attribute schema's own decoder, and the reverse on
 // encode. `target` is the attribute schema with any `NullOr` stripped, so the
 // codec's `Type` never includes `null`.
-const scalarLiteral = (kind: ScalarKind, target: Schema.Top): Schema.Codec<unknown, string> =>
-  cast(
-    Schema.String.pipe(
-      Schema.decodeTo(
-        target,
-        SchemaTransformation.transformEffect<unknown, string>({
-          decode: (input, options) => {
-            return Effect.fromOption(
-              parseScalar(kind, input),
-              () =>
+const scalarLiteral = (kind: ScalarKind, target: Schema.Top): Schema.Codec<unknown, string> => {
+  const literal: Schema.Codec<unknown, string, unknown, unknown> = Schema.String.pipe(
+    Schema.decodeTo(
+      target,
+      SchemaTransformation.transformEffect<unknown, string>({
+        decode: (input, options) => {
+          return Effect.fromOption(
+            parseScalar(kind, input),
+            () =>
+              new SchemaIssue.InvalidValue(
+                { message: `Expected a ${kind} filter literal, got ${render(input)}` },
+                input,
+                options,
+              ),
+          );
+        },
+        // `target` has already validated and encoded the value, so it arrives
+        // here as a scalar of `kind`; the one thing left to refuse is a
+        // non-finite number — `NaN` / `±Infinity` are numbers `Schema.Number`
+        // admits but the decoder above rejects, and refusing them keeps
+        // `decode ∘ encode` total. They are rendered with `String`:
+        // `JSON.stringify` writes all three as `null`, which reads as a NULL
+        // literal. (`null` itself never reaches here either — `target`
+        // rejects it first; the tree encoder in `internal/filter.ts` names it.)
+        encode: (value, options) =>
+          kind !== "number" || Number.isFinite(value)
+            ? Effect.succeed(String(value))
+            : Effect.fail(
                 new SchemaIssue.InvalidValue(
-                  { message: `Expected a ${kind} filter literal, got ${render(input)}` },
-                  input,
+                  {
+                    message: `Expected a finite number to encode as a filter literal, got ${String(value)}`,
+                  },
+                  value,
                   options,
                 ),
-            );
-          },
-          // `target` has already validated and encoded the value, so it arrives
-          // here as a scalar of `kind`; the one thing left to refuse is a
-          // non-finite number — `NaN` / `±Infinity` are numbers `Schema.Number`
-          // admits but the decoder above rejects, and refusing them keeps
-          // `decode ∘ encode` total. They are rendered with `String`:
-          // `JSON.stringify` writes all three as `null`, which reads as a NULL
-          // literal. (`null` itself never reaches here either — `target`
-          // rejects it first; the tree encoder in `internal/filter.ts` names it.)
-          encode: (value, options) =>
-            kind !== "number" || Number.isFinite(value)
-              ? Effect.succeed(String(value))
-              : Effect.fail(
-                  new SchemaIssue.InvalidValue(
-                    {
-                      message: `Expected a finite number to encode as a filter literal, got ${String(value)}`,
-                    },
-                    value,
-                    options,
-                  ),
-                ),
-        }),
-      ),
+              ),
+      }),
     ),
   );
+  // SAFETY: only the service channels narrow. A filter literal is decoded and
+  // encoded by the query middleware, which provides no services, so the
+  // scalar attribute schemas it is derived from require none.
+  return literal as Schema.Codec<unknown, string>;
+};
 
 // Derives the literal codec for a filterable attribute from its schema, or
 // throws when the schema's encoded form is not a JSON scalar. Called from
@@ -3686,6 +3689,11 @@ export const extend = <
     ),
   };
   // `id` is a member only when one was given or inherited.
+  // A double assertion, not a single one: the spread maps are not provably
+  // `ExtendedAttributes` / `ExtendedRelationships` (`Struct.Assign`) while
+  // the base and extra maps are generic, nor the id `ExtendedId`, so `make`'s
+  // result and `extend`'s are not comparable; an overload would restate the
+  // whole signature to the same effect.
   return cast(id === undefined ? make(type, declaration) : make(type, { ...declaration, id }));
 };
 
@@ -4004,6 +4012,9 @@ export function family(nameOrBase: string | Any, members: ReadonlyArray<Any>): A
   // The default `included` union: every member's non-`paginated` targets.
   const includedUnion = () => Schema.Union(dedupe(members.flatMap(directTargets)));
 
+  // A double assertion, not a single one: the object is not yet a family —
+  // `relationships` is defined lazily below — and its `document` /
+  // `collection` are erased over the generic signatures `Family` declares.
   const fam: AnyFamily = cast(
     Object.assign(memberUnion, {
       type: name,

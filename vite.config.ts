@@ -154,8 +154,8 @@ export default defineConfig({
       "typescript/no-generated-empty-object-type": "warn",
       // `@effect/tsgo`'s preset sets its rules at `warn`; the `correctness` /
       // `suspicious` categories above raised these three to `error`. Back at
-      // the preset's level, counted: 90 sites (79 in tests and examples),
-      // and 24 (all in tests and examples). The tsc gate leaves both off.
+      // the preset's level, counted: 23 sites (11 in tests and examples),
+      // and 24 (23 in tests and examples). The tsc gate leaves both off.
       "effecttsgo/any-unknown-in-error-context": "warn",
       "effecttsgo/unsafe-effect-type-assertion": "warn",
       // At zero sites: the preset's `warn`, raised so a new one fails the gate.

@@ -2,7 +2,6 @@ import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import { it } from "@effect/vitest";
 import * as Arr from "effect/Array";
-import { cast } from "effect/Function";
 import type * as Scope from "effect/Scope";
 import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf, onTestFinished } from "vite-plus/test";
@@ -12,6 +11,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
+import type { HttpApiGroup } from "effect/http-api";
 import {
   HttpApi,
   HttpApiBuilder,
@@ -292,22 +292,43 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     ),
 );
 
-// The builder's handlers reduced to the one method these tests call: they
-// answer with minimal documents, deliberately looser than each endpoint's
-// declared success type, so the builder's per-endpoint inference is bypassed.
+// The handlers these tests register answer with minimal documents,
+// deliberately looser than each endpoint's declared success type, so their
+// group is built over the erased api — keyed by an index signature, as the
+// erased group's endpoint map is.
 interface LooseHandlers {
-  readonly handle: (
-    name: string,
-    handler: () => Effect.Effect<unknown, unknown, unknown>,
-  ) => LooseHandlers;
+  readonly [endpoint: string]: () => Effect.Effect<unknown, unknown>;
 }
 
-const liveGroup = (
+// A group layer over the erased api. The erased endpoint leaves its middleware
+// untyped, so the layer names the middleware `serve` provides.
+type LiveGroup = Layer.Layer<
+  HttpApiGroup.Service<string, string>,
+  never,
+  Layer.Success<typeof Middleware.layer>
+>;
+
+// SAFETY: an `HttpApi` with its identifier and groups erased; the builder
+// reads the groups and endpoints at runtime all the same.
+const erase = (api: HttpApi.Constraint): HttpApi.Top => api as HttpApi.Top;
+
+const liveGroup = (api: HttpApi.Constraint, group: string, handlers: LooseHandlers): LiveGroup =>
+  HttpApiBuilder.group(erase(api), group, (builder) => builder.handleAll(handlers));
+
+// The web handler over one group of the erased api, the middleware and the
+// registry's no-op platform provided.
+const serve = (
   api: HttpApi.Constraint,
-  group: string,
-  build: (handlers: LooseHandlers) => LooseHandlers,
-): Layer.Layer<never, unknown, unknown> =>
-  cast(HttpApiBuilder.group(api as HttpApi.Top, group, cast(build)));
+  live: LiveGroup,
+  middleware: Layer.Layer<Layer.Success<typeof Middleware.layer>>,
+) =>
+  HttpRouter.toWebHandler(
+    HttpApiBuilder.layer(erase(api)).pipe(
+      Layer.provide(live),
+      Layer.provide(middleware),
+      Layer.provide(platformLayer),
+    ),
+  );
 
 const buildClient = HttpApiTest.groups(Api, ["articles"]);
 
@@ -1503,18 +1524,20 @@ describe("Endpoint.delete success override", () => {
 
   // The 204 default and a document success differ only in the response, so the
   // assertions are on the wire: status and content type.
+  // Each api is served through its own typed group layer.
   const request = async (
-    api: HttpApi.Constraint,
-    live: Layer.Layer<never, unknown, unknown>,
+    apiLayer: Layer.Layer<
+      never,
+      never,
+      | HttpRouter.HttpRouter
+      | Layer.Success<typeof platformLayer>
+      | Layer.Success<typeof Middleware.layer>
+    >,
     url: string,
   ) => {
-    // SAFETY: every middleware the api's endpoints require is provided here; the
-    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
-    const appLayer = HttpApiBuilder.layer(api as never).pipe(
-      Layer.provide(live),
-      Layer.provide(Middleware.layer),
-    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
-    const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
+    const { dispose, handler } = HttpRouter.toWebHandler(
+      apiLayer.pipe(Layer.provide(Middleware.layer), Layer.provide(platformLayer)),
+    );
     onTestFinished(() => dispose());
     const response = await handler(new Request(url, { method: "DELETE" }));
     const text = await response.text();
@@ -1526,13 +1549,19 @@ describe("Endpoint.delete success override", () => {
   };
 
   it("answers 204 with an empty body when no `success` is given (regression: unchanged default)", async () => {
-    const response = await request(Api, ArticlesLive, "http://localhost/articles/1");
+    const response = await request(
+      HttpApiBuilder.layer(Api).pipe(Layer.provide(ArticlesLive)),
+      "http://localhost/articles/1",
+    );
     expect(response.status).toBe(204);
     expect(response.body).toBeUndefined();
   });
 
   it("answers 200 with the tombstone document when `success` is a resource document", async () => {
-    const response = await request(TombstoneApi, TombstoneLive, "http://localhost/articles/1");
+    const response = await request(
+      HttpApiBuilder.layer(TombstoneApi).pipe(Layer.provide(TombstoneLive)),
+      "http://localhost/articles/1",
+    );
     expect(response.status).toBe(200);
     expect(response.contentType).toContain(MEDIA_TYPE);
     expect(response.body).toMatchObject({
@@ -1547,7 +1576,10 @@ describe("Endpoint.delete success override", () => {
     const AcceptedLive = HttpApiBuilder.group(AcceptedApi, "articles", (handlers) =>
       handlers.handle("delete", () => Effect.succeed({ data: sampleArticle })),
     );
-    const response = await request(AcceptedApi, AcceptedLive, "http://localhost/articles/1");
+    const response = await request(
+      HttpApiBuilder.layer(AcceptedApi).pipe(Layer.provide(AcceptedLive)),
+      "http://localhost/articles/1",
+    );
     expect(response.status).toBe(202);
     expect(response.body).toMatchObject({ data: { type: "articles", id: "1" } });
   });
@@ -2186,18 +2218,12 @@ describe("Endpoint.create / Endpoint.update status override", () => {
   // wire — what a real web handler actually answers.
   const request = async (
     api: HttpApi.Constraint,
-    live: Layer.Layer<never, unknown, unknown>,
+    live: LiveGroup,
     method: string,
     url: string,
     body: Schema.Json,
   ) => {
-    // SAFETY: every middleware the api's endpoints require is provided here; the
-    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
-    const appLayer = HttpApiBuilder.layer(api as never).pipe(
-      Layer.provide(live),
-      Layer.provide(Middleware.layer),
-    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
-    const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
+    const { dispose, handler } = serve(api, live, Middleware.layer);
     onTestFinished(() => dispose());
     const response = await handler(
       new Request(url, {
@@ -2233,12 +2259,11 @@ describe("Endpoint.create / Endpoint.update status override", () => {
     ...endpoints: readonly [HttpApiEndpoint.Top, ...ReadonlyArray<HttpApiEndpoint.Top>]
   ) => HttpApi.make(name).add(Group.make(Article, ...endpoints));
 
-  const writesLive = (api: HttpApi.Constraint): Layer.Layer<never, unknown, unknown> =>
-    liveGroup(api, "articles", (handlers) =>
-      handlers
-        .handle("create", () => Effect.succeed({ data: sampleArticle }))
-        .handle("update", () => Effect.succeed({ data: sampleArticle })),
-    );
+  const writesLive = (api: HttpApi.Constraint): LiveGroup =>
+    liveGroup(api, "articles", {
+      create: () => Effect.succeed({ data: sampleArticle }),
+      update: () => Effect.succeed({ data: sampleArticle }),
+    });
 
   const roundTrip = async (createOptions?: WriteOptions, updateOptions?: WriteOptions) => {
     const api = writesApi(
@@ -2357,20 +2382,10 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
   // The router matches a request's `Content-Type` against the payload's
   // registration and answers 415 on a mismatch, so the only honest assertion is
   // a real request at each label.
-  const post = async (
-    api: HttpApi.Constraint,
-    live: Layer.Layer<never, unknown, unknown>,
-    contentType: string,
-  ) => {
-    // SAFETY: every middleware the api's endpoints require is provided here; the
-    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
-    const appLayer = HttpApiBuilder.layer(api as never).pipe(
-      Layer.provide(live),
-      // the host negotiated §6 upstream; the package's own §5 check would
-      // otherwise reject exactly the request this option exists to admit
-      Layer.provide(Middleware.layerHostNegotiated),
-    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
-    const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
+  const post = async (api: HttpApi.Constraint, live: LiveGroup, contentType: string) => {
+    // the host negotiated §6 upstream; the package's own §5 check would
+    // otherwise reject exactly the request this option exists to admit
+    const { dispose, handler } = serve(api, live, Middleware.layerHostNegotiated);
     onTestFinished(() => dispose());
     const response = await handler(
       new Request("http://localhost/articles", {
@@ -2390,9 +2405,9 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
     const api = HttpApi.make(name).add(
       Group.make(Article, Endpoint.create(Article, { payload: Article.createInput, ...options })),
     );
-    const live = liveGroup(api, "articles", (handlers) =>
-      handlers.handle("create", () => Effect.succeed({ data: sampleArticle })),
-    );
+    const live = liveGroup(api, "articles", {
+      create: () => Effect.succeed({ data: sampleArticle }),
+    });
     return { api, live };
   };
 
@@ -2416,16 +2431,10 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
     const api = HttpApi.make("plain-request-jsonapi-response").add(
       Group.make(Article, Endpoint.create(Article, { payloadMediaType: "application/json" })),
     );
-    const live = liveGroup(api, "articles", (handlers) =>
-      handlers.handle("create", () => Effect.succeed({ data: sampleArticle })),
-    );
-    // SAFETY: every middleware the api's endpoints require is provided here; the
-    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
-    const appLayer = HttpApiBuilder.layer(api as never).pipe(
-      Layer.provide(live),
-      Layer.provide(Middleware.layerHostNegotiated),
-    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
-    const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
+    const live = liveGroup(api, "articles", {
+      create: () => Effect.succeed({ data: sampleArticle }),
+    });
+    const { dispose, handler } = serve(api, live, Middleware.layerHostNegotiated);
     onTestFinished(() => dispose());
     const response = await handler(
       new Request("http://localhost/articles", {
@@ -2471,11 +2480,10 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
         },
       }),
     );
-    const live = liveGroup(api, "articles", (handlers) =>
-      handlers
-        .handle("create", () => Effect.succeed({ data: sampleArticle }))
-        .handle("update", () => Effect.succeed({ data: sampleArticle })),
-    );
+    const live = liveGroup(api, "articles", {
+      create: () => Effect.succeed({ data: sampleArticle }),
+      update: () => Effect.succeed({ data: sampleArticle }),
+    });
     expect((await post(api, live, "application/json")).status).toBe(201);
     expect((await post(api, live, MEDIA_TYPE)).status).toBe(415);
   });
@@ -2492,11 +2500,10 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
         },
       }),
     );
-    const live = liveGroup(api, "articles", (handlers) =>
-      handlers
-        .handle("create", () => Effect.succeed({ data: sampleArticle }))
-        .handle("update", () => Effect.succeed({ data: sampleArticle })),
-    );
+    const live = liveGroup(api, "articles", {
+      create: () => Effect.succeed({ data: sampleArticle }),
+      update: () => Effect.succeed({ data: sampleArticle }),
+    });
     expect((await post(api, live, MEDIA_TYPE)).status).toBe(201);
     expect((await post(api, live, "application/json")).status).toBe(415);
   });
@@ -2634,12 +2641,11 @@ describe("HTTP round-trip with repeated ?include= keys", () => {
   );
 
   const request = async (url: string) => {
-    // SAFETY: every middleware the api's endpoints require is provided here; the
-    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
-    const appLayer = HttpApiBuilder.layer(IncludeApi as never).pipe(
+    const appLayer = HttpApiBuilder.layer(IncludeApi).pipe(
       Layer.provide(IncludeLive),
       Layer.provide(Middleware.layer),
-    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+      Layer.provide(platformLayer),
+    );
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
     onTestFinished(() => dispose());
     const response = await handler(new Request(url, { headers: { accept: MEDIA_TYPE } }));
@@ -2833,12 +2839,11 @@ describe("Endpoint constructors with an injected id schema", () => {
         .handle("delete", () => Effect.void),
     );
 
-    // SAFETY: every middleware the api's endpoints require is provided here; the
-    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
-    const appLayer = HttpApiBuilder.layer(InvoiceApi as never).pipe(
+    const appLayer = HttpApiBuilder.layer(InvoiceApi).pipe(
       Layer.provide(InvoiceLive),
       Layer.provide(Middleware.layer),
-    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+      Layer.provide(platformLayer),
+    );
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
     onTestFinished(() => dispose());
     const response = await handler(
