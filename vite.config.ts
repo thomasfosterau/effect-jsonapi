@@ -147,7 +147,6 @@ export default defineConfig({
       "effect/avoid-any": "warn",
       "effect/avoid-untagged-errors": "warn",
       "effect/prefer-effect-is": "warn",
-      "effect/effect-run-in-body": "warn",
       "effect/prefer-option-over-null": "warn",
       // ---- Type-aware rules (tsgolint): staged rollout (#535) ------------
       // `typeAware` turned these on. Each sits at `warn` with its count on

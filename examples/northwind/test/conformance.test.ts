@@ -8,9 +8,12 @@
  * here), and a disappearing one means a fixed bug whose entry should come
  * off this list.
  */
-import { describe, expect, it } from "vite-plus/test";
+import { layer } from "@effect/vitest";
+import { expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
 import { HttpApiTest } from "effect/http-api";
@@ -160,7 +163,14 @@ const resolveSamples = Effect.fn("resolveSamples")(function* () {
 
 // The samples are resolved first, against the store as seeded, then the suite
 // runs against the same layer.
-const { report, resolved } = await Effect.runPromise(
+/** The one run every test below reads, built once for the suite. */
+class Run extends Context.Service<
+  Run,
+  { readonly report: Conformance.Report; readonly resolved: Record<keyof typeof IDS, string> }
+>()("example/Run") {}
+
+const RunLive = Layer.effect(
+  Run,
   Effect.all(
     {
       resolved: resolveSamples(),
@@ -173,171 +183,203 @@ const { report, resolved } = await Effect.runPromise(
   }>,
 );
 
-describe("northwind: JSON:API conformance", () => {
-  it("decided every rule it ran: none died", () => {
-    // The message carries the whole report, so a dead rule explains itself
-    // alongside its neighbours; the diff names each dead rule and its defect.
-    expect(
-      died(report),
-      `a rule died — a defect, not a finding\n${Conformance.format(report)}`,
-    ).toEqual([]);
-  });
+layer(RunLive)("northwind: JSON:API conformance", (it) => {
+  it.effect("decided every rule it ran: none died", () =>
+    Effect.gen(function* () {
+      const { report } = yield* Run;
+      // The message carries the whole report, so a dead rule explains itself
+      // alongside its neighbours; the diff names each dead rule and its defect.
+      expect(
+        died(report),
+        `a rule died — a defect, not a finding\n${Conformance.format(report)}`,
+      ).toEqual([]);
+    }),
+  );
 
-  it("samples an id the example holds for every resource type", () => {
-    // An `ids` entry the example does not hold fails no rule: the read endpoints
-    // answer 404, and the rules that resolve `/:type/:id` see less of the api
-    // (#301). This is the direct guard: each sample fetched through its own
-    // `get` endpoint, independent of how the kit words anything in its report.
-    // Keyed by type, so the returned `data.id`s are compared with `IDS` entry by
-    // entry and a sample that does not resolve shows up under its type.
-    expect(resolved).toEqual(IDS);
-  });
+  it.effect("samples an id the example holds for every resource type", () =>
+    Effect.gen(function* () {
+      const { resolved } = yield* Run;
+      // An `ids` entry the example does not hold fails no rule: the read endpoints
+      // answer 404, and the rules that resolve `/:type/:id` see less of the api
+      // (#301). This is the direct guard: each sample fetched through its own
+      // `get` endpoint, independent of how the kit words anything in its report.
+      // Keyed by type, so the returned `data.id`s are compared with `IDS` entry by
+      // entry and a sample that does not resolve shows up under its type.
+      expect(resolved).toEqual(IDS);
+    }),
+  );
 
-  it("sampled only resources the example holds: every sample read answered 200", () => {
-    // A second line of defence behind the direct guard above, over what the kit
-    // itself read: `report.samples` records every `/:type/:id` read the `ids`
-    // resolve, with its status, as data rather than in a note's wording (#319).
-    // Keyed by type, so a sample that did not resolve shows up under its type,
-    // and a type the kit resolved no read for is missing.
-    expect(
-      Object.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
-      Conformance.format(report),
-    ).toEqual(Object.fromEntries(Object.keys(IDS).map((type) => [type, 200])));
-  });
+  it.effect("sampled only resources the example holds: every sample read answered 200", () =>
+    Effect.gen(function* () {
+      const { report } = yield* Run;
+      // A second line of defence behind the direct guard above, over what the kit
+      // itself read: `report.samples` records every `/:type/:id` read the `ids`
+      // resolve, with its status, as data rather than in a note's wording (#319).
+      // Keyed by type, so a sample that did not resolve shows up under its type,
+      // and a type the kit resolved no read for is missing.
+      expect(
+        Object.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
+        Conformance.format(report),
+      ).toEqual(Object.fromEntries(Object.keys(IDS).map((type) => [type, 200])));
+    }),
+  );
 
-  it("breaks exactly the rules that are already filed", () => {
-    const failing = Arr.sort(
-      report.outcomes
-        .filter((outcome) => P.isTagged(outcome, "Failed"))
-        .map((outcome) => outcome.rule.id),
-      Order.String,
-    );
-    const known = Arr.sort(
-      KNOWN_FAILURES.map(([id]) => id),
-      Order.String,
-    );
+  it.effect("breaks exactly the rules that are already filed", () =>
+    Effect.gen(function* () {
+      const { report } = yield* Run;
+      const failing = Arr.sort(
+        report.outcomes
+          .filter((outcome) => P.isTagged(outcome, "Failed"))
+          .map((outcome) => outcome.rule.id),
+        Order.String,
+      );
+      const known = Arr.sort(
+        KNOWN_FAILURES.map(([id]) => id),
+        Order.String,
+      );
 
-    // The whole report is the assertion message, so a new failure explains itself.
-    expect(failing, Conformance.format(report)).toEqual(known);
-  });
+      // The whole report is the assertion message, so a new failure explains itself.
+      expect(failing, Conformance.format(report)).toEqual(known);
+    }),
+  );
 
-  it("every failure names a rule, cites its section and shows the request", () => {
-    for (const outcome of report.outcomes) {
-      if (!P.isTagged(outcome, "Failed")) continue;
-      expect(outcome.rule.requirement.length).toBeGreaterThan(20);
-      expect(outcome.rule.reference).toMatch(/^https:\/\//);
-      for (const finding of outcome.findings) {
-        expect(finding.detail).not.toBe("");
-        expect(finding.expected).not.toBe("");
-        expect(finding.observed).not.toBe("");
+  it.effect("every failure names a rule, cites its section and shows the request", () =>
+    Effect.gen(function* () {
+      const { report } = yield* Run;
+      for (const outcome of report.outcomes) {
+        if (!P.isTagged(outcome, "Failed")) continue;
+        expect(outcome.rule.requirement.length).toBeGreaterThan(20);
+        expect(outcome.rule.reference).toMatch(/^https:\/\//);
+        for (const finding of outcome.findings) {
+          expect(finding.detail).not.toBe("");
+          expect(finding.expected).not.toBe("");
+          expect(finding.observed).not.toBe("");
+        }
       }
-    }
-  });
+    }),
+  );
 
-  it("actually probed the api rather than skipping its way to a verdict", () => {
-    const summary = Conformance.summarise(report);
-    expect(summary.probes).toBeGreaterThan(50);
-    expect(summary.passed).toBeGreaterThan(15);
-  });
+  it.effect("actually probed the api rather than skipping its way to a verdict", () =>
+    Effect.gen(function* () {
+      const { report } = yield* Run;
+      const summary = Conformance.summarise(report);
+      expect(summary.probes).toBeGreaterThan(50);
+      expect(summary.passed).toBeGreaterThan(15);
+    }),
+  );
 
-  it("honours an empty sparse fieldset as no fields, on primary data and `included` alike", () => {
-    // #488: `?fields[TYPE]=` asks for no fields, not every field, and
-    // `Handlers.project` answers it with no attributes.
-    const ids = [
-      "spec/query/sparse-fieldsets-primary",
-      "spec/query/sparse-fieldsets-included",
-      "spec/query/sparse-fieldsets-empty",
-    ];
-    expect(
-      ids.map((id) => `${id}: ${report.outcomes.find((o) => o.rule.id === id)?._tag}`),
-    ).toEqual(ids.map((id) => `${id}: Passed`));
-  });
+  it.effect(
+    "honours an empty sparse fieldset as no fields, on primary data and `included` alike",
+    () =>
+      Effect.gen(function* () {
+        const { report } = yield* Run;
+        // #488: `?fields[TYPE]=` asks for no fields, not every field, and
+        // `Handlers.project` answers it with no attributes.
+        const ids = [
+          "spec/query/sparse-fieldsets-primary",
+          "spec/query/sparse-fieldsets-included",
+          "spec/query/sparse-fieldsets-empty",
+        ];
+        expect(
+          ids.map((id) => `${id}: ${report.outcomes.find((o) => o.rule.id === id)?._tag}`),
+        ).toEqual(ids.map((id) => `${id}: Passed`));
+      }),
+  );
 
-  it("follows every relationship's and document's `self` link to a verdict", () => {
-    // #309: the relationship `self` link `Handlers.paginatedRelationship`
-    // writes for an order's line items
-    // (`/orders/:id/relationships/lineItems`) is served by a declared
-    // `Endpoint.getRelationship`, so both MUSTs pass rather than skip. That
-    // relationship is links-only, so the relationship SHOULD has no linkage to
-    // compare and skips.
-    const ids = [
-      "spec/links/relationship-self-dereferences",
-      "spec/links/relationship-self-matches-linkage",
-      "spec/links/top-level-self-dereferences",
-      "spec/links/top-level-self-matches-document",
-    ];
-    const outcomeOf = (id: string) => report.outcomes.find((outcome) => outcome.rule.id === id);
-    expect(ids.map((id) => `${id}: ${outcomeOf(id)?._tag}`)).toEqual([
-      "spec/links/relationship-self-dereferences: Passed",
-      "spec/links/relationship-self-matches-linkage: Skipped",
-      "spec/links/top-level-self-dereferences: Passed",
-      "spec/links/top-level-self-matches-document: Passed",
-    ]);
-    // Skipped for want of linkage, not for want of a link to follow.
-    expect(outcomeOf("spec/links/relationship-self-matches-linkage")).toMatchObject({
-      reason: expect.stringContaining("carries both a `self` link and resource linkage"),
-    });
-  });
+  it.effect("follows every relationship's and document's `self` link to a verdict", () =>
+    Effect.gen(function* () {
+      const { report } = yield* Run;
+      // #309: the relationship `self` link `Handlers.paginatedRelationship`
+      // writes for an order's line items
+      // (`/orders/:id/relationships/lineItems`) is served by a declared
+      // `Endpoint.getRelationship`, so both MUSTs pass rather than skip. That
+      // relationship is links-only, so the relationship SHOULD has no linkage to
+      // compare and skips.
+      const ids = [
+        "spec/links/relationship-self-dereferences",
+        "spec/links/relationship-self-matches-linkage",
+        "spec/links/top-level-self-dereferences",
+        "spec/links/top-level-self-matches-document",
+      ];
+      const outcomeOf = (id: string) => report.outcomes.find((outcome) => outcome.rule.id === id);
+      expect(ids.map((id) => `${id}: ${outcomeOf(id)?._tag}`)).toEqual([
+        "spec/links/relationship-self-dereferences: Passed",
+        "spec/links/relationship-self-matches-linkage: Skipped",
+        "spec/links/top-level-self-dereferences: Passed",
+        "spec/links/top-level-self-matches-document: Passed",
+      ]);
+      // Skipped for want of linkage, not for want of a link to follow.
+      expect(outcomeOf("spec/links/relationship-self-matches-linkage")).toMatchObject({
+        reason: expect.stringContaining("carries both a `self` link and resource linkage"),
+      });
+    }),
+  );
 
-  it("ran the write rules against targets it created, and left nothing behind", () => {
-    const writeRules = [
-      "spec/status/create-response-document",
-      // #236: the 201 carries `Location`, copied from the created resource's
-      // own `links.self`, so the two match.
-      "spec/status/create-location",
-      "spec/status/create-location-matches-self",
-      "spec/status/update-response",
-      "spec/status/delete-response",
-      // #237: what each create and update answered reads back through the
-      // resource's own GET.
-      "spec/status/create-read-back",
-      "spec/status/update-read-back",
-      // #429: a created order's `shipper` replaced with the `ids` shipper and
-      // read back through `GET /orders/:id/relationships/shipper`. A product's
-      // `category` / `supplier` PATCH has no relationship GET to read back
-      // through, so is not decided.
-      "spec/relationships/update-replaces",
-      // #451: the same `shipper` cleared with `{ "data": null }` and read back
-      // empty (a product's `category` / `supplier` are required, so their
-      // payloads admit no `null`); what each order and product relationship
-      // PATCH answered; and the 404 for linking a shipper that does not exist.
-      "spec/relationships/update-to-one-null",
-      "spec/relationships/write-response",
-      "spec/relationships/absent-related-404",
-    ];
-    expect(
-      writeRules.map((id) => report.outcomes.find((outcome) => outcome.rule.id === id)?._tag),
-    ).toEqual(writeRules.map(() => "Passed"));
-    const writes = report.writes ?? [];
-    expect(writes.length).toBeGreaterThan(0);
-    expect(writes.map((write) => write.disposal)).toEqual(
-      writes.map(() => expect.stringMatching(/^(deleted|cleaned-up)$/)),
-    );
-  });
+  it.effect("ran the write rules against targets it created, and left nothing behind", () =>
+    Effect.gen(function* () {
+      const { report } = yield* Run;
+      const writeRules = [
+        "spec/status/create-response-document",
+        // #236: the 201 carries `Location`, copied from the created resource's
+        // own `links.self`, so the two match.
+        "spec/status/create-location",
+        "spec/status/create-location-matches-self",
+        "spec/status/update-response",
+        "spec/status/delete-response",
+        // #237: what each create and update answered reads back through the
+        // resource's own GET.
+        "spec/status/create-read-back",
+        "spec/status/update-read-back",
+        // #429: a created order's `shipper` replaced with the `ids` shipper and
+        // read back through `GET /orders/:id/relationships/shipper`. A product's
+        // `category` / `supplier` PATCH has no relationship GET to read back
+        // through, so is not decided.
+        "spec/relationships/update-replaces",
+        // #451: the same `shipper` cleared with `{ "data": null }` and read back
+        // empty (a product's `category` / `supplier` are required, so their
+        // payloads admit no `null`); what each order and product relationship
+        // PATCH answered; and the 404 for linking a shipper that does not exist.
+        "spec/relationships/update-to-one-null",
+        "spec/relationships/write-response",
+        "spec/relationships/absent-related-404",
+      ];
+      expect(
+        writeRules.map((id) => report.outcomes.find((outcome) => outcome.rule.id === id)?._tag),
+      ).toEqual(writeRules.map(() => "Passed"));
+      const writes = report.writes ?? [];
+      expect(writes.length).toBeGreaterThan(0);
+      expect(writes.map((write) => write.disposal)).toEqual(
+        writes.map(() => expect.stringMatching(/^(deleted|cleaned-up)$/)),
+      );
+    }),
+  );
 
-  it("renders a report that states what it did not check", () => {
-    const text = Conformance.format(report);
-    expect(text).toContain("NOT COVERED BY THIS KIT");
-    expect(text).toContain("SUMMARY");
-    // Skipped rules are named individually, not rolled into the pass count.
-    expect(text).toContain("not checked:");
-  });
+  it.effect("renders a report that states what it did not check", () =>
+    Effect.gen(function* () {
+      const { report } = yield* Run;
+      const text = Conformance.format(report);
+      expect(text).toContain("NOT COVERED BY THIS KIT");
+      expect(text).toContain("SUMMARY");
+      // Skipped rules are named individually, not rolled into the pass count.
+      expect(text).toContain("not checked:");
+    }),
+  );
 
-  it("runs the spec tier without the profile tier", async () => {
-    const specOnly = await Effect.runPromise(
-      Conformance.verify(Api, { ids: IDS, tiers: ["spec"] }).pipe(
+  it.effect("runs the spec tier without the profile tier", () =>
+    Effect.gen(function* () {
+      const specOnly = yield* Conformance.verify(Api, { ids: IDS, tiers: ["spec"] }).pipe(
         Effect.provide(NorthwindLive),
         Effect.scoped,
-      ) as Effect.Effect<Conformance.Report>,
-    );
-    expect(specOnly.outcomes.every((outcome) => outcome.rule.tier === "spec")).toBe(true);
-    expect(
-      died(specOnly),
-      `a rule died — a defect, not a finding\n${Conformance.format(specOnly)}`,
-    ).toEqual([]);
-    const failing = specOnly.outcomes
-      .filter((outcome) => P.isTagged(outcome, "Failed"))
-      .map((outcome) => outcome.rule.id);
-    expect(failing).not.toContain("profile/document/jsonapi-member");
-  });
+      ) as Effect.Effect<Conformance.Report>;
+      expect(specOnly.outcomes.every((outcome) => outcome.rule.tier === "spec")).toBe(true);
+      expect(
+        died(specOnly),
+        `a rule died — a defect, not a finding\n${Conformance.format(specOnly)}`,
+      ).toEqual([]);
+      const failing = specOnly.outcomes
+        .filter((outcome) => P.isTagged(outcome, "Failed"))
+        .map((outcome) => outcome.rule.id);
+      expect(failing).not.toContain("profile/document/jsonapi-member");
+    }),
+  );
 });
