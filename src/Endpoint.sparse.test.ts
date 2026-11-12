@@ -16,6 +16,7 @@
 import { it } from "@effect/vitest";
 import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -819,7 +820,10 @@ describe("a projected answer over HTTP (#322)", () => {
   const inMemory = HttpClient.make((request) =>
     Effect.gen(function* () {
       const web = yield* HttpClientRequest.toWeb(request);
-      const response = yield* Effect.tryPromise(() => fetchApp(web));
+      const response = yield* Effect.tryPromise({
+        try: () => fetchApp(web),
+        catch: (cause) => new Cause.UnknownError(cause),
+      });
       return HttpClientResponse.fromWeb(request, response);
     }).pipe(Effect.orDie),
   );
