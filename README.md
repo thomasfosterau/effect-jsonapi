@@ -1400,15 +1400,12 @@ HttpRouter.serve(ApiLive).pipe(
 );
 ```
 
-If you negotiate content outside `HttpApi` — say in a framework hook that owns the URL — `Middleware.negotiate(headers, options?)` runs the §5 rules standalone, returning the offending `ApiError` (`UnsupportedMediaType` / `NotAcceptable`) or `undefined`, and `ApiError.toDocument(error)` renders any `ApiError` to a JSON:API error-document value:
+If you negotiate content outside `HttpApi` — say in a framework hook that owns the URL — `Middleware.negotiate(headers, options?)` runs the §5 rules standalone over the request's headers (a web `Headers`, an effect `Headers` or a plain record), returning an `Option` of the offending `ApiError` (`UnsupportedMediaType` / `NotAcceptable`), and `ApiError.toDocument(error)` renders any `ApiError` to a JSON:API error-document value:
 
 ```ts
-const error = Middleware.negotiate({
-  contentType: request.headers.get("content-type") ?? undefined,
-  accept: request.headers.get("accept") ?? undefined,
-});
-if (error) {
-  const body = ApiError.toDocument(error); // { errors: [{ status, code, title }] }
+const error = Middleware.negotiate(request.headers);
+if (Option.isSome(error)) {
+  const body = ApiError.toDocument(error.value); // { errors: [{ status, code, title }] }
   // → respond with `Number(body.errors[0].status)` and `body`
 }
 ```
@@ -1465,7 +1462,7 @@ The allow-list defaults to `["_"]`, so jQuery's cache-buster (`$.ajax({ cache: f
 
 Each entry must be a base name the check would otherwise reject: `lang[region]`, `Lang`, `x-trace`, `page%5Bsize%5D`, `[x]` or `""` throws `Middleware.InvalidAllowedQueryParameter` when the layer is built, rather than silently admitting nothing (list a bracketed member by its base name, and a name as it decodes; an implementation-specific name is never rejected, so it needs no entry; a name with an empty base name, starting `[`, cannot be admitted). So does a family the specification defines — `include`, `fields`, `sort`, `page` or `filter` — and any bracketed name of one, such as `page[size]`: an endpoint supports a family, or a `fields`, `page` or `filter` member, by declaring it in its `query` schema, and answers 400 when it doesn't, under the specification's general rule (§Implementation-Specific Query Parameters: if "the server does not know how to process it as a query parameter from this specification, it **MUST** return `400 Bad Request`"; see [Query parameters](#query-parameters)). JSON:API defines only the bare `include` and `sort`, so the refusal of an `include[]` or `sort[title]` entry says so; one of a name that only starts like a family's (`page[`, `page[size`, `filter[_]`) says it is no member of the family. The allow-list can't switch that 400 off, so a spec family is never silently ignored ([#261](https://github.com/thomasfosterau/effect-jsonapi/issues/261)).
 
-An allowed name never reaches the endpoint's decoded `query`, which keeps only what its `query` schema declares — also when that schema declares nothing ([#260](https://github.com/thomasfosterau/effect-jsonapi/issues/260)); it is only no longer rejected. `Middleware.checkQueryParameters(names, { declared, allowedQueryParameters })` is the same check standalone, for a hook that decodes requests itself: it returns the 400 document, or `undefined`.
+An allowed name never reaches the endpoint's decoded `query`, which keeps only what its `query` schema declares — also when that schema declares nothing ([#260](https://github.com/thomasfosterau/effect-jsonapi/issues/260)); it is only no longer rejected. `Middleware.checkQueryParameters(names, { declared, allowedQueryParameters })` is the same check standalone, for a hook that decodes requests itself: it returns an `Option` of the 400 document.
 
 And to call it — the same definitions drive a fully typed client:
 
@@ -1671,7 +1668,7 @@ The page cursor is one reader and a few href builders, so no page hands a user-c
 
 ```ts
 const cursor = Client.readPageCursor(url, { defaultLimit: 24, maxLimit: 100 }); // { offset, limit }, clamped
-const href = Client.filteredPageHref("/people", { q }); // href(offset): bare path on page 1
+const href = Client.filteredPageHref("/people", Client.stripUndefined({ q })); // href(offset): bare path on page 1
 const next = Client.canonicalPageHref("/people", pairs, { offset: 24, limit: 24 }); // the server's own link spelling
 const window = Client.pageWindow(cursor, total); // first, last, siblings, gaps — for the control to render
 ```

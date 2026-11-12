@@ -181,9 +181,11 @@ describe("decodeInput", () => {
   );
   const decode = Client.decodeInput(ListPeople);
 
-  it.effect("strips undefined members and applies the schema's defaults", () =>
+  it.effect("decodes a stripped input and applies the schema's defaults", () =>
     Effect.gen(function* () {
-      expect(yield* decode({ limit: 5, q: undefined })).toEqual({
+      // A page's search term, which it may not have.
+      const search = (q?: string) => decode(Client.stripUndefined({ limit: 5, q }));
+      expect(yield* search()).toEqual({
         offset: 0,
         limit: 5,
       });
@@ -261,7 +263,7 @@ describe("hydration", () => {
   });
 
   it("tolerates a missing relationship, empty linkage and an absent included member", () => {
-    expect(Client.related(Book, undefined, "authors", index)).toEqual([]);
+    expect(Client.related(Book, {}, "authors", index)).toEqual([]);
     expect(
       Client.related(Book, { relationships: {} }, "authors", Client.indexIncluded(undefined)),
     ).toEqual([]);
@@ -322,7 +324,10 @@ describe("page hrefs", () => {
   });
 
   it("filteredPageHref leaves the first page bare and carries applied filters", () => {
-    const href = Client.filteredPageHref("/people", { q: "ada", role: "", empty: undefined });
+    const href = Client.filteredPageHref(
+      "/people",
+      Client.stripUndefined({ q: "ada", role: "", empty: undefined }),
+    );
     expect(href(0)).toBe("/people?q=ada");
     expect(href(24)).toBe("/people?page%5Boffset%5D=24&q=ada");
     expect(Client.filteredPageHref("/people")(0)).toBe("/people");

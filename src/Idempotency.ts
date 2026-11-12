@@ -359,18 +359,17 @@ export type Applied<E, O> = [O] extends [false | undefined]
     : never;
 
 /**
- * The header schema an {@link Option} declares, at runtime.
+ * The header schema an {@link Option} declares, at runtime: `None` when the
+ * option is absent or off.
  *
  * @since 0.15.0
  * @category utils
  * @internal
  */
-export const headersFor = (option: Option | undefined): Schema.Top | undefined =>
+export const headersFor = (option?: Option): Opt.Option<Schema.Top> =>
   option === undefined || option === false
-    ? undefined
-    : option === "required"
-      ? HeadersRequired
-      : Headers;
+    ? Opt.none()
+    : Opt.some(option === "required" ? HeadersRequired : Headers);
 
 /**
  * Attaches {@link Middleware} to an endpoint when the {@link Option} is on.

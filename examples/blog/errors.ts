@@ -3,6 +3,7 @@
  * whose wire encoding is a spec-compliant JSON:API error document with the
  * declared HTTP status.
  */
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { ApiError, Atomic } from "@thomasfosterau/effect-jsonapi";
 export class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
@@ -24,7 +25,7 @@ export class PersonNotFound extends ApiError.make<PersonNotFound>()("PersonNotFo
   title: "Person not found",
   fields: { id: Schema.String, pointer: Schema.optionalKey(Schema.String) },
   detail: (e) => `Person ${e.id} not found`,
-  source: (e) => (e.pointer === undefined ? undefined : { pointer: e.pointer }),
+  source: (e) => Option.map(Option.fromUndefinedOr(e.pointer), (pointer) => ({ pointer })),
 }) {}
 
 /** A write naming a comment the store does not hold; `pointer` as on {@link PersonNotFound}. */
@@ -34,7 +35,7 @@ export class CommentNotFound extends ApiError.make<CommentNotFound>()("CommentNo
   title: "Comment not found",
   fields: { id: Schema.String, pointer: Schema.optionalKey(Schema.String) },
   detail: (e) => `Comment ${e.id} not found`,
-  source: (e) => (e.pointer === undefined ? undefined : { pointer: e.pointer }),
+  source: (e) => Option.map(Option.fromUndefinedOr(e.pointer), (pointer) => ({ pointer })),
 }) {}
 
 /** A write naming a tag the store does not hold; `pointer` as on {@link PersonNotFound}. */
@@ -44,7 +45,7 @@ export class TagNotFound extends ApiError.make<TagNotFound>()("TagNotFound", {
   title: "Tag not found",
   fields: { id: Schema.String, pointer: Schema.optionalKey(Schema.String) },
   detail: (e) => `Tag ${e.id} not found`,
-  source: (e) => (e.pointer === undefined ? undefined : { pointer: e.pointer }),
+  source: (e) => Option.map(Option.fromUndefinedOr(e.pointer), (pointer) => ({ pointer })),
 }) {}
 
 export class TitleTaken extends ApiError.make<TitleTaken>()("TitleTaken", {

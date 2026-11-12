@@ -252,14 +252,14 @@ const formatDefault = SchemaIssue.makeFormatterDefault();
  */
 export interface SchemaIssueOptions {
   /** The HTTP status stamped on every emitted error object. Defaults to `400`. */
-  readonly status?: number | undefined;
+  readonly status?: number;
   /**
    * The pointer prefix every accumulated path is placed under. Defaults to
    * `["data", "attributes"]`, the canonical location of a flat,
    * attribute-keyed input; a caller that decoded a whole JSON:API document
    * passes `[]`.
    */
-  readonly prefix?: ReadonlyArray<PropertyKey> | undefined;
+  readonly prefix?: ReadonlyArray<PropertyKey>;
 }
 
 /**
@@ -576,7 +576,7 @@ export interface RespondOptions {
    * driver's unique-violation error as a `409 conflict`, say). `none` leaves
    * the cause a defect.
    */
-  readonly materialise?: ((cause: unknown) => Option.Option<JsonapiError>) | undefined;
+  readonly materialise?: (cause: unknown) => Option.Option<JsonapiError>;
   /**
    * Mapping arms consulted **before** {@link fromTaggedError}: the place an
    * application renders a cause the package already maps its own way (an
@@ -586,7 +586,7 @@ export interface RespondOptions {
    *
    * @since 0.21.0
    */
-  readonly override?: ((cause: unknown) => Option.Option<JsonapiError>) | undefined;
+  readonly override?: (cause: unknown) => Option.Option<JsonapiError>;
 }
 
 /**

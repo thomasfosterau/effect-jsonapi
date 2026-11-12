@@ -260,10 +260,10 @@ export const format = (
     readonly version: string;
     readonly outcomes: ReadonlyArray<Outcome>;
     readonly gaps: ReadonlyArray<Gap>;
-    readonly writes?: ReadonlyArray<WriteRecord> | undefined;
-    readonly samples?: ReadonlyArray<SampleRecord> | undefined;
+    readonly writes?: ReadonlyArray<WriteRecord>;
+    readonly samples?: ReadonlyArray<SampleRecord>;
   },
-  options?: { readonly width?: number | undefined },
+  options?: { readonly width?: number },
 ): string => {
   const width = options?.width ?? 96;
   const summary = summarise(report.outcomes);

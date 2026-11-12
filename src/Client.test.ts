@@ -393,7 +393,7 @@ describe("Client.errorDocument", () => {
     Effect.gen(function* () {
       const document = yield* errorDocument(clientError(stringify(notFound), 404));
       assert(Option.isSome(document));
-      expect(errorMessage(document.value)).toBe(ArticleNotFound.title);
+      expect(Option.some(errorMessage(document.value))).toEqual(ArticleNotFound.title);
     }),
   );
 

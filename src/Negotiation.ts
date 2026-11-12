@@ -130,9 +130,9 @@ export interface Options {
     | ReadonlyArray<GroupLike>
     | { readonly groups: { readonly [id: string]: GroupLike } };
   /** The representation a request falls through to. Defaults to `"text/html"`. */
-  readonly fallback?: string | undefined;
+  readonly fallback?: string;
   /** Representations negotiated ahead of JSON:API on their own paths. */
-  readonly alternates?: ReadonlyArray<Alternate> | undefined;
+  readonly alternates?: ReadonlyArray<Alternate>;
   /**
    * What a read on an api path answers when its `Accept` refuses JSON:API
    * explicitly — a clean JSON:API instance at `q=0` — and no range of any
@@ -366,10 +366,10 @@ const cleanParameters =
  * (`text/markdown;charset=utf-8`) never stop it winning (#566).
  */
 const acceptEntries = (
-  header: string | null,
+  header: Option.Option<string>,
   clean: (parameters: ReadonlyArray<readonly [name: string, value: string]>) => boolean,
 ): ReadonlyArray<AcceptEntry> =>
-  (header ?? "")
+  Option.getOrElse(header, () => "")
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry !== "")
@@ -494,7 +494,7 @@ export const make = (options: Options): Negotiator => {
 
   const negotiateRead = (request: Request): Verdict => {
     const pathname = new URL(request.url).pathname;
-    const entries = acceptEntries(request.headers.get("accept"), clean);
+    const entries = acceptEntries(Option.fromNullOr(request.headers.get("accept")), clean);
     // Alternates are negotiated first: they apply to their own paths, an
     // orthogonal media type / path set from the JSON:API surface.
     const alternate = Arr.findFirst(

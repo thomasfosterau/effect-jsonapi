@@ -2,11 +2,12 @@ import { assert, describe, expect, it, onTestFinished } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as ErrorReporter from "effect/ErrorReporter";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as Tracer from "effect/Tracer";
-import { HttpRouter } from "effect/http";
+import { Headers, HttpRouter } from "effect/http";
 import {
   HttpApi,
   HttpApiBuilder,
@@ -114,35 +115,46 @@ describe("acceptIsAcceptable", () => {
 });
 
 describe("Middleware.negotiate", () => {
-  it("returns undefined for an acceptable request", () => {
-    expect(negotiate({})).toBeUndefined();
-    expect(negotiate({ contentType: MEDIA_TYPE, accept: MEDIA_TYPE })).toBeUndefined();
-    expect(negotiate({ accept: "*/*" })).toBeUndefined();
+  // The verdict's error, for `toBeInstanceOf`; `undefined` when there is none.
+  const verdict = (...args: Parameters<typeof negotiate>) =>
+    Option.getOrUndefined(negotiate(...args));
+
+  it("returns None for an acceptable request", () => {
+    expect(negotiate({})).toEqual(Option.none());
+    expect(negotiate({ "content-type": MEDIA_TYPE, accept: MEDIA_TYPE })).toEqual(Option.none());
+    expect(negotiate({ accept: "*/*" })).toEqual(Option.none());
+  });
+
+  it("reads a web Headers and an effect Headers alike", () => {
+    const headers = new globalThis.Headers({ "Content-Type": `${MEDIA_TYPE}; charset=utf-8` });
+    expect(verdict(headers)).toBeInstanceOf(UnsupportedMediaType);
+    expect(verdict(Headers.fromInput(headers))).toBeInstanceOf(UnsupportedMediaType);
+    expect(negotiate(new globalThis.Headers({ Accept: MEDIA_TYPE }))).toEqual(Option.none());
   });
 
   it("returns a 415 UnsupportedMediaType for a bad content type", () => {
-    const error = negotiate({ contentType: `${MEDIA_TYPE}; charset=utf-8` });
+    const error = verdict({ "content-type": `${MEDIA_TYPE}; charset=utf-8` });
     expect(error).toBeInstanceOf(UnsupportedMediaType);
     expect(error?._tag).toBe("UnsupportedMediaType");
     expect(UnsupportedMediaType.status).toBe(415);
   });
 
   it("returns a 406 NotAcceptable for a bad accept header", () => {
-    const error = negotiate({ accept: `${MEDIA_TYPE}; charset=utf-8` });
+    const error = verdict({ accept: `${MEDIA_TYPE}; charset=utf-8` });
     expect(error).toBeInstanceOf(NotAcceptable);
     expect(error?._tag).toBe("NotAcceptable");
     expect(NotAcceptable.status).toBe(406);
   });
 
   it("admits a malformed q (#245) but still 406s a well-formed q=0", () => {
-    expect(negotiate({ accept: `${MEDIA_TYPE};q=abc` })).toBeUndefined();
-    expect(negotiate({ accept: `${MEDIA_TYPE};q=2` })).toBeUndefined();
-    expect(negotiate({ accept: `${MEDIA_TYPE};q=0` })).toBeInstanceOf(NotAcceptable);
+    expect(negotiate({ accept: `${MEDIA_TYPE};q=abc` })).toEqual(Option.none());
+    expect(negotiate({ accept: `${MEDIA_TYPE};q=2` })).toEqual(Option.none());
+    expect(verdict({ accept: `${MEDIA_TYPE};q=0` })).toBeInstanceOf(NotAcceptable);
   });
 
   it("checks content type before accept (415 wins)", () => {
-    const error = negotiate({
-      contentType: `${MEDIA_TYPE}; charset=utf-8`,
+    const error = verdict({
+      "content-type": `${MEDIA_TYPE}; charset=utf-8`,
       accept: `${MEDIA_TYPE}; charset=utf-8`,
     });
     expect(error).toBeInstanceOf(UnsupportedMediaType);
@@ -151,26 +163,26 @@ describe("Middleware.negotiate", () => {
   it("honours supported extensions", () => {
     const ext = "https://jsonapi.org/ext/atomic";
     expect(
-      negotiate({ contentType: `${MEDIA_TYPE}; ext="${ext}"` }, { extensions: [ext] }),
-    ).toBeUndefined();
-    expect(negotiate({ contentType: `${MEDIA_TYPE}; ext="${ext}"` })).toBeInstanceOf(
+      negotiate({ "content-type": `${MEDIA_TYPE}; ext="${ext}"` }, { extensions: [ext] }),
+    ).toEqual(Option.none());
+    expect(verdict({ "content-type": `${MEDIA_TYPE}; ext="${ext}"` })).toBeInstanceOf(
       UnsupportedMediaType,
     );
   });
 
   it("applies the extension list to the Accept header too", () => {
     const ext = "https://jsonapi.org/ext/atomic";
-    expect(
-      negotiate({ accept: `${MEDIA_TYPE}; ext="${ext}"` }, { extensions: [ext] }),
-    ).toBeUndefined();
-    expect(negotiate({ accept: `${MEDIA_TYPE}; ext="${ext}"` })).toBeInstanceOf(NotAcceptable);
+    expect(negotiate({ accept: `${MEDIA_TYPE}; ext="${ext}"` }, { extensions: [ext] })).toEqual(
+      Option.none(),
+    );
+    expect(verdict({ accept: `${MEDIA_TYPE}; ext="${ext}"` })).toBeInstanceOf(NotAcceptable);
   });
 
   it("composes with ApiError.toDocument to render the spec error body", () => {
-    const error = negotiate({ contentType: `${MEDIA_TYPE}; charset=utf-8` });
-    expect(error).toBeInstanceOf(UnsupportedMediaType);
-    assert(error !== undefined);
-    expect(toDocument(error)).toEqual({
+    const error = negotiate({ "content-type": `${MEDIA_TYPE}; charset=utf-8` });
+    assert(Option.isSome(error));
+    expect(error.value).toBeInstanceOf(UnsupportedMediaType);
+    expect(toDocument(error.value)).toEqual({
       errors: [{ status: "415", code: "unsupported_media_type", title: "Unsupported Media Type" }],
     });
   });
