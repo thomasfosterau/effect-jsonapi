@@ -2566,13 +2566,31 @@ export const getRelationship = <
     });
     return options?.fields === true ? sparseUnion(union, fieldsetNames) : union;
   });
-  // SAFETY: `linkageData` mirrors `LinkageData` kind by kind, and `included`
-  // mirrors `RelationshipSuccess`'s `included` union.
-  const success: RelationshipSuccess<Res, Name, DocMeta, Include, Fields> = cast(
-    LinkageDocument(linkageData(descriptor, target), {
+  // `RelationshipSuccess`'s `included` union.
+  type Included = AsSchema<
+    [Fields] extends [true]
+      ? IncludeEnabled<Include> extends true
+        ? SparseUnion<
+            RelationshipIncludedMembers<Res, Name, Include>,
+            RelationshipFieldsetTypes<Res, Name, Include>
+          >
+        : typeof Schema.Never
+      : RelationshipIncludedOf<Res, Name, Include>
+  >;
+  const success: RelationshipSuccess<Res, Name, DocMeta, Include, Fields> = LinkageDocument<
+    AsSchema<LinkageData<Res, Name>>,
+    DocMeta,
+    Included
+  >(
+    // SAFETY: `linkageData` mirrors `LinkageData` kind by kind: the target's
+    // identifier for a `one`, nullable for an `optional`, an array otherwise.
+    linkageData(descriptor, target) as AsSchema<LinkageData<Res, Name>>,
+    {
       meta: (options?.meta ?? AnyMeta) as DocMeta,
-      ...someMember("included", included),
-    }),
+      // SAFETY: `included` is the surface's union or the reached resources',
+      // sparse when `fields` is on — `Included` kind by kind.
+      ...someMember("included", included as Option.Option<Included>),
+    },
   );
 
   return HttpApiEndpoint.get(
@@ -4462,6 +4480,10 @@ export const resource = <
     });
   }
 
+  // A double assertion, not a single one: `ResourceEndpoints` is a non-empty
+  // tuple, and the array is non-empty only when the options leave an endpoint
+  // on — a fact the options' type tracks but the array's cannot. A guard would
+  // change what an all-off call returns (an empty array today).
   return cast(endpoints);
 };
 

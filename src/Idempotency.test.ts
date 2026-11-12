@@ -1,11 +1,11 @@
 import { it } from "@effect/vitest";
 import { describe, expect, onTestFinished } from "vite-plus/test";
 import * as Cause from "effect/Cause";
-import { cast } from "effect/Function";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
+import type { HttpApiGroup } from "effect/http-api";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import * as ApiError from "./ApiError.js";
 import * as Atomic from "./Atomic.js";
@@ -13,6 +13,7 @@ import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
 import * as Idempotency from "./Idempotency.js";
 import * as Middleware from "./Middleware.js";
+import { platformLayer } from "./Registry.js";
 import { make as Resource } from "./Resource.js";
 import { MEDIA_TYPE } from "./internal/media.js";
 import { definedMember } from "./internal/members.js";
@@ -228,37 +229,42 @@ describe("Idempotency errors", () => {
 // The middleware, end to end
 // ---------------------------------------------------------------------------
 
-// The builder's handlers reduced to the one method these tests call: they
-// answer with minimal documents, deliberately looser than each endpoint's
-// declared success type, so the builder's per-endpoint inference is bypassed.
+// The handlers these tests register answer with minimal documents,
+// deliberately looser than each endpoint's declared success type, so their
+// group is built over the erased api — keyed by an index signature, as the
+// erased group's endpoint map is.
 interface LooseHandlers {
-  readonly handle: (
-    name: string,
-    handler: () => Effect.Effect<unknown, unknown, unknown>,
-  ) => LooseHandlers;
+  readonly [endpoint: string]: () => Effect.Effect<unknown, unknown>;
 }
 
-const liveGroup = (
-  api: HttpApi.Constraint,
-  group: string,
-  build: (handlers: LooseHandlers) => LooseHandlers,
-): Layer.Layer<never, unknown, unknown> =>
-  cast(HttpApiBuilder.group(api as HttpApi.Top, group, cast(build)));
+// A group layer over the erased api. The erased endpoint leaves its middleware
+// untyped, so the layer names the middleware `server` provides.
+type LiveGroup = Layer.Layer<
+  HttpApiGroup.Service<string, string>,
+  never,
+  Layer.Success<typeof Middleware.layer> | Idempotency.Middleware
+>;
+
+// SAFETY: an `HttpApi` with its identifier and groups erased; the builder
+// reads the groups and endpoints at runtime all the same.
+const erase = (api: HttpApi.Constraint): HttpApi.Top => api as HttpApi.Top;
+
+const liveGroup = (api: HttpApi.Constraint, group: string, handlers: LooseHandlers): LiveGroup =>
+  HttpApiBuilder.group(erase(api), group, (builder) => builder.handleAll(handlers));
 
 // One server per test, over a store the test owns, so replays and conflicts are
 // observed on the wire — status, headers and body — rather than in a decoder.
 const server = (options: {
-  readonly api: unknown;
-  readonly live: Layer.Layer<never, unknown, unknown>;
+  readonly api: HttpApi.Constraint;
+  readonly live: LiveGroup;
   readonly store: Idempotency.Store;
 }) => {
-  // SAFETY: every middleware the api's endpoints require is provided here; the
-  // platform services `HttpApiBuilder.layer` lists are unused by these routes.
-  const appLayer = HttpApiBuilder.layer(options.api as never).pipe(
+  const appLayer = HttpApiBuilder.layer(erase(options.api)).pipe(
     Layer.provide(options.live),
     Layer.provide(Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] })),
     Layer.provide(Idempotency.layer(options.store)),
-  ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+    Layer.provide(platformLayer),
+  );
   const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
   return {
     dispose,
@@ -291,11 +297,8 @@ const server = (options: {
 const articlesApi = (idempotency: Idempotency.Option) =>
   HttpApi.make("blog").add(Group.make(Article, Endpoint.create(Article, { idempotency } as never)));
 
-const articlesLive = (
-  api: HttpApi.Constraint,
-  handle: () => Effect.Effect<unknown, unknown, unknown>,
-): Layer.Layer<never, unknown, unknown> =>
-  liveGroup(api, "articles", (handlers) => handlers.handle("create", handle));
+const articlesLive = (api: HttpApi.Constraint, handle: () => Effect.Effect<unknown, unknown>) =>
+  liveGroup(api, "articles", { create: handle });
 
 describe("Idempotency.layer", () => {
   it("replays the original response verbatim, marking it with the replay header", async () => {
@@ -367,11 +370,10 @@ describe("Idempotency.layer", () => {
         Endpoint.create(Article, { name: "draft", path: "/drafts", idempotency: true }),
       ),
     );
-    const live = liveGroup(api, "articles", (handlers) =>
-      handlers
-        .handle("create", () => Effect.succeed({ data: sample }))
-        .handle("draft", () => Effect.succeed({ data: sample })),
-    );
+    const live = liveGroup(api, "articles", {
+      create: () => Effect.succeed({ data: sample }),
+      draft: () => Effect.succeed({ data: sample }),
+    });
     const { dispose, request } = server({ api, live, store: Idempotency.memoryStore() });
     onTestFinished(() => dispose());
     await request({ key: "k1", body: createBody });
@@ -526,13 +528,12 @@ describe("Idempotency.layer", () => {
     const api = HttpApi.make("blog").add(
       Group.make(Article, Endpoint.delete(Article, { idempotency: true })),
     );
-    const live = liveGroup(api, "articles", (handlers) =>
-      handlers.handle("delete", () =>
+    const live = liveGroup(api, "articles", {
+      delete: () =>
         Effect.sync(() => {
           calls += 1;
         }),
-      ),
-    );
+    });
     const { dispose, request } = server({ api, live, store: Idempotency.memoryStore() });
     onTestFinished(() => dispose());
     const first = await request({
@@ -558,9 +559,7 @@ describe("Idempotency.layer", () => {
       const api = HttpApi.make("blog").add(
         Group.make(Article, Endpoint.get(Article).middleware(Idempotency.Middleware)),
       );
-      const live = liveGroup(api, "articles", (handlers) =>
-        handlers.handle("get", () => Effect.succeed({ data: sample })),
-      );
+      const live = liveGroup(api, "articles", { get: () => Effect.succeed({ data: sample }) });
       const store = Idempotency.memoryStore();
       const { dispose, request } = server({ api, live, store });
       yield* Effect.addFinalizer(() =>
@@ -601,14 +600,13 @@ describe("Idempotency and the atomic operations extension", () => {
 
   it("replays the whole atomic:results document, so a replayed lid keeps its assigned id", async () => {
     let calls = 0;
-    const live = liveGroup(operationsApi, "operations", (handlers) =>
-      handlers.handle("operations", () =>
+    const live = liveGroup(operationsApi, "operations", {
+      operations: () =>
         Effect.sync(() => {
           calls += 1;
           return { "atomic:results": [{ data: { ...sample, id: String(calls) } }] };
         }),
-      ),
-    );
+    });
     const { dispose, request } = server({
       api: operationsApi,
       live,
@@ -633,9 +631,9 @@ describe("Idempotency and the atomic operations extension", () => {
   });
 
   it("rejects the same key carrying a different operations list", async () => {
-    const live = liveGroup(operationsApi, "operations", (handlers) =>
-      handlers.handle("operations", () => Effect.succeed({ "atomic:results": [{ data: sample }] })),
-    );
+    const live = liveGroup(operationsApi, "operations", {
+      operations: () => Effect.succeed({ "atomic:results": [{ data: sample }] }),
+    });
     const { dispose, request } = server({
       api: operationsApi,
       live,

@@ -32,7 +32,6 @@
 import * as R from "effect/Record";
 import type * as Cause from "effect/Cause";
 import * as Arr from "effect/Array";
-import { cast } from "effect/Function";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
@@ -364,53 +363,76 @@ export const make =
   <const Tag extends string, const Fields extends Schema.Struct.Fields = Record<never, never>>(
     tag: Tag,
     config: Config<Fields>,
-  ): ApiErrorClass<Self, Tag, Fields> => {
-    const fields = (config.fields ?? {}) as Fields;
-    const fieldKeys = R.keys(fields);
-    const code = config.code ?? snakeCase(tag);
-    // `detail` and `source`, constant or per occurrence, as functions of the
-    // encoded fields: `None` when this occurrence carries none.
-    const detailOf = config.detail;
-    const detail = (encoded: Schema.Struct.Encoded<Fields>): Option.Option<string> =>
-      maybe(P.isFunction(detailOf) ? detailOf(encoded) : detailOf);
-    const sourceOf = config.source;
-    const source = (encoded: Schema.Struct.Encoded<Fields>): Option.Option<ErrorSource> =>
-      maybe(P.isFunction(sourceOf) ? sourceOf(encoded) : sourceOf);
-    const title = Option.fromUndefinedOr(config.title);
+  ): ApiErrorClass<Self, Tag, Fields> =>
+    makeClass<Self, Tag, Fields>(tag, config, identifier);
 
-    // The conditional `MissingSelfGeneric` branch only matters at the user's
-    // `extends` clause, where `Self` is concrete — cast it away here.
-    // The base class is built over erased `tag` / `fields`: a class cannot
-    // extend a constructor type that is still generic in them.
-    const erasedTag: string = tag;
-    const erasedFields: Schema.Struct.Fields = fields;
-    const Base = Schema.TaggedError<ApiErrorSelf>(identifier)(erasedTag, erasedFields);
+// The class `make` builds, erased over `Self`, `tag` and `fields`: its schema
+// and metadata. The wire schema is derived lazily per final
+// subclass, so it is a `Schema.Top` until `makeClass`'s overload names it.
+interface ErasedClass extends Schema.Top {
+  readonly status: number;
+  readonly code: string;
+  readonly title: Option.Option<string>;
+  readonly wire: Schema.Top;
+}
 
-    class ApiErrorBase extends Base {
-      static readonly status = config.status;
-      static readonly code = code;
-      static readonly title = title;
-      // The brand `isApiError` and `Any` recognise, on the prototype so it is
-      // never an own (encoded) field of the instance.
-      get [TypeId](): TypeId {
-        return TypeId;
-      }
-      static get wire() {
-        // `this` is the user's final class, so decoded errors are `instanceof` it.
-        return makeWire(this, {
-          tag,
-          status: config.status,
-          code,
-          title,
-          fieldKeys,
-          detail,
-          source,
-        });
-      }
+// The class `make` builds. The base class is built over erased `tag` /
+// `fields`, since a class cannot extend a constructor type that is still
+// generic in them, so the implementation is typed over the erased class and
+// the overload restores `Self`, `Tag` and `Fields`.
+function makeClass<Self, Tag extends string, Fields extends Schema.Struct.Fields>(
+  tag: Tag,
+  config: Config<Fields>,
+  identifier?: string,
+): ApiErrorClass<Self, Tag, Fields>;
+function makeClass(
+  tag: string,
+  config: Config<Schema.Struct.Fields>,
+  identifier?: string,
+): ErasedClass {
+  const fields = config.fields ?? {};
+  const fieldKeys = R.keys(fields);
+  const code = config.code ?? snakeCase(tag);
+  // `detail` and `source`, constant or per occurrence, as functions of the
+  // encoded fields: `None` when this occurrence carries none.
+  const detailOf = config.detail;
+  const detail = (encoded: Schema.Struct.Encoded<Schema.Struct.Fields>): Option.Option<string> =>
+    maybe(P.isFunction(detailOf) ? detailOf(encoded) : detailOf);
+  const sourceOf = config.source;
+  const source = (
+    encoded: Schema.Struct.Encoded<Schema.Struct.Fields>,
+  ): Option.Option<ErrorSource> => maybe(P.isFunction(sourceOf) ? sourceOf(encoded) : sourceOf);
+  const title = Option.fromUndefinedOr(config.title);
+
+  // The conditional `MissingSelfGeneric` branch only matters at the user's
+  // `extends` clause, where `Self` is concrete: `ApiErrorSelf` stands in.
+  const Base = Schema.TaggedError<ApiErrorSelf>(identifier)(tag, fields);
+
+  class ApiErrorBase extends Base {
+    static readonly status = config.status;
+    static readonly code = code;
+    static readonly title = title;
+    // The brand `isApiError` and `Any` recognise, on the prototype so it is
+    // never an own (encoded) field of the instance.
+    get [TypeId](): TypeId {
+      return TypeId;
     }
+    static get wire() {
+      // `this` is the user's final class, so decoded errors are `instanceof` it.
+      return makeWire(this, {
+        tag,
+        status: config.status,
+        code,
+        title,
+        fieldKeys,
+        detail,
+        source,
+      });
+    }
+  }
 
-    return cast<typeof ApiErrorBase, ApiErrorClass<Self, Tag, Fields>>(ApiErrorBase);
-  };
+  return ApiErrorBase;
+}
 
 /**
  * Encodes an {@link make} error instance to its JSON:API error-document value

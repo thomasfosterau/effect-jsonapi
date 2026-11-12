@@ -372,14 +372,12 @@ const request = async (
 ) => {
   // The api layer also advertises the platform services (`FileSystem`,
   // `HttpPlatform`, …) that multipart and file responses would need; none of
-  // these endpoints use them, so the requirement is discharged by the cast
-  // rather than by pulling in a platform package for the test.
-  // SAFETY: every middleware the api's endpoints require is provided here; the
-  // platform services `HttpApiBuilder.layer` lists are unused by these routes.
+  // these endpoints use them, so the registry's no-op platform discharges them.
   const appLayer = HttpApiBuilder.layer(Api).pipe(
     Layer.provide(ArticlesLive),
     Layer.provide(middlewareLayer),
-  ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+    Layer.provide(platformLayer),
+  );
 
   const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
   onTestFinished(() => dispose());
@@ -405,13 +403,12 @@ const requestTraced = async (
     },
   });
 
-  // SAFETY: every middleware the api's endpoints require is provided here; the
-  // platform services `HttpApiBuilder.layer` lists are unused by these routes.
   const appLayer = HttpApiBuilder.layer(Api).pipe(
     Layer.provide(ArticlesLive),
     Layer.provide(middlewareLayer),
+    Layer.provide(platformLayer),
     Layer.provide(Layer.succeed(Tracer.Tracer, recordingTracer)),
-  ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+  );
 
   const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
   onTestFinished(() => dispose());

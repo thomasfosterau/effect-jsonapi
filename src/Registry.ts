@@ -41,7 +41,6 @@ import type { HttpServerResponse } from "effect/http";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { HttpApiBuilder } from "effect/http-api";
-import { cast } from "effect/Function";
 import * as Middleware from "./Middleware.js";
 import * as ServerErrors from "./ServerErrors.js";
 import { declarationError } from "./internal/errors.js";
@@ -309,13 +308,11 @@ function erase(api: HttpApi.Constraint): HttpApi.Constraint {
   return api;
 }
 
-// The one method of a `HttpApiBuilder` group's handlers the fold calls.
-interface DynamicHandlers {
-  readonly handle: (
-    name: string,
-    handler: (request: never) => Effect.Effect<unknown, unknown, unknown>,
-  ) => DynamicHandlers;
-}
+// The request an erased group's builder hands every handler.
+type ErasedRequest = Parameters<HttpApiEndpoint.Handler<HttpApiEndpoint.Top, never, never>>[0];
+
+// One handler of an erased group, wrapped in the boundary.
+type ErasedHandler<R> = (request: ErasedRequest) => Effect.Effect<unknown, never, R>;
 
 /**
  * Registers one family's handlers with its `HttpApiBuilder` group, each
@@ -335,14 +332,21 @@ export const familyLayer = <ApiId extends string, Groups extends HttpApiGroup.Co
   checkFamily(erased, family);
   const respond =
     options?.respond ?? (<A, E>(effect: Effect.Effect<A, E, R>) => ServerErrors.respond(effect));
-  // reason: a dynamic fold over the handler record; completeness is the runtime check above
-  const fold = (handlers: DynamicHandlers): DynamicHandlers =>
-    R.toEntries(family.handlers).reduce(
-      (current, [name, handler]) =>
-        current.handle(name, (request: never) => respond(handler(request))),
-      handlers,
-    );
-  return cast(HttpApiBuilder.group(erased, family.group, cast(fold)));
+  // Every handler wrapped in the boundary, registered in one `handleAll`
+  // over the erased group; completeness is the runtime check above.
+  // Index-signature keyed (`string | number`, as the erased group's endpoint
+  // map is), so the builder sees every endpoint handled.
+  const wrapped: { readonly [endpoint: string]: ErasedHandler<R> } = R.map(
+    family.handlers,
+    (handler) => {
+      // SAFETY: `checkFamily` matched every handler name to an endpoint of the
+      // group, and the builder hands each handler only requests decoded by the
+      // endpoint registered under its own name — the request it was declared over.
+      const dispatch = handler as (request: ErasedRequest) => Effect.Effect<unknown, unknown, R>;
+      return (request: ErasedRequest) => respond(dispatch(request));
+    },
+  );
+  return HttpApiBuilder.group(erased, family.group, (handlers) => handlers.handleAll(wrapped));
 };
 
 /**

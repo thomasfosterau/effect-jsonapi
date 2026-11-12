@@ -3,7 +3,6 @@
  *
  * @internal
  */
-import { cast } from "effect/Function";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -123,22 +122,22 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
     direction: Schema.Literals(["asc", "desc"] as ["asc", "desc"]),
   });
   type Encoded = ReadonlyArray<typeof item.Encoded>;
+  // SAFETY: a term outside `fields` is rejected by the item schema, which
+  // decodes every term this transformation hands it.
+  const sortField = (field: string) => field as Field;
   return Schema.String.pipe(
     Schema.decodeTo(
       Schema.Array(item),
       SchemaTransformation.transform<Encoded, string>({
-        // SAFETY: a term outside `fields` is rejected by the item schema.
-        decode: (value) =>
-          cast<ReadonlyArray<{ field: string; direction: "asc" | "desc" }>, Encoded>(
-            value
-              .split(",")
-              .filter((term) => term !== "")
-              .map((term) =>
-                term.startsWith("-")
-                  ? { field: term.slice(1), direction: "desc" as const }
-                  : { field: term, direction: "asc" as const },
-              ),
-          ),
+        decode: (value): Encoded =>
+          value
+            .split(",")
+            .filter((term) => term !== "")
+            .map((term) =>
+              term.startsWith("-")
+                ? { field: sortField(term.slice(1)), direction: "desc" }
+                : { field: sortField(term), direction: "asc" },
+            ),
         encode: (terms) =>
           terms
             .map((term) => (term.direction === "desc" ? `-${term.field}` : term.field))
