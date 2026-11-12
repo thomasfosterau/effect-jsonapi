@@ -26,10 +26,11 @@ const Person = Resource.make("people", {
 
 const byDefault = Handlers.paginatedRelationship("people", "9", "articles");
 const defaultSelf: string = byDefault.links.self;
-const explicitUndefined = Handlers.paginatedRelationship("people", "9", "articles", {
+// An explicit `undefined` is not "omitted" (#533): leave the key out instead.
+// @ts-expect-error `self` takes a string or `false`, not `undefined`
+export const explicitUndefined = Handlers.paginatedRelationship("people", "9", "articles", {
   self: undefined,
 });
-const explicitUndefinedSelf: string = explicitUndefined.links.self;
 
 // ---------------------------------------------------------------------------
 // A custom path: `links.self` is still a required string
@@ -79,7 +80,6 @@ export {
   either,
   eitherRelated,
   eitherSelf,
-  explicitUndefinedSelf,
   optedOutRelated,
   optedOutSelf,
   people,

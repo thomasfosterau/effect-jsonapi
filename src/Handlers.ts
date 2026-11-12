@@ -1824,7 +1824,7 @@ export const relatedLink = (type: string, id: string, name: string): string =>
  * declares that endpoint — `Endpoint.getRelationship` for this relationship.
  * The `self` option controls it:
  *
- * - omitted (or `undefined`): `self` is `/<type>/<id>/relationships/<name>`;
+ * - omitted: `self` is `/<type>/<id>/relationships/<name>`;
  * - a string: `self` is that string, verbatim — for a relationship endpoint
  *   served at another path, or an absolute URL. It is not validated: any
  *   string, the empty string included, is written as given;
@@ -1884,7 +1884,7 @@ export const relatedLink = (type: string, id: string, name: string): string =>
  * @since 0.1.0
  * @category constructors
  */
-export const paginatedRelationship = <const Self extends string | false | undefined = undefined>(
+export const paginatedRelationship = <const Self extends string | false = never>(
   type: string,
   id: string,
   name: string,
@@ -1900,17 +1900,23 @@ export const paginatedRelationship = <const Self extends string | false | undefi
      */
     readonly self?: Self;
   },
-): Self extends false
-  ? { readonly links: { readonly related: string } }
-  : { readonly links: { readonly self: string; readonly related: string } } => {
+): PaginatedRelationshipValue<Self> => {
   const self = options?.self ?? relationshipLink(type, id, name);
   const related = relatedLink(type, id, name);
   return {
     links: self === false ? { related } : { self, related },
-  } as Self extends false
+  } as PaginatedRelationshipValue<Self>;
+};
+
+// The relationship object `paginatedRelationship` builds: no `self` link for
+// `self: false`, the default or given `self` link otherwise — `never` (the
+// option omitted) included, which a bare `Self extends false` would
+// distribute to `never`.
+type PaginatedRelationshipValue<Self extends string | false> = [Self] extends [never]
+  ? { readonly links: { readonly self: string; readonly related: string } }
+  : Self extends false
     ? { readonly links: { readonly related: string } }
     : { readonly links: { readonly self: string; readonly related: string } };
-};
 
 /**
  * The linkage shapes accepted by {@link linkage}: one identifier (to-one),

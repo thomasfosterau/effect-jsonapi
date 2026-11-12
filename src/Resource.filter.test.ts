@@ -1053,7 +1053,7 @@ describe("Resource.filterable / Resource.sortable", () => {
         title: "rating",
       });
       const res = Resource("nullable-annotated", {
-        attributes: { rating: attribute(s, { clearable: undefined }) },
+        attributes: { rating: attribute(s) },
       });
       expect(R.keys(filterable(res))).toEqual(["rating"]);
       expect(sortable(res)).toEqual(["rating"]);

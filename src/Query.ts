@@ -657,6 +657,13 @@ export type IncludeOption<Res extends Any> = boolean | IncludeOptions<Res> | Sur
  */
 export type IncludePathsOf<Res extends Any, I> = LegalIncludePaths<Res, I>;
 
+// The paths `Include` legalises for its `options`: those `IncludePathsOf`
+// reads off a given option, else (`never`, the option omitted) the default
+// depth-2 graph.
+type IncludeOptionPaths<Res extends Any, O> = [O] extends [never]
+  ? IncludePath<Res>
+  : IncludePathsOf<Res, O>;
+
 /**
  * The decoded `include` schema: a comma-separated list of relationship paths,
  * typed as the resource's legal path literals (2 hops into the relationship
@@ -736,15 +743,12 @@ export interface Include<
  * @since 0.1.0
  * @category constructors
  */
-export const Include = <
-  Res extends Any,
-  const O extends IncludeOptions<Res> | AnySurface | undefined = undefined,
->(
+export const Include = <Res extends Any, const O extends IncludeOptions<Res> | AnySurface = never>(
   resource: Res | ReadonlyArray<Res>,
   options?: O,
-): Include<Res, IncludePathsOf<Res, O>> => {
+): Include<Res, IncludeOptionPaths<Res, O>> => {
   const paths = includePathsFor(toResources(resource), options) as ReadonlyArray<
-    IncludePathsOf<Res, O>
+    IncludeOptionPaths<Res, O>
   >;
   return repeatable(
     CommaSeparated(
@@ -1517,7 +1521,7 @@ export interface Options<Res extends Any> {
    * `SchemaErrors` middleware, `?page[…]=` on an endpoint without it, or
    * with no key (`{}`), is a 400 naming it (#261).
    */
-  readonly page?: Schema.Struct.Fields | undefined;
+  readonly page?: Schema.Struct.Fields;
   /**
    * Enable `?filter[*]=` filtering. `true` turns on the filter grammar
    * (`docs/filter-grammar.md`) over the resource's declared filterable fields
@@ -1535,7 +1539,7 @@ export interface Options<Res extends Any> {
    * without it — or with `true` over a resource with no filterable field, or
    * an empty map — is a 400 naming it (#261).
    */
-  readonly filter?: FilterOption | undefined;
+  readonly filter?: FilterOption;
 }
 
 /**
@@ -1610,6 +1614,16 @@ type NestedFieldsets<Res extends Any, I, Types extends string> = [Types] extends
       >;
     };
 
+// A query's `page` / `filter` option, with `never` (the option omitted) read
+// as `false`, off: a bare `never` would pass every test below
+// (`[never] extends [true]`, `never extends Schema.Struct.Fields`).
+type PageOf<O extends { readonly page?: unknown }> = [O["page"]] extends [never]
+  ? false
+  : O["page"];
+type FilterOf<O extends { readonly filter?: unknown }> = [O["filter"]] extends [never]
+  ? false
+  : O["filter"];
+
 /**
  * The nested (decoded) struct fields of a query schema.
  *
@@ -1626,13 +1640,13 @@ export type NestedFields<Res extends Any, O extends Options<Res>> = Types.Simpli
       : O["sort"] extends ReadonlyArray<string>
         ? { readonly sort: Schema.optionalKey<Sort<O["sort"][number]>> }
         : Record<never, never>) &
-    (O["page"] extends Schema.Struct.Fields
-      ? { readonly page: Schema.optionalKey<Schema.Struct<O["page"]>> }
+    (PageOf<O> extends Schema.Struct.Fields
+      ? { readonly page: Schema.optionalKey<Schema.Struct<PageOf<O>>> }
       : Record<never, never>) &
-    ([O["filter"]] extends [true]
+    ([FilterOf<O>] extends [true]
       ? { readonly filter: Schema.optionalKey<FilterAstSchema<Res>> }
-      : O["filter"] extends Schema.Struct.Fields
-        ? { readonly filter: Schema.optionalKey<Schema.Struct<O["filter"]>> }
+      : FilterOf<O> extends Schema.Struct.Fields
+        ? { readonly filter: Schema.optionalKey<Schema.Struct<FilterOf<O>>> }
         : Record<never, never>)
 >;
 
@@ -1655,19 +1669,19 @@ export type FlatFields<Res extends Any, O extends Options<Res>> = Types.Simplify
   } & (O["sort"] extends true | ReadonlyArray<string>
       ? { readonly sort: Schema.optionalKey<Repeatable> }
       : Record<never, never>) &
-    (O["page"] extends Schema.Struct.Fields
+    (PageOf<O> extends Schema.Struct.Fields
       ? {
           readonly [
-            K in keyof O["page"] & string as `page[${K}]`
+            K in keyof PageOf<O> & string as `page[${K}]`
           ]: Schema.optionalKey<Schema.String>;
         }
       : Record<never, never>) &
-    ([O["filter"]] extends [true]
+    ([FilterOf<O>] extends [true]
       ? { readonly filter: Schema.optionalKey<FilterWireValueSchema> }
-      : O["filter"] extends Schema.Struct.Fields
+      : FilterOf<O> extends Schema.Struct.Fields
         ? {
             readonly [
-              K in keyof O["filter"] & string as `filter[${K}]`
+              K in keyof FilterOf<O> & string as `filter[${K}]`
             ]: Schema.optionalKey<Schema.String>;
           }
         : Record<never, never>)
@@ -1686,7 +1700,7 @@ type AsFields<T> = T extends Schema.Struct.Fields ? T : never;
  * @since 0.13.0
  * @category type-level
  */
-export type FlatSchema<Res extends Any, O extends Options<Res>> = [O["filter"]] extends [true]
+export type FlatSchema<Res extends Any, O extends Options<Res>> = [FilterOf<O>] extends [true]
   ? Schema.StructWithRest<Schema.Struct<AsFields<FlatFields<Res, O>>>, readonly [FilterRestSchema]>
   : Schema.Struct<AsFields<FlatFields<Res, O>>>;
 

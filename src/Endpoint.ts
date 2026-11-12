@@ -183,14 +183,11 @@ export interface CommonOptions<Name extends string, Path extends `/${string}`, E
 }
 
 const queryConfig = (options?: {
-  readonly include?:
-    | boolean
-    | { readonly paths?: ReadonlyArray<string>; readonly depth?: number }
-    | undefined;
-  readonly fields?: boolean | undefined;
-  readonly sort?: boolean | ReadonlyArray<string> | undefined;
-  readonly page?: Schema.Struct.Fields | undefined;
-  readonly filter?: Query.FilterOption | undefined;
+  readonly include?: boolean | { readonly paths?: ReadonlyArray<string>; readonly depth?: number };
+  readonly fields?: boolean;
+  readonly sort?: boolean | ReadonlyArray<string>;
+  readonly page?: Schema.Struct.Fields;
+  readonly filter?: Query.FilterOption;
 }) => ({
   include: options?.include ?? false,
   fields: options?.fields === true,
@@ -402,8 +399,8 @@ type DefaultGetQuery<
     readonly include: Include;
     readonly fields: Fields;
     readonly sort: false;
-    readonly page: undefined;
-    readonly filter: undefined;
+    readonly page: never;
+    readonly filter: never;
   }
 >;
 
@@ -584,8 +581,8 @@ export const get = <
             readonly include: Include;
             readonly fields: Fields;
             readonly sort: false;
-            readonly page: undefined;
-            readonly filter: undefined;
+            readonly page: never;
+            readonly filter: never;
           },
         )) as QuerySchema,
       success: asJsonApi(
@@ -615,8 +612,8 @@ type DefaultListQuery<
   Sort extends
     | boolean
     | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
-  PageFields extends Schema.Struct.Fields | undefined,
-  FilterFields extends Query.FilterOption | undefined,
+  PageFields extends Schema.Struct.Fields,
+  FilterFields extends Query.FilterOption,
 > = Query.QuerySchema<
   Resource<Type, Attributes, Rels, Meta, IdSchema>,
   {
@@ -726,8 +723,8 @@ export const list = <
   const Sort extends
     | boolean
     | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = false,
-  const PageFields extends Schema.Struct.Fields | undefined = undefined,
-  const FilterFields extends Query.FilterOption | undefined = undefined,
+  const PageFields extends Schema.Struct.Fields = never,
+  const FilterFields extends Query.FilterOption = never,
   DocMeta extends Schema.Top = Meta,
   QuerySchema extends Schema.Top = DefaultListQuery<
     Type,
@@ -1590,8 +1587,8 @@ export const collection = <
   const Include extends Query.IncludeOption<Resources[number]> = false,
   const Fields extends boolean = false,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resources[number]>> = false,
-  const PageFields extends Schema.Struct.Fields | undefined = undefined,
-  const FilterFields extends Schema.Struct.Fields | undefined = undefined,
+  const PageFields extends Schema.Struct.Fields = never,
+  const FilterFields extends Schema.Struct.Fields = never,
   DocMeta extends Schema.Top = typeof AnyMeta,
 >(
   resources: Resources,
@@ -1736,7 +1733,7 @@ const polymorphicDocument = (
 export const polymorphic = <
   FamilyName extends string,
   Members extends ReadonlyArray<Any>,
-  Base extends Any | undefined,
+  Base extends Any = never,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "get",
   const Path extends `/${string}` = `/${FamilyName}/:id`,
@@ -1779,8 +1776,8 @@ export const polymorphic = <
           readonly include: Include;
           readonly fields: Fields;
           readonly sort: false;
-          readonly page: undefined;
-          readonly filter: undefined;
+          readonly page: never;
+          readonly filter: never;
         },
       ),
       success: asJsonApi(
@@ -2050,7 +2047,7 @@ type RelationshipQueryOptions<R extends Any, Name extends string, Include, Field
   readonly fields: RelationshipQueryFields<R, Name, Include, Fields>;
   readonly sort: false;
   readonly page: PageFields;
-  readonly filter: undefined;
+  readonly filter: never;
 };
 
 // The `fields` option `getRelationship` hands `Query.schema` over the parent
@@ -2282,8 +2279,8 @@ export const related = <
     | boolean
     | ReadonlyArray<AttributeKeys<Target<Resource<Type, Attributes, Rels, Meta, IdSchema>, Name>>> =
     false,
-  const PageFields extends Schema.Struct.Fields | undefined = undefined,
-  const FilterFields extends Query.FilterOption | undefined = undefined,
+  const PageFields extends Schema.Struct.Fields = never,
+  const FilterFields extends Query.FilterOption = never,
   DocMeta extends Schema.Top = typeof AnyMeta,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
@@ -2482,7 +2479,7 @@ export const getRelationship = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `${Name}Relationship`,
   const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
-  const PageFields extends Schema.Struct.Fields | undefined = undefined,
+  const PageFields extends Schema.Struct.Fields = never,
   DocMeta extends Schema.Top = typeof AnyMeta,
   const Include extends RelationshipIncludeOption<
     Resource<Type, Attributes, Rels, Meta, IdSchema>,
@@ -2590,7 +2587,6 @@ export const getRelationship = <
           fields: options?.fields === true ? fieldsetNames : false,
           sort: false,
           page: options?.page,
-          filter: undefined,
         } as RelationshipQueryOptions<R, Name, Include, Fields, PageFields>,
       ),
       success: asJsonApi(success),
@@ -3397,12 +3393,10 @@ type ListSort<C, R extends Any, GSort extends boolean | ReadonlyArray<AttributeK
   FieldOr<C, "sort", GSort> extends boolean | ReadonlyArray<AttributeKeys<R>>
     ? FieldOr<C, "sort", GSort>
     : GSort;
-type ListPage<C, GPage extends Schema.Struct.Fields | undefined> =
-  FieldOr<C, "page", GPage> extends Schema.Struct.Fields | undefined
-    ? FieldOr<C, "page", GPage>
-    : GPage;
-type ListFilter<C, GFilter extends Query.FilterOption | undefined> =
-  FieldOr<C, "filter", GFilter> extends Query.FilterOption | undefined
+type ListPage<C, GPage extends Schema.Struct.Fields> =
+  FieldOr<C, "page", GPage> extends Schema.Struct.Fields ? FieldOr<C, "page", GPage> : GPage;
+type ListFilter<C, GFilter extends Query.FilterOption> =
+  FieldOr<C, "filter", GFilter> extends Query.FilterOption
     ? FieldOr<C, "filter", GFilter>
     : GFilter;
 
@@ -3481,8 +3475,8 @@ type GeneratedList<
   GSort extends
     | boolean
     | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
-  GPage extends Schema.Struct.Fields | undefined,
-  GFilter extends Query.FilterOption | undefined,
+  GPage extends Schema.Struct.Fields,
+  GFilter extends Query.FilterOption,
   GMeta,
   C = ConfigObject<E, "list">,
 > =
@@ -3671,10 +3665,8 @@ type RelRelationshipFields<RC, GRelFields extends boolean> =
   FieldOr<RC, "relationshipFields", GRelFields> extends boolean
     ? FieldOr<RC, "relationshipFields", GRelFields>
     : GRelFields;
-type RelPage<RC, GPage extends Schema.Struct.Fields | undefined> =
-  FieldOr<RC, "page", GPage> extends Schema.Struct.Fields | undefined
-    ? FieldOr<RC, "page", GPage>
-    : GPage;
+type RelPage<RC, GPage extends Schema.Struct.Fields> =
+  FieldOr<RC, "page", GPage> extends Schema.Struct.Fields ? FieldOr<RC, "page", GPage> : GPage;
 
 type GeneratedRelated<
   Type extends string,
@@ -3688,7 +3680,7 @@ type GeneratedRelated<
   GInclude extends boolean,
   GFields extends boolean,
   GSort,
-  GPage extends Schema.Struct.Fields | undefined,
+  GPage extends Schema.Struct.Fields,
 > =
   Rels[K] extends Relationship.ToMany<Any>
     ? ReturnType<
@@ -3706,7 +3698,7 @@ type GeneratedRelated<
           RelFields<RC, GFields>,
           EnabledSort<FieldOr<RC, "sort", GSort>>,
           RelPage<RC, GPage>,
-          undefined,
+          never,
           typeof AnyMeta
         >
       >
@@ -3724,8 +3716,8 @@ type GeneratedRelated<
           RelInclude<RC, GInclude>,
           RelFields<RC, GFields>,
           false,
-          undefined,
-          undefined,
+          never,
+          never,
           typeof AnyMeta
         >
       >;
@@ -3741,7 +3733,7 @@ type GeneratedRelationships<
   GInclude extends boolean,
   GFields extends boolean,
   GSort,
-  GPage extends Schema.Struct.Fields | undefined,
+  GPage extends Schema.Struct.Fields,
   GRelInclude = false,
   GRelFields extends boolean = false,
 > =
@@ -3778,7 +3770,7 @@ type GeneratedRelationships<
                   `/${Type}/:id/relationships/${K}`,
                   Rels[K] extends Relationship.ToMany<Any>
                     ? RelPage<RelConfigObject<RO, K>, GPage>
-                    : undefined,
+                    : never,
                   typeof AnyMeta,
                   RelRelationshipInclude<
                     Resource<Type, Attributes, Rels, Meta, IdSchema>,
@@ -3862,8 +3854,8 @@ export type ResourceEndpoint<
   Sort extends
     | boolean
     | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
-  Page extends Schema.Struct.Fields | undefined,
-  Filter extends Query.FilterOption | undefined,
+  Page extends Schema.Struct.Fields,
+  Filter extends Query.FilterOption,
   GMeta,
   GIdem extends Idempotency.Option = false,
   GRelInclude extends ResourceRelationshipIncludeOption = false,
@@ -3924,8 +3916,8 @@ export type ResourceEndpoints<
   Sort extends
     | boolean
     | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
-  Page extends Schema.Struct.Fields | undefined,
-  Filter extends Query.FilterOption | undefined,
+  Page extends Schema.Struct.Fields,
+  Filter extends Query.FilterOption,
   GMeta,
   GIdem extends Idempotency.Option = false,
   GRelInclude extends ResourceRelationshipIncludeOption = false,
@@ -3979,8 +3971,8 @@ export interface ResourceOptions<
   Sort extends
     | boolean
     | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
-  Page extends Schema.Struct.Fields | undefined,
-  Filter extends Query.FilterOption | undefined,
+  Page extends Schema.Struct.Fields,
+  Filter extends Query.FilterOption,
   GMeta extends Schema.Top,
   GIdem extends Idempotency.Option = false,
   GRelInclude extends ResourceRelationshipIncludeOption = false,
@@ -4205,8 +4197,8 @@ export const resource = <
   const Sort extends
     | boolean
     | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
-  const Page extends Schema.Struct.Fields | undefined = undefined,
-  const Filter extends Query.FilterOption | undefined = undefined,
+  const Page extends Schema.Struct.Fields = never,
+  const Filter extends Query.FilterOption = never,
   const GMeta extends Schema.Top = Meta,
   const GIdem extends Idempotency.Option = false,
   const GRelInclude extends ResourceRelationshipIncludeOption = false,

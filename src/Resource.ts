@@ -394,11 +394,9 @@ export type ReadOnlyAttribute<S extends Schema.Top> = Attribute<
  * Resolves an attribute's `clearable` flag: the explicit option when given,
  * otherwise whether the base schema is nullable.
  */
-type ResolveClearable<S extends Schema.Top, Clearable extends boolean | undefined> = [
-  Clearable,
-] extends [boolean]
-  ? Clearable
-  : IsNullable<S>;
+type ResolveClearable<S extends Schema.Top, Clearable extends boolean> = [Clearable] extends [never]
+  ? IsNullable<S>
+  : Clearable;
 
 // The `filter` / `sort` sugar of `attribute` at the type level: the same markers
 // `Filter.able` / `Sort.able` stamp, applied in that order, so both spellings
@@ -554,7 +552,7 @@ export const attribute = <
   const Resource extends boolean | "optional" = true,
   const Create extends AttributePresence = "required",
   const Update extends "optional" | false = "optional",
-  const Clearable extends boolean | undefined = undefined,
+  const Clearable extends boolean = never,
   const FilterDecl extends FilterDeclaration = false,
   const Sortable extends boolean = false,
   Literal = FilterLiteralType<S>,
@@ -3484,13 +3482,12 @@ export type ExtendedId<
   BaseId extends Schema.Codec<unknown, string>,
   Type extends string,
   Inherit extends boolean,
-  Custom extends Schema.Codec<unknown, string> | undefined = undefined,
-> =
-  Custom extends Schema.Codec<unknown, string>
-    ? Custom
-    : Inherit extends true
-      ? InheritedId<BaseId, Type>
-      : Id<Type>;
+  Custom extends Schema.Codec<unknown, string> = never,
+> = [Custom] extends [never]
+  ? Inherit extends true
+    ? InheritedId<BaseId, Type>
+    : Id<Type>
+  : Custom;
 
 // The base's id branded with the child's type. A `Filter.able` base id stays
 // filterable at runtime through the brand (a rebuild keeps the annotation), so
@@ -3587,7 +3584,7 @@ export const extend = <
   Meta extends Schema.Top = BaseMeta,
   BaseId extends Schema.Codec<unknown, string> = Id<BaseType>,
   const InheritId extends boolean = false,
-  IdSchema extends Schema.Codec<unknown, string> | undefined = undefined,
+  IdSchema extends Schema.Codec<unknown, string> = never,
 >(
   base: Parameter<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>,
   type: Type,
@@ -3610,7 +3607,7 @@ export const extend = <
      * a fresh independent id, so the child id is a subtype of the base id.
      * Defaults to `false`. Not admitted alongside `id`.
      */
-    readonly inheritId?: [IdSchema] extends [undefined] ? InheritId : false;
+    readonly inheritId?: [IdSchema] extends [never] ? InheritId : false;
     /**
      * Resource-level metadata for this resource, exactly as {@link make}'s
      * `annotations` option. The base's annotations are inherited; keys given
@@ -3796,34 +3793,36 @@ export type FamilyRelationships<Members extends ReadonlyArray<Any>> = Members ex
 export interface Family<
   Name extends string,
   Members extends ReadonlyArray<Any>,
-  Base extends Any | undefined = undefined,
+  Base extends Any = never,
 > extends Schema.Union<Members> {
   /** The family name (used to name groups; *not* a wire resource type). */
   readonly type: Name;
   /** The member resource definitions. */
   readonly members: Members;
   /** The shared id schema: the base's id, or a union of the members' ids. */
-  readonly Id: Base extends Any
-    ? Base["Id"]
-    : Schema.Union<{ readonly [K in keyof Members]: Members[K]["Id"] }>;
+  readonly Id: [Base] extends [never]
+    ? Schema.Union<{ readonly [K in keyof Members]: Members[K]["Id"] }>
+    : Base["Id"];
   /** The linkage schema: a union of the members' identifiers. */
   readonly identifier: FamilyIdentifier<Members>;
   /** The shared relationships: the base's, or the by-key intersection of the members'. */
-  readonly relationships: Base extends Any ? Base["relationships"] : FamilyRelationships<Members>;
+  readonly relationships: [Base] extends [never]
+    ? FamilyRelationships<Members>
+    : Base["relationships"];
   /**
    * The base's `maxUndeclaredMemberErrors`, for a family anchored on a base;
    * `undefined` on a name-only family, whose atomic operations use the default.
    *
    * @since 0.17.0
    */
-  readonly maxUndeclaredMemberErrors: Base extends Any
-    ? Base["maxUndeclaredMemberErrors"]
-    : undefined;
+  readonly maxUndeclaredMemberErrors: [Base] extends [never]
+    ? undefined
+    : Base["maxUndeclaredMemberErrors"];
   /** The shared attributes: the base's, or the by-key intersection of the members'. */
   readonly fields: {
-    readonly attributes: Base extends Any
-      ? Base["fields"]["attributes"]
-      : Schema.Struct<Schema.Struct.Fields>;
+    readonly attributes: [Base] extends [never]
+      ? Schema.Struct<Schema.Struct.Fields>
+      : Base["fields"]["attributes"];
   };
   /**
    * Single-resource document schema whose primary `data` is the member union
@@ -3848,7 +3847,7 @@ export interface Family<
 }
 
 // Any family, whether or not it is anchored to a base resource (`Base` is
-// `undefined` by default).
+// `never`, absent, by default).
 type AnyFamily = Family<string, ReadonlyArray<Any>, Any> | Family<string, ReadonlyArray<Any>>;
 
 /**

@@ -200,40 +200,29 @@ export interface CollectionDocument<R extends ResourceLike, I extends ResourceLi
  *
  * The top-level `links` member is the collection's own `self` link, and
  * `Self` is the type of the `self` option the document was assembled with:
- * `undefined` (the default — no `self` passed) means no `links` member at
- * all, `string` means `links.self` is always present, and `string |
- * undefined` (a `self` the caller may not have) means `links` is optional.
+ * `never` (the default — no `self` passed) means no `links` member at all,
+ * and `string` means `links.self` is always present.
  *
  * The top-level `meta` member is the caller's own document-level metadata,
  * passed through as given, and `M` is the type of the `meta` option, decided
- * the same way: `undefined` (the default — no `meta` passed) means no `meta`
- * member at all, an object type means `meta` is that type and always
- * present, and an object type `| undefined` means `meta` is optional.
+ * the same way: `never` (the default — no `meta` passed) means no `meta`
+ * member at all, and an object type means `meta` is that type and always
+ * present.
  *
  * @since 0.17.0
  * @category models
  */
 export type UnpaginatedCollectionDocument<
   R extends ResourceLike,
-  // oxlint-disable-next-line effect/prefer-option-over-null -- a type-level switch on the `self` option's type, not a runtime value: `undefined` selects the linkless document
-  Self extends string | undefined = undefined,
-  // oxlint-disable-next-line effect/prefer-option-over-null -- a type-level switch on the `meta` option's type, not a runtime value: `undefined` selects the document with no `meta`
-  M extends Handlers.MetaValue | undefined = undefined,
+  Self extends string = never,
+  M extends Handlers.MetaValue = never,
   I extends ResourceLike = ResourceLike,
 > = {
   readonly data: ReadonlyArray<WireResource<R> & { readonly meta?: Handlers.MetaValue }>;
   readonly included?: ReadonlyArray<WireResource<I>>;
   readonly jsonapi: typeof JSONAPI_MEMBER;
-} & ([Self] extends [undefined]
-  ? unknown
-  : [Self] extends [string]
-    ? { readonly links: { readonly self: string } }
-    : { readonly links?: { readonly self: string } }) &
-  ([M] extends [undefined]
-    ? unknown
-    : [undefined] extends [M]
-      ? { readonly meta?: Exclude<M, undefined> }
-      : { readonly meta: M });
+} & ([Self] extends [never] ? unknown : { readonly links: { readonly self: string } }) &
+  ([M] extends [never] ? unknown : { readonly meta: M });
 
 /**
  * A §8.4 relationship document as {@link relationship} assembles it: the
@@ -462,10 +451,11 @@ export interface CollectionOptions<
  * ({@link UnpaginatedCollectionDocument}).
  *
  * `Self` and `M` are decided from a concrete type, so a caller forwarding its
- * own generic parameter (`<S extends string | undefined>(self: S) => …`)
- * widens it at the call site — `self: self as string | undefined` (or `as
- * string`), and likewise `meta` to its object type — otherwise `query` is
- * rejected and `links` / `meta` stay unresolved.
+ * own generic parameter (`<S extends string>(self: S) => …`) widens it at the
+ * call site — `self: self as string`, and likewise `meta` to its object type
+ * — otherwise `query` is rejected and `links` / `meta` stay unresolved. A
+ * `self` or `meta` the caller may not have is passed only when it is defined:
+ * the option takes no explicit `undefined`.
  *
  * @since 0.17.0
  * @category models
@@ -473,39 +463,31 @@ export interface CollectionOptions<
 export interface UnpaginatedCollectionOptions<
   V = unknown,
   Targets extends Handlers.IncludeTargets = never,
-  // oxlint-disable-next-line effect/prefer-option-over-null -- inferred from the `self` option as passed; an `Option` there would stop a caller forwarding its own optional `self`
-  Self extends string | undefined = undefined,
-  // oxlint-disable-next-line effect/prefer-option-over-null -- inferred from the `meta` option as passed; an `Option` there would stop a caller forwarding its own optional `meta`
-  M extends Handlers.MetaValue | undefined = undefined,
+  Self extends string = never,
+  M extends Handlers.MetaValue = never,
   X extends ResourceLike = never,
 > extends CollectionOptions<V, Targets, X> {
   /**
    * The collection's own absolute URL, emitted as the document's
    * `links.self`. Supplied by the handler, as {@link Pagination.baseUrl} is,
-   * so the assembler stays request-agnostic. Omit it (or pass `undefined`)
-   * and the document has no `links` member.
-   *
-   * An explicit `undefined` is accepted only when `Self` already admits it,
-   * so a caller's own bare-optional `o.self` (read as `string | undefined`
-   * under `exactOptionalPropertyTypes`) forwards as is, while a `self` that
-   * infers as `string` keeps `links.self` required.
+   * so the assembler stays request-agnostic. Omit it and the document has no
+   * `links` member.
    */
-  readonly self?: Self | ([undefined] extends [Self] ? undefined : never);
+  readonly self?: Self;
   /**
    * The rest of the request's query as canonical wire pairs
    * (`Query.canonicalPairs(listQuery)(query)`) — `?include=`, each
    * `?filter[…]=`, `?sort=` — appended to `links.self` and serialised
    * canonically, as the pagination links of a {@link collection} carry
    * theirs, so `self` names the request the document answers. It rides on
-   * `self`: a call with no `self` can't pass it, and a `self` that turns out
-   * `undefined` drops it with the `links` member.
+   * `self`: a call with no `self` can't pass it.
    */
   // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes, as the sibling options do
-  readonly query?: ([Self] extends [undefined] ? never : ReadonlyArray<Query.Pair>) | undefined;
+  readonly query?: ([Self] extends [never] ? never : ReadonlyArray<Query.Pair>) | undefined;
   /**
    * The document's top-level `meta` — document-level metadata that isn't
    * page math: a generation timestamp, a cache hint, an application-specific
-   * summary — emitted as given. Omit it (or pass `undefined`) and the
+   * summary — emitted as given. Omit it and the
    * document has no `meta` member. `totalCount` is not special-cased: one
    * passed here is emitted verbatim and, with a `self`, makes the document
    * structurally assignable to {@link CollectionDocument} — a caller that
@@ -516,13 +498,8 @@ export interface UnpaginatedCollectionOptions<
    * constraint is `Handlers.MetaValue`, which a value typed by an `interface`
    * without an index signature doesn't satisfy (as on `Handlers.collection`):
    * spread it (`{ ...stamp }`) or declare its type with a `type` alias.
-   *
-   * An explicit `undefined` is accepted only when `M` already admits it, as
-   * for `self`, so a caller's own bare-optional `o.meta` forwards as is while
-   * a `meta` that infers as an object type keeps the document's `meta`
-   * required.
    */
-  readonly meta?: M | ([undefined] extends [M] ? undefined : never);
+  readonly meta?: M;
 }
 
 /**
@@ -1155,10 +1132,8 @@ export const unpaginatedCollection = <
   R extends ResourceLike,
   V = unknown,
   Targets extends Handlers.IncludeTargets = never,
-  // oxlint-disable-next-line effect/prefer-option-over-null -- see `UnpaginatedCollectionOptions`: inferred from the `self` option as passed
-  Self extends string | undefined = undefined,
-  // oxlint-disable-next-line effect/prefer-option-over-null -- see `UnpaginatedCollectionOptions`: inferred from the `meta` option as passed
-  const M extends Handlers.MetaValue | undefined = undefined,
+  Self extends string = never,
+  const M extends Handlers.MetaValue = never,
   X extends ResourceLike = never,
 >(
   resources: ReadonlyArray<R>,
@@ -1168,7 +1143,7 @@ export const unpaginatedCollection = <
   // type; `M` is not, since the document emits that very value.
   UnpaginatedCollectionDocument<
     R,
-    Self extends string ? string : undefined,
+    [Self] extends [never] ? never : string,
     M,
     TargetsIncluded<Targets> | X
   >,
@@ -1184,7 +1159,7 @@ export const unpaginatedCollection = <
   return assembleCollection<
     UnpaginatedCollectionDocument<
       R,
-      Self extends string ? string : undefined,
+      [Self] extends [never] ? never : string,
       M,
       TargetsIncluded<Targets> | X
     >,
