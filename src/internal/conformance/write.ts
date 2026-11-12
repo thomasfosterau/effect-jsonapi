@@ -562,11 +562,9 @@ const record = (
       id,
       rule: rule.id,
       disposal: "left",
-      detail: undefined,
     }),
     onFailure: (detail) => ({
       type: payload.type,
-      id: undefined,
       rule: rule.id,
       disposal: "left",
       detail,
@@ -593,7 +591,7 @@ const runCleanup = (
       Exit.match({
         onSuccess: () => {
           entry.disposal = "cleaned-up";
-          entry.detail = undefined;
+          delete entry.detail;
         },
         onFailure: (cause) => {
           entry.disposal = "cleanup-failed";
@@ -781,12 +779,10 @@ export const withBatch = <A>(
             id: own,
             rule: rule.id,
             disposal: "left",
-            detail: undefined,
           };
         },
         onFailure: (detail) => ({
           type: payload.type,
-          id: undefined,
           rule: rule.id,
           disposal: "left",
           detail,

@@ -509,7 +509,7 @@ describe("Conformance: the report", () => {
       version: "1.1",
       transport: "in-process",
       outcomes: [
-        { _tag: "Passed", rule, probes: 2, note: undefined },
+        { _tag: "Passed", rule, probes: 2 },
         {
           _tag: "Failed",
           rule: Conformance.rules[1],
@@ -565,7 +565,6 @@ describe("Conformance: the report", () => {
               detail: "the member `a\nb` is not allowed",
               expected: "x",
               observed: "y",
-              probe: undefined,
             },
           ],
         },
@@ -595,7 +594,6 @@ describe("Conformance: the report", () => {
               detail: "d",
               expected: "x\ny",
               observed: "a\nb:1",
-              probe: undefined,
             },
           ],
         },
@@ -615,9 +613,9 @@ describe("Conformance: the report", () => {
       outcomes: [],
       gaps: [],
       writes: [
-        { type: "articles", id: "1", rule: "r/a", disposal: "deleted", detail: undefined },
+        { type: "articles", id: "1", rule: "r/a", disposal: "deleted" },
         { type: "articles", id: "2", rule: "r/b", disposal: "left", detail: "no cleanup" },
-        { type: "articles", id: undefined, rule: "r/c", disposal: "left", detail: "named x" },
+        { type: "articles", rule: "r/c", disposal: "left", detail: "named x" },
       ],
     });
     expect(text).toContain("3 resources created · 2 still in place");
@@ -632,7 +630,7 @@ describe("Conformance: the report", () => {
       version: "1.1",
       transport: "in-process",
       outcomes: [
-        { _tag: "Passed", rule, probes: 3, note: undefined },
+        { _tag: "Passed", rule, probes: 3 },
         { _tag: "Skipped", rule: Conformance.rules[1], reason: "nope" },
       ],
       gaps: [],
@@ -659,8 +657,8 @@ describe("Conformance: the report", () => {
             rule,
             probes: 1,
             findings: [
-              { rule, detail: "first", expected: "e", observed: "o", probe: undefined },
-              { rule, detail: "second", expected: "e", observed: "o", probe: undefined },
+              { rule, detail: "first", expected: "e", observed: "o" },
+              { rule, detail: "second", expected: "e", observed: "o" },
             ],
           },
         ],
@@ -684,7 +682,7 @@ describe("Conformance: the report", () => {
         version: "1.1",
         transport: "in-process",
         outcomes: [
-          { _tag: "Passed", rule, probes: 2, note: undefined },
+          { _tag: "Passed", rule, probes: 2 },
           { _tag: "Errored", rule, message: "the transport fell over", defect },
         ],
         gaps: [],
@@ -725,7 +723,7 @@ describe("Conformance: the report", () => {
             _tag: "Failed",
             rule,
             probes: 1,
-            findings: [{ rule, detail: "d", expected: "e", observed: "o", probe: undefined }],
+            findings: [{ rule, detail: "d", expected: "e", observed: "o" }],
           },
         ],
       });
@@ -1787,8 +1785,8 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
       expect(failed(report)).toEqual([]);
       const include = outcomeFor(report, INCLUDE);
       const sort = outcomeFor(report, SORT);
-      expect(include).toMatchObject({ _tag: "Passed", probes: 2, note: undefined });
-      expect(sort).toMatchObject({ _tag: "Passed", probes: 2, note: undefined });
+      expect(include).toMatchObject({ _tag: "Passed", probes: 2 });
+      expect(sort).toMatchObject({ _tag: "Passed", probes: 2 });
     }),
   );
 
@@ -2009,7 +2007,6 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
       expect(outcomeFor(report, SORT)).toMatchObject({
         _tag: "Passed",
         probes: 3,
-        note: undefined,
       });
       expect(seen).toEqual(["/articles/1/author", "/articles", "/articles?sort=title"]);
     }),
@@ -2259,7 +2256,7 @@ describe("Conformance: a parameter whose name alone requires a 400", () => {
         },
         { only: [id] },
       );
-      expect(outcomeFor(report, id)).toMatchObject({ _tag: "Passed", probes: 2, note: undefined });
+      expect(outcomeFor(report, id)).toMatchObject({ _tag: "Passed", probes: 2 });
       expect(seen).toEqual(["/articles/1", `/articles/1?${name}=1`]);
     }),
   );
@@ -2522,9 +2519,7 @@ describe("Conformance: a family or member the endpoint does not declare", () => 
         });
         expect(failed(report)).toEqual([]);
         expect(Arr.map(ALL, (id) => outcomeFor(report, id))).toEqual(
-          Arr.map(ALL, () =>
-            expect.objectContaining({ _tag: "Passed", probes: 2, note: undefined }),
-          ),
+          Arr.map(ALL, () => expect.objectContaining({ _tag: "Passed", probes: 2 })),
         );
         // A baseline, then the probe, for each rule in turn: never a declared name.
         const probed = seen.filter((path) => PROBES.some(([, , url]) => url === path));
@@ -3594,7 +3589,6 @@ describe("Conformance: the filter evaluation oracle", () => {
       expect(outcomeFor(report, RULE)).toMatchObject({
         _tag: "Passed",
         probes: 30,
-        note: undefined,
       });
     }),
   );
@@ -4943,18 +4937,22 @@ describe("Conformance: the write fixture", () => {
         const direct = yield* run();
         const failedOnce = new WeakSet<HttpClientRequest.HttpClientRequest>();
         let refused = 0;
-        const { report } = yield* run(undefined, () => ({ requestTimeout }), {
-          client: (canned) =>
-            HttpClient.retry(
-              HttpClient.mapRequestEffect(canned, (request) => {
-                if (failedOnce.has(request)) return Effect.succeed(request);
-                failedOnce.add(request);
-                refused += 1;
-                return Effect.fail(unprepared(request));
-              }),
-              { times: 1 },
-            ),
-        });
+        const { report } = yield* run(
+          undefined,
+          () => definedMember("requestTimeout", requestTimeout),
+          {
+            client: (canned) =>
+              HttpClient.retry(
+                HttpClient.mapRequestEffect(canned, (request) => {
+                  if (failedOnce.has(request)) return Effect.succeed(request);
+                  failedOnce.add(request);
+                  refused += 1;
+                  return Effect.fail(unprepared(request));
+                }),
+                { times: 1 },
+              ),
+          },
+        );
         expect(refused).toBeGreaterThan(0);
         expect(failed(report)).toEqual([]);
         expect(verdicts(report)).toEqual(verdicts(direct.report));
@@ -5690,12 +5688,12 @@ describe("Conformance: the write fixture", () => {
         expect(writes).toEqual(
           CREATING_RULES.map(() =>
             expect.objectContaining({
-              id: undefined,
               disposal: "left",
               detail: expect.stringMatching(new RegExp(`\`${type}:${id}\`.*not touched`)),
             }),
           ),
         );
+        expect(writes.filter((write) => "id" in write)).toEqual([]);
         // The rules that act on the created resource decide nothing on it.
         expect(outcomeFor(report, "spec/status/update-response")).toEqual(
           skippedFor("not touched"),
@@ -5724,7 +5722,6 @@ describe("Conformance: the write fixture", () => {
         expect(writes).toEqual(
           CREATING_RULES.map(() =>
             expect.objectContaining({
-              id: undefined,
               disposal: "left",
               detail: expect.stringContaining(
                 `\`articles:${id}\`, which is not a URL path segment of its own`,
@@ -5732,6 +5729,7 @@ describe("Conformance: the write fixture", () => {
             }),
           ),
         );
+        expect(writes.filter((write) => "id" in write)).toEqual([]);
         expect(outcomeFor(report, "spec/status/update-response")).toEqual(
           skippedFor("not touched"),
         );
@@ -5782,12 +5780,12 @@ describe("Conformance: the write fixture", () => {
       expect(writes).toEqual(
         CREATING_RULES.map(() =>
           expect.objectContaining({
-            id: undefined,
             disposal: "left",
             detail: expect.stringContaining("`articles:7`, which the kit did not create (a read"),
           }),
         ),
       );
+      expect(writes.filter((write) => "id" in write)).toEqual([]);
     }),
   );
 
@@ -5796,7 +5794,8 @@ describe("Conformance: the write fixture", () => {
       // A 404 is no evidence the server holds articles:7, so the first create
       // naming it is taken at its word.
       const { writes } = yield* run(showing({ data: { ...seven, attributes: {} } }, 404));
-      expect(writes[0]).toEqual(expect.objectContaining({ id: "7", detail: undefined }));
+      expect(writes[0]).toEqual(expect.objectContaining({ id: "7" }));
+      expect(writes[0]).not.toHaveProperty("detail");
     }),
   );
 
@@ -7080,7 +7079,7 @@ describe("Conformance: pagination links enumerate the collection", () => {
     Effect.gen(function* () {
       const server = recording(offsetPager());
       const outcome = outcomeFor(yield* verifyPaged(server.serve, offsetApi), RULE);
-      expect(outcome).toMatchObject({ _tag: "Passed", note: undefined });
+      expect(outcome).toMatchObject({ _tag: "Passed" });
       // The whole collection first, then three pages of three, the third reached
       // through the second's `next`, and the `first` link once.
       expect(server.paths).toEqual([
@@ -7975,7 +7974,7 @@ describe("Conformance: pagination links enumerate the collection", () => {
         offsetApi,
         TagsLive.pipe(Layer.provideMerge(Middleware.layer)),
       )({ only: [RULE] });
-      expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", note: undefined });
+      expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed" });
     }),
   );
 
@@ -8175,7 +8174,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
       const server = recording(linked());
       const report = yield* verifyCanned(server.serve, { only: [SELF] }, server.client);
       const outcome = outcomeFor(report, SELF);
-      expect(outcome).toMatchObject({ _tag: "Passed", note: undefined });
+      expect(outcome).toMatchObject({ _tag: "Passed" });
       // The read endpoints first, in discovery order, then each `self` the kit
       // has not already fetched: `/articles/1` is the get endpoint's own answer,
       // so it costs nothing.
@@ -8189,13 +8188,12 @@ describe("Conformance: `self` and `related` links dereference", () => {
       const server = recording(linked());
       const report = yield* verifyCanned(server.serve, { only: [RELATED] }, server.client);
       const outcome = outcomeFor(report, RELATED);
-      expect(outcome).toMatchObject({ _tag: "Passed", note: undefined });
+      expect(outcome).toMatchObject({ _tag: "Passed" });
       // The SHOULD follows the same links, less the links-only `comments`.
       const matches = recording(linked());
       const compared = yield* verifyCanned(matches.serve, { only: [MATCHES] }, matches.client);
       expect(outcomeFor(compared, MATCHES)).toMatchObject({
         _tag: "Passed",
-        note: undefined,
         probes: 6,
       });
       expect(matches.paths().filter((path) => path.endsWith("/comments"))).toEqual([]);
@@ -8398,8 +8396,8 @@ describe("Conformance: `self` and `related` links dereference", () => {
         }),
       );
       const report = yield* verifyCanned(server.serve, { only: [SELF, RELATED] }, server.client);
-      expect(outcomeFor(report, SELF)).toMatchObject({ _tag: "Passed", note: undefined });
-      expect(outcomeFor(report, RELATED)).toMatchObject({ _tag: "Passed", note: undefined });
+      expect(outcomeFor(report, SELF)).toMatchObject({ _tag: "Passed" });
+      expect(outcomeFor(report, RELATED)).toMatchObject({ _tag: "Passed" });
       expect(server.paths()).toContain("/articles/2");
       expect(server.paths()).toContain("/articles/2/author");
       // And reads what it found there.
@@ -8430,8 +8428,8 @@ describe("Conformance: `self` and `related` links dereference", () => {
         }),
       );
       const report = yield* verifyCanned(server.serve, { only: [SELF, RELATED] }, server.client);
-      expect(outcomeFor(report, SELF)).toMatchObject({ _tag: "Passed", note: undefined });
-      expect(outcomeFor(report, RELATED)).toMatchObject({ _tag: "Passed", note: undefined });
+      expect(outcomeFor(report, SELF)).toMatchObject({ _tag: "Passed" });
+      expect(outcomeFor(report, RELATED)).toMatchObject({ _tag: "Passed" });
       expect(server.paths()).toContain("/articles/1/author");
       expect(server.paths().filter((path) => path.startsWith("/1"))).toEqual([]);
     }),
@@ -8482,7 +8480,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
     Effect.gen(function* () {
       const server = recording(linked({ self: (id) => `http://fixture.test/articles/${id}` }));
       const report = yield* verifyCanned(server.serve, { only: [SELF] }, server.client);
-      expect(outcomeFor(report, SELF)).toMatchObject({ _tag: "Passed", note: undefined });
+      expect(outcomeFor(report, SELF)).toMatchObject({ _tag: "Passed" });
       expect(server.paths()).toContain("/articles/2");
     }),
   );
@@ -8635,7 +8633,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
       // A to-one `related` answering another resource is resource data: the
       // MUST holds; only the SHOULD that compares it with the linkage fails.
       const report = yield* run(at("/articles/1/author", { body: { data: person("10") } }));
-      expect(outcomeFor(report, RELATED)).toMatchObject({ _tag: "Passed", note: undefined });
+      expect(outcomeFor(report, RELATED)).toMatchObject({ _tag: "Passed" });
       expect(findingsOf(outcomeFor(report, MATCHES))).toEqual([
         "the `related` link of articles:1's `author` (in /articles/1, at /data) answers a different resource from the one its linkage names | people:10",
       ]);
@@ -8800,7 +8798,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
           },
           { only: [SELF] },
         );
-        expect(outcomeFor(report, SELF)).toMatchObject({ _tag: "Passed", note: undefined });
+        expect(outcomeFor(report, SELF)).toMatchObject({ _tag: "Passed" });
         expect(seen).toEqual(["/articles/1", "/articles/1/author", "/people/9"]);
       }),
   );
@@ -9006,7 +9004,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
           ),
         );
         const report = yield* run(hopped.serve, hopped.client);
-        expect(outcomeFor(report, SELF)).toMatchObject({ _tag: "Passed", note: undefined });
+        expect(outcomeFor(report, SELF)).toMatchObject({ _tag: "Passed" });
         expect(hopped.paths()).toContain("/old/2");
         expect(hopped.urls.every((url) => url.startsWith("http://fixture.test/"))).toBe(true);
         // The hop is a request of its own, counted against the rule's budget.
@@ -9280,7 +9278,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
         server.client,
       );
       const outcome = outcomeFor(report, RELATIONSHIP_SELF);
-      expect(outcome).toMatchObject({ _tag: "Passed", note: undefined, probes: 8 });
+      expect(outcome).toMatchObject({ _tag: "Passed", probes: 8 });
       expect(server.paths()).toEqual([
         "/articles/1",
         "/articles",
@@ -9300,7 +9298,6 @@ describe("Conformance: `self` and `related` links dereference", () => {
       );
       expect(outcomeFor(compared, RELATIONSHIP_MATCHES)).toMatchObject({
         _tag: "Passed",
-        note: undefined,
         probes: 6,
       });
       expect(matches.paths().filter((path) => path.endsWith("/comments"))).toEqual([]);
@@ -9554,11 +9551,9 @@ describe("Conformance: `self` and `related` links dereference", () => {
         );
         expect(outcomeFor(report, RELATIONSHIP_SELF)).toMatchObject({
           _tag: "Passed",
-          note: undefined,
         });
         expect(outcomeFor(report, RELATIONSHIP_MATCHES)).toMatchObject({
           _tag: "Passed",
-          note: undefined,
         });
       }),
   );
@@ -9684,7 +9679,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
         // `comments`, one identifier for `author` — passes.
         expect(
           yield* outcomeOver(declaring("author", "comments"), linked({ author: linksOnlyAuthor })),
-        ).toMatchObject({ _tag: "Passed", note: undefined });
+        ).toMatchObject({ _tag: "Passed" });
         const authorFinding =
           'the `self` link of articles:1\'s `author` (in /articles/1, at /data) answers to-many linkage (an array of resource identifiers) where the relationship is to-one, as the relationship endpoint `articles.authorRelationship` (`GET /articles/:id/relationships/author`) declares | `data: [{"type":"people","id":"9"}]`';
         const outcome = yield* outcomeOver(declaring("author", "comments"), wrong);
@@ -9718,7 +9713,6 @@ describe("Conformance: `self` and `related` links dereference", () => {
         );
         expect(yield* outcomeOver(unknown, wrong)).toMatchObject({
           _tag: "Passed",
-          note: undefined,
         });
       }),
   );
@@ -9811,7 +9805,6 @@ describe("Conformance: `self` and `related` links dereference", () => {
       // `/articles/1`'s own `self` is the URL it was fetched by, so it costs no request.
       expect(outcomeFor(report, TOP_SELF)).toMatchObject({
         _tag: "Passed",
-        note: undefined,
         probes: 3,
       });
       expect(server.paths()).toEqual(["/articles/1", "/articles", "/articles"]);
@@ -9820,7 +9813,6 @@ describe("Conformance: `self` and `related` links dereference", () => {
       const compared = yield* verifyCanned(matches.serve, { only: [TOP_MATCHES] }, matches.client);
       expect(outcomeFor(compared, TOP_MATCHES)).toMatchObject({
         _tag: "Passed",
-        note: undefined,
         probes: 3,
       });
       expect(matches.paths()).toEqual(server.paths());
@@ -9833,7 +9825,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
       Effect.gen(function* () {
         // A different resource is resource data: the MUST holds, the SHOULD fails.
         const report = yield* run(selfAt("/articles/1", "/articles/2"));
-        expect(outcomeFor(report, TOP_SELF)).toMatchObject({ _tag: "Passed", note: undefined });
+        expect(outcomeFor(report, TOP_SELF)).toMatchObject({ _tag: "Passed" });
         expect(findingsOf(outcomeFor(report, TOP_MATCHES))).toEqual([
           "the top-level `self` link of /articles/1 answers a different resource as primary data | articles:2",
         ]);
@@ -10164,7 +10156,6 @@ describe("Conformance: in-process", () => {
         expect(outcomeFor(report, "spec/query/sort-unsupported-endpoint")).toMatchObject({
           _tag: "Passed",
           probes: 2,
-          note: undefined,
         });
       }),
   );
@@ -10186,7 +10177,6 @@ describe("Conformance: in-process", () => {
       expect(outcomeFor(report, "spec/query/include-unsupported-endpoint")).toMatchObject({
         _tag: "Passed",
         probes: 2,
-        note: undefined,
       });
     }),
   );
@@ -11395,7 +11385,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
             posts: {
               create: () => ({ type: "posts", attributes: { title: `post ${++sequence}` } }),
               cleanup: (id) => Effect.sync(() => MutableHashMap.remove(posts, id)),
-              clientId: clientId === "none" ? undefined : clientId,
+              ...definedMember("clientId", clientId === "none" ? undefined : clientId),
             },
           },
         },
@@ -11512,10 +11502,14 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
         ]);
         // The second answer names the id the first create holds, so the kit
         // refuses it; the first is disposed of, which leaves the store empty.
-        expect(writes.filter((write) => write.rule === "spec/status/create-conflict-id")).toEqual([
+        const conflicting = writes.filter(
+          (write) => write.rule === "spec/status/create-conflict-id",
+        );
+        expect(conflicting).toEqual([
           expect.objectContaining({ disposal: "cleaned-up" }),
-          expect.objectContaining({ id: undefined, disposal: "left" }),
+          expect.objectContaining({ disposal: "left" }),
         ]);
+        expect(conflicting[1]).not.toHaveProperty("id");
         expect(MutableHashMap.size(posts)).toBe(0);
       }),
   );
@@ -11995,7 +11989,7 @@ describe("Conformance: client-generated ids through atomic operations", () => {
             posts: {
               create: () => ({ type: "posts", attributes: { title: `post ${++sequence}` } }),
               cleanup: (id) => Effect.sync(() => MutableHashMap.remove(posts, id)),
-              clientId: clientId === "none" ? undefined : clientId,
+              ...definedMember("clientId", clientId === "none" ? undefined : clientId),
             },
           },
         },
@@ -12075,10 +12069,12 @@ describe("Conformance: client-generated ids through atomic operations", () => {
       ]);
       // The second answer names the id the first holds, so the kit refuses it;
       // the first is disposed of, which leaves the store empty.
-      expect(writes.filter((write) => write.rule === "spec/atomic/add-conflict-id")).toEqual([
+      const conflicting = writes.filter((write) => write.rule === "spec/atomic/add-conflict-id");
+      expect(conflicting).toEqual([
         expect.objectContaining({ disposal: "cleaned-up" }),
-        expect.objectContaining({ id: undefined, disposal: "left" }),
+        expect.objectContaining({ disposal: "left" }),
       ]);
+      expect(conflicting[1]).not.toHaveProperty("id");
       expect(MutableHashMap.size(posts)).toBe(0);
     }),
   );

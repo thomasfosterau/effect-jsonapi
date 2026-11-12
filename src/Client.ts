@@ -462,19 +462,17 @@ export const transform: <E, R>(
  */
 export interface MakeOptions extends NegotiationOptions {
   /** The base URL every request is resolved against. */
-  readonly baseUrl?: URL | string | undefined;
+  readonly baseUrl?: URL | string;
   /**
    * A further transformation of the underlying `HttpClient` — authentication
    * headers, retries, tracing. It is applied *after* the JSON:API negotiation
    * transform, so it can override the headers if it needs to.
    */
-  readonly transformClient?: ((client: HttpClient.HttpClient) => HttpClient.HttpClient) | undefined;
+  readonly transformClient?: (client: HttpClient.HttpClient) => HttpClient.HttpClient;
   /** A transformation of each endpoint's response effect. */
-  readonly transformResponse?:
-    | ((
-        effect: Effect.Effect<unknown, unknown, unknown>,
-      ) => Effect.Effect<unknown, unknown, unknown>)
-    | undefined;
+  readonly transformResponse?: (
+    effect: Effect.Effect<unknown, unknown, unknown>,
+  ) => Effect.Effect<unknown, unknown, unknown>;
   /**
    * Fail every call the server answered with an error response as a decoded
    * {@link ErrorResponse} — its status, a readable message and the JSON:API
@@ -489,7 +487,7 @@ export interface MakeOptions extends NegotiationOptions {
    *
    * @since 0.16.0
    */
-  readonly decodeErrors?: boolean | undefined;
+  readonly decodeErrors?: boolean;
 }
 
 /**
@@ -930,20 +928,21 @@ export const hasNextPage = (offset: number, limit: number, totalCount: number): 
 // ---------------------------------------------------------------------------
 
 /**
- * Loose call-site input for a wrapper: every field optional and explicitly
- * `undefined`-tolerant, matching how a page builds inputs
- * (`{ limit: x ?? 50, q: maybeUndefined }`). {@link decodeInput} strips the
- * `undefined` members and decodes through the schema, so required fields and
+ * Loose call-site input for a wrapper: every field optional, so a page
+ * passes only what it has. A value that may be `undefined` is left out with
+ * {@link stripUndefined} (`decode(Client.stripUndefined({ limit, q }))`).
+ * {@link decodeInput} decodes through the schema, so required fields and
  * bounds are still enforced.
  *
  * @since 0.16.0
  * @category models
  */
-export type LooseInput<T> = { readonly [K in keyof T]?: T[K] | undefined };
+export type LooseInput<T> = { readonly [K in keyof T]?: T[K] };
 
 /**
  * Drops explicitly-`undefined` members, so an absent key and a key set to
- * `undefined` decode alike.
+ * `undefined` decode alike — the way to build a {@link LooseInput} from
+ * values a page may not have.
  *
  * @since 0.16.0
  * @category utils
@@ -967,7 +966,9 @@ export const stripUndefined = <T extends object>(
  *
  * const ListPeople = FlatQuery.listInput({ maxLimit: 100 }, { q: Schema.optionalKey(Schema.String) })
  * const decode = Client.decodeInput(ListPeople)
- * console.log(Effect.runSync(decode({ limit: 5, q: undefined })))
+ * // A page's search term, which it may not have.
+ * const search = (q?: string) => decode(Client.stripUndefined({ limit: 5, q }))
+ * console.log(Effect.runSync(search()))
  * // → { offset: 0, limit: 5 }
  * ```
  *
@@ -1006,9 +1007,7 @@ const refKey = (ref: { readonly type: string; readonly id: string }): string =>
  * @since 0.16.0
  * @category constructors
  */
-export const indexIncluded = (
-  included: ReadonlyArray<IncludedResource> | undefined,
-): IncludedIndex =>
+export const indexIncluded = (included?: ReadonlyArray<IncludedResource>): IncludedIndex =>
   HashMap.fromIterable(
     Arr.map(included ?? [], (resource) => [refKey(resource), resource] as const),
   );
@@ -1108,7 +1107,7 @@ export type PathTarget<R extends Any, Path> = Path extends `${infer Head}.${infe
  */
 export const related = <R extends Any, const K extends RelationshipName<R>>(
   resource: R,
-  data: LinkedResource | undefined,
+  data: LinkedResource,
   key: K,
   index: IncludedIndex,
 ): Related<R, K> => {
@@ -1134,7 +1133,7 @@ export const related = <R extends Any, const K extends RelationshipName<R>>(
  */
 export const walk = <R extends Any, const P extends IncludePathsTo<R, 3>>(
   _resource: R,
-  data: LinkedResource | undefined,
+  data: LinkedResource,
   path: P,
   index: IncludedIndex,
 ): ReadonlyArray<PathTarget<R, P>["Type"]> => {
@@ -1220,7 +1219,9 @@ export const hydrate = <R extends Any>(
   },
 ): Hydrated<R> => {
   const index = indexIncluded(document.included);
-  const data = document.data ?? undefined;
+  // A document whose primary data is `null` links nothing: a resource with
+  // no `relationships` member resolves every key and path to nothing.
+  const data: LinkedResource = document.data ?? {};
   return {
     index,
     related: (key) => related(resource, data, key, index),
@@ -1256,18 +1257,22 @@ export interface PageCursorOptions {
    * independently paginated lists names one prefix per list so their
    * cursors don't collide.
    */
-  readonly key?: string | undefined;
+  readonly key?: string;
   /** The limit read when the URL names none, or names one that is malformed. Defaults to `50`. */
-  readonly defaultLimit?: number | undefined;
+  readonly defaultLimit?: number;
   /** The largest limit honoured; a larger one is clamped. Defaults to `100`. */
-  readonly maxLimit?: number | undefined;
+  readonly maxLimit?: number;
 }
 
-const nonNegativeInt = (raw: string | null): Option.Option<number> =>
+const nonNegativeInt = (raw: Option.Option<string>): Option.Option<number> =>
   Option.flatMap(
-    Option.filter(Option.fromNullOr(raw), (raw) => raw.trim() !== ""),
+    Option.filter(raw, (raw) => raw.trim() !== ""),
     (raw) => Option.liftPredicate(Number(raw), (parsed) => Number.isInteger(parsed) && parsed >= 0),
   );
+
+// `URLSearchParams.get` answers `null` for an absent parameter.
+const searchParam = (params: URLSearchParams, name: string): Option.Option<string> =>
+  Option.fromNullOr(params.get(name));
 
 const searchParamsOf = (source: URL | URLSearchParams | string): URLSearchParams =>
   source instanceof URLSearchParams
@@ -1304,10 +1309,10 @@ export const readPageCursor = (
   const key = options?.key ?? "page";
   const params = searchParamsOf(source);
   const limit = Option.getOrElse(
-    nonNegativeInt(params.get(`${key}[limit]`)),
+    nonNegativeInt(searchParam(params, `${key}[limit]`)),
     () => options?.defaultLimit ?? 50,
   );
-  const offset = Option.getOrElse(nonNegativeInt(params.get(`${key}[offset]`)), () => 0);
+  const offset = Option.getOrElse(nonNegativeInt(searchParam(params, `${key}[offset]`)), () => 0);
   return { offset, limit: Math.min(Math.max(limit, 1), options?.maxLimit ?? 100) };
 };
 
@@ -1340,17 +1345,18 @@ export const pageHref = (
 };
 
 /**
- * The page's own query keys, as it has them: a blank or absent value means
- * "not applied" and is left off the link rather than written as an empty key.
+ * The page's own query keys, as it has them: a blank value means "not
+ * applied" and is left off the link rather than written as an empty key. A
+ * filter the page may not have is left out of the record.
  *
  * @since 0.16.0
  * @category models
  */
-export type PageFilters = { readonly [key: string]: string | undefined };
+export type PageFilters = { readonly [key: string]: string };
 
 const appliedFilters = (filters: PageFilters): Array<[string, string]> =>
   R.toEntries(filters).flatMap(([key, value]): Array<[string, string]> =>
-    value === undefined || value === "" ? [] : [[key, value]],
+    value === "" ? [] : [[key, value]],
   );
 
 /**

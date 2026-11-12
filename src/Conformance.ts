@@ -587,7 +587,7 @@ export interface Report {
    *
    * @since 0.17.0
    */
-  readonly writes?: ReadonlyArray<Write> | undefined;
+  readonly writes?: ReadonlyArray<Write>;
   /**
    * Every `/:type/:id` read the `ids` samples resolve that the run made, in
    * discovery order, with the status it answered. A non-`2xx` one is a sample the server does
@@ -596,7 +596,7 @@ export interface Report {
    *
    * @since 0.17.0
    */
-  readonly samples?: ReadonlyArray<Sample> | undefined;
+  readonly samples?: ReadonlyArray<Sample>;
 }
 
 /**
@@ -847,29 +847,29 @@ export interface Options {
    * A known-existing id per resource type, keyed by the type name — which under
    * the conventional paths is the first literal path segment.
    */
-  readonly ids?: Readonly<Record<string, string>> | undefined;
+  readonly ids?: Readonly<Record<string, string>>;
   /**
    * An explicit URL path for an endpoint, keyed `"<group>.<endpoint>"`, for
    * paths the `ids` convention cannot resolve (several path parameters, or a
    * path that does not begin with the resource type).
    */
-  readonly paths?: Readonly<Record<string, string>> | undefined;
+  readonly paths?: Readonly<Record<string, string>>;
   /**
    * An id the target is known *not* to have, used to probe the 404 rules.
    * Defaults to a value no realistic fixture would use.
    */
-  readonly absentId?: string | undefined;
+  readonly absentId?: string;
   /**
    * Extension URIs the target advertises support for. Only affects which `ext`
    * URI the kit treats as unsupported when probing negotiation.
    */
-  readonly extensions?: ReadonlyArray<string> | undefined;
+  readonly extensions?: ReadonlyArray<string>;
   /**
    * Run the rules whose probes change the target's state. Off by default: a
    * conformance run should be safe to point at a live server. The write rules
    * also need a {@link WriteFixture} per type in `writes`.
    */
-  readonly mutating?: boolean | undefined;
+  readonly mutating?: boolean;
   /**
    * The write fixture per resource type, keyed like `ids`: a payload to create
    * a disposable target with, an update to apply to it, and how to remove it.
@@ -877,9 +877,9 @@ export interface Options {
    *
    * @since 0.17.0
    */
-  readonly writes?: Readonly<Record<string, WriteFixture>> | undefined;
+  readonly writes?: Readonly<Record<string, WriteFixture>>;
   /** Which tiers to run. Defaults to both. */
-  readonly tiers?: ReadonlyArray<Tier> | undefined;
+  readonly tiers?: ReadonlyArray<Tier>;
   /**
    * Run only these rule ids. Each entry matches by path segment: the rule
    * with that id, and every rule whose id continues it with `/`. So
@@ -889,7 +889,7 @@ export interface Options {
    * segment such as `["spec/content-neg"]` nothing. A rule it does not select
    * is left out of the run and out of the report.
    */
-  readonly only?: ReadonlyArray<string> | undefined;
+  readonly only?: ReadonlyArray<string>;
   /**
    * Leave out these rule ids — the complement of `only`, matched the same
    * way, by path segment: an entry matches the rule with that id and every
@@ -904,7 +904,7 @@ export interface Options {
    *
    * @since 0.17.0
    */
-  readonly skip?: ReadonlyArray<string> | undefined;
+  readonly skip?: ReadonlyArray<string>;
   /**
    * The longest the kit waits for one request to be answered and its body
    * read, as any `Duration.Input` (`"5 seconds"`, `Duration.seconds(5)`, a
@@ -923,9 +923,9 @@ export interface Options {
    *
    * @since 0.17.0
    */
-  readonly requestTimeout?: Duration.Input | undefined;
+  readonly requestTimeout?: Duration.Input;
   /** A name for the report's header. Defaults to the `HttpApi`'s identifier. */
-  readonly target?: string | undefined;
+  readonly target?: string;
 }
 
 const DEFAULT_ABSENT_ID = "conformance-absent-id-0000";
@@ -1264,7 +1264,7 @@ export const verifyWith = <ApiId extends string, Groups extends HttpApiGroup.Con
  * @since 0.15.0
  * @category accessors
  */
-export const format = (report: Report, options?: { readonly width?: number | undefined }): string =>
+export const format = (report: Report, options?: { readonly width?: number }): string =>
   ReportFormat.format(report, options);
 
 /**

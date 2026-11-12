@@ -261,7 +261,7 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
     () =>
       Effect.gen(function* () {
         const { outcome, sent } = yield* run(serve(profileSorter));
-        expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
+        expect(outcome).toMatchObject({ _tag: "Passed", probes: 6 });
         // `due` holds NULLs, so it is the attribute decided — both ways — on each endpoint.
         expect(sent).toEqual([
           "/tasks",
@@ -501,7 +501,7 @@ describe("Conformance: several sort fields (filter-grammar §10.4, S-MULTI-1)", 
   it.effect("passes a server that orders lexicographically, each term in its own direction", () =>
     Effect.gen(function* () {
       const { outcome, sent } = yield* runAgainst(api, serve(profileSorter), MULTI);
-      expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
+      expect(outcome).toMatchObject({ _tag: "Passed", probes: 6 });
       // `rank` ties tasks 1 and 4, whose `title`s differ: both directions of each term are asked for.
       expect(sent).toEqual([
         "/tasks",
@@ -596,7 +596,7 @@ describe("Conformance: the `id` tiebreak (filter-grammar §10.5, S-TIE-1)", () =
   it.effect("passes a server that breaks ties by `id` whatever the direction", () =>
     Effect.gen(function* () {
       const { outcome, sent } = yield* runAgainst(api, serve(profileSorter), TIE);
-      expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
+      expect(outcome).toMatchObject({ _tag: "Passed", probes: 6 });
       expect(sent).toEqual([
         "/tasks",
         "/tasks?sort=rank",
@@ -668,7 +668,7 @@ describe("Conformance: the order across pages (filter-grammar §10.6, S-PAGE-1)"
   it.effect("passes a server that sorts the collection before it pages it, walking `next`", () =>
     Effect.gen(function* () {
       const { outcome, sent } = yield* runAgainst(api, serve(profileSorter), PAGES);
-      expect(outcome).toMatchObject({ _tag: "Passed", probes: 3, note: undefined });
+      expect(outcome).toMatchObject({ _tag: "Passed", probes: 3 });
       // Only the list declares a page size; half the baseline's four resources a page.
       expect(sent).toEqual([
         "/tasks",

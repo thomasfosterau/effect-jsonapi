@@ -311,14 +311,16 @@ describe("5. Middleware.negotiate replaces the hand-rolled Accept / Content-Type
   });
 
   it("returns the spec error a framework hook renders", () => {
-    const error = Middleware.negotiate({ contentType: "application/vnd.api+json;charset=utf-8" });
-    expect(error).toBeInstanceOf(ApiError.UnsupportedMediaType);
-    assert(error !== undefined);
-    expect(ApiError.toDocument(error).errors[0]?.status).toBe("415");
-    expect(Middleware.negotiate({ accept: "application/vnd.api+json;foo=bar" })).toBeInstanceOf(
-      ApiError.NotAcceptable,
-    );
-    expect(Middleware.negotiate({ accept: "*/*" })).toBeUndefined();
+    const error = Middleware.negotiate({
+      "content-type": "application/vnd.api+json;charset=utf-8",
+    });
+    assert(Option.isSome(error));
+    expect(error.value).toBeInstanceOf(ApiError.UnsupportedMediaType);
+    expect(ApiError.toDocument(error.value).errors[0]?.status).toBe("415");
+    expect(
+      Option.getOrUndefined(Middleware.negotiate({ accept: "application/vnd.api+json;foo=bar" })),
+    ).toBeInstanceOf(ApiError.NotAcceptable);
+    expect(Middleware.negotiate({ accept: "*/*" })).toEqual(Option.none());
   });
 });
 

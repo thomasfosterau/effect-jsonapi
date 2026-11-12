@@ -102,3 +102,18 @@ Client.isMutatingMethod("DELETE");
 Client.isMutatingMethod(1);
 
 export { calls, custom };
+
+// ---------------------------------------------------------------------------
+// Options members do not accept an explicit `undefined` (#533)
+// ---------------------------------------------------------------------------
+
+export const forward = (maybeBaseUrl?: string) => [
+  // @ts-expect-error — an absent `baseUrl` is left out, never set to `undefined`
+  Client.make(Api, { baseUrl: maybeBaseUrl }),
+  // Negative control: the key left out when there is no value.
+  Client.make(Api, maybeBaseUrl === undefined ? {} : { baseUrl: maybeBaseUrl }),
+];
+
+// @ts-expect-error — likewise a page cursor option
+Client.readPageCursor("?page[limit]=5", { defaultLimit: undefined });
+Client.readPageCursor("?page[limit]=5", { defaultLimit: 5 });

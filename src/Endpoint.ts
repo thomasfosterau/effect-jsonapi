@@ -1013,7 +1013,9 @@ export const create = <
       (options?.name ?? "create") as Name,
       (options?.path ?? `/${resource.type}`) as Path,
       {
-        headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
+        headers: Option.getOrUndefined(
+          Idempotency.headersFor(options?.idempotency),
+        ) as Idempotency.HeadersFor<Idem>,
         payload: asMediaType(
           (options?.payload ?? resource.createPayload) as Payload,
           options?.payloadMediaType ?? MEDIA_TYPE,
@@ -1171,7 +1173,9 @@ export const update = <
       (options?.path ?? `/${resource.type}/:id`) as Path,
       {
         params: Schema.Struct({ id: resource.Id }),
-        headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
+        headers: Option.getOrUndefined(
+          Idempotency.headersFor(options?.idempotency),
+        ) as Idempotency.HeadersFor<Idem>,
         payload: asMediaType(
           (options?.payload ?? resource.updatePayload) as Payload,
           options?.payloadMediaType ?? MEDIA_TYPE,
@@ -1302,7 +1306,9 @@ const deleteEndpoint = <
       (options?.path ?? `/${resource.type}/:id`) as Path,
       {
         params: Schema.Struct({ id: resource.Id }),
-        headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
+        headers: Option.getOrUndefined(
+          Idempotency.headersFor(options?.idempotency),
+        ) as Idempotency.HeadersFor<Idem>,
         success: deleteSuccess(options?.success, options?.status) as Success,
         // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
         error: wires(options?.errors),
@@ -2999,7 +3005,9 @@ export const operations = <
       (options?.name ?? "operations") as Name,
       (options?.path ?? "/operations") as Path,
       {
-        headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
+        headers: Option.getOrUndefined(
+          Idempotency.headersFor(options?.idempotency),
+        ) as Idempotency.HeadersFor<Idem>,
         // SAFETY: `Payload` is inferred from `options.payload` when one is
         // passed, and otherwise defaults to the `Atomic.RequestDocument` built here.
         payload: asJsonApi((options?.payload ?? Atomic.RequestDocument(resources)) as Payload),

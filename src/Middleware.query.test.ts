@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Match from "effect/Match";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -292,12 +293,12 @@ describe("illegal and extension query parameter names (#263)", () => {
     "accepts the allow-list entry %j, a base name the check would reject",
     (entry) => {
       expect(() => Middleware.schemaErrorsLayer({ allowedQueryParameters: [entry] })).not.toThrow();
-      expect(
-        Middleware.checkQueryParameters([entry], { allowedQueryParameters: [entry] }),
-      ).toBeUndefined();
-      expect(Middleware.checkQueryParameters([entry], { allowedQueryParameters: [] })).toEqual({
-        errors: [expect.objectContaining({ source: { parameter: entry } })],
-      });
+      expect(Middleware.checkQueryParameters([entry], { allowedQueryParameters: [entry] })).toEqual(
+        Option.none(),
+      );
+      expect(Middleware.checkQueryParameters([entry], { allowedQueryParameters: [] })).toEqual(
+        Option.some({ errors: [expect.objectContaining({ source: { parameter: entry } })] }),
+      );
     },
   );
 
@@ -321,7 +322,7 @@ describe("illegal and extension query parameter names (#263)", () => {
       Middleware.checkQueryParameters(["ext:param", "foo![x]"], {
         declared: ["ext:param", "foo!"],
       }),
-    ).toBeUndefined();
+    ).toEqual(Option.none());
   });
 });
 
@@ -578,7 +579,10 @@ describe("allowedQueryParameters entries", () => {
 });
 
 describe("Middleware.checkQueryParameters", () => {
-  const check = Middleware.checkQueryParameters;
+  // The 400 document, or `undefined` when every name is acceptable: the
+  // assertions below read the document itself.
+  const check = (names: Iterable<string>, options?: Middleware.QueryParameterCheck) =>
+    Option.getOrUndefined(Middleware.checkQueryParameters(names, options));
 
   it("returns undefined when every name is acceptable", () => {
     expect(check([])).toBeUndefined();

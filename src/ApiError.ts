@@ -145,8 +145,8 @@ export interface ApiErrorClass<
   readonly status: number;
   /** The JSON:API error `code` (application-specific identifier). */
   readonly code: string;
-  /** The JSON:API error `title`, if declared. */
-  readonly title: string | undefined;
+  /** The JSON:API error `title`: `Some` when declared, `None` otherwise. */
+  readonly title: Option.Option<string>;
   /**
    * The endpoint error schema: an instance of this class on the Effect side,
    * a JSON:API error document on the wire, annotated with the HTTP status and
@@ -178,11 +178,13 @@ export interface Config<Fields extends Schema.Struct.Fields> {
   readonly fields?: Fields;
   /**
    * JSON:API error `detail`: a human-readable explanation specific to this
-   * occurrence. Either a constant string or a function of the (encoded) fields.
+   * occurrence. Either a constant string or a function of the (encoded)
+   * fields, returning the detail, or an `Option` of it when an occurrence may
+   * carry none (`(e) => Option.fromUndefinedOr(e.reason)`).
    */
   readonly detail?:
     | string
-    | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => string | undefined);
+    | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => string | Option.Option<string>);
   /**
    * JSON:API error `source`: identifies what in the request caused this
    * error — `source.pointer` (a JSON Pointer into the request document, e.g.
@@ -192,11 +194,14 @@ export interface Config<Fields extends Schema.Struct.Fields> {
    *
    * Either a constant (the same source on every occurrence) or a function of
    * the (encoded) fields — the usual case, since e.g. a validation error's
-   * pointer depends on which field failed.
+   * pointer depends on which field failed — returning the source, or an
+   * `Option` of it when an occurrence may carry none.
    */
   readonly source?:
     | ErrorSource
-    | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => ErrorSource | undefined);
+    | ((
+        fields: Schema.Struct.Encoded<NoInfer<Fields>>,
+      ) => ErrorSource | Option.Option<ErrorSource>);
 }
 
 // A concrete `Self` for the base class below: `Schema.TaggedError`'s `Self`
@@ -208,6 +213,13 @@ const snakeCase = (tag: string): string =>
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .replace(/[\s-]+/g, "_")
     .toLowerCase();
+
+// A `detail` or `source` as a config declares it — absent, a value, or an
+// `Option` of one — as an `Option`.
+const maybe = <A>(
+  value: A | Option.Option<Exclude<A, undefined>>,
+): Option.Option<Exclude<A, undefined>> =>
+  Option.isOption(value) ? value : Option.fromUndefinedOr(value);
 
 // Wire schemas are derived lazily (so they bind to the user's final subclass,
 // preserving `instanceof`) and cached per class.
@@ -360,10 +372,11 @@ export const make =
     // encoded fields: `None` when this occurrence carries none.
     const detailOf = config.detail;
     const detail = (encoded: Schema.Struct.Encoded<Fields>): Option.Option<string> =>
-      Option.fromUndefinedOr(P.isFunction(detailOf) ? detailOf(encoded) : detailOf);
+      maybe(P.isFunction(detailOf) ? detailOf(encoded) : detailOf);
     const sourceOf = config.source;
     const source = (encoded: Schema.Struct.Encoded<Fields>): Option.Option<ErrorSource> =>
-      Option.fromUndefinedOr(P.isFunction(sourceOf) ? sourceOf(encoded) : sourceOf);
+      maybe(P.isFunction(sourceOf) ? sourceOf(encoded) : sourceOf);
+    const title = Option.fromUndefinedOr(config.title);
 
     // The conditional `MissingSelfGeneric` branch only matters at the user's
     // `extends` clause, where `Self` is concrete — cast it away here.
@@ -376,7 +389,7 @@ export const make =
     class ApiErrorBase extends Base {
       static readonly status = config.status;
       static readonly code = code;
-      static readonly title = config.title;
+      static readonly title = title;
       // The brand `isApiError` and `Any` recognise, on the prototype so it is
       // never an own (encoded) field of the instance.
       get [TypeId](): TypeId {
@@ -388,7 +401,7 @@ export const make =
           tag,
           status: config.status,
           code,
-          title: Option.fromUndefinedOr(config.title),
+          title,
           fieldKeys,
           detail,
           source,
@@ -453,7 +466,7 @@ export class BadRequest extends make<BadRequest>()("BadRequest", {
   code: "bad_request",
   title: "Bad Request",
   fields: { detail: Schema.optionalKey(Schema.String) },
-  detail: (e) => e.detail,
+  detail: (e) => Option.fromUndefinedOr(e.detail),
 }) {}
 
 /**
@@ -493,7 +506,7 @@ export class Conflict extends make<Conflict>()("Conflict", {
   code: "conflict",
   title: "Conflict",
   fields: { detail: Schema.optionalKey(Schema.String) },
-  detail: (e) => e.detail,
+  detail: (e) => Option.fromUndefinedOr(e.detail),
 }) {}
 
 /**

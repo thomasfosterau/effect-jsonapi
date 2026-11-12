@@ -44,6 +44,7 @@ import {
   linkageOf,
 } from "../linkage.js";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "../media.js";
+import { definedMember, someMember } from "../members.js";
 
 // The kit's identity and linkage over arbitrary JSON live beside the shared
 // reachability walk, which the endpoint middleware runs over the encoded
@@ -84,7 +85,7 @@ export interface Finding {
   readonly detail: string;
   readonly expected: string;
   readonly observed: string;
-  readonly probe: Probe | undefined;
+  readonly probe?: Probe;
 }
 
 /** @internal */
@@ -92,7 +93,7 @@ export interface Passed {
   readonly _tag: "Passed";
   readonly rule: Rule;
   readonly probes: number;
-  readonly note: string | undefined;
+  readonly note?: string;
 }
 
 /** @internal */
@@ -637,26 +638,26 @@ export interface Fixture {
    * `id`. Called once per create the kit makes, so a fixture under a
    * uniqueness constraint can return a fresh value each time.
    */
-  readonly create?: (() => Payload) | undefined;
+  readonly create?: () => Payload;
   /**
    * The `attributes` / `relationships` of a PATCH that must succeed against a
    * resource `create` made. The kit adds `type` and `id`.
    */
-  readonly update?: (() => Omit<Payload, "type">) | undefined;
+  readonly update?: () => Omit<Payload, "type">;
   /**
    * Removes a resource the kit created, by the id the server assigned it. Run
    * for every resource the kit created, could identify and did not itself
    * delete — after the rule that made it, whether that rule passed, failed or
    * died. It runs uninterruptibly, so one that never completes hangs the run.
    */
-  readonly cleanup?: ((id: string) => Effect.Effect<unknown, unknown>) | undefined;
+  readonly cleanup?: (id: string) => Effect.Effect<unknown, unknown>;
   /**
    * Opts the type into the client-generated id rules: whether the server
    * supports a client-generated id on `POST /<type>` (and on an atomic
    * `add`), and an id to send with `create`'s payload. The kit never makes
    * one up.
    */
-  readonly clientId?: ClientIdFixture | undefined;
+  readonly clientId?: ClientIdFixture;
 }
 
 /** @internal */
@@ -695,14 +696,14 @@ export interface WriteRecord {
    */
   readonly type: string;
   /**
-   * The id the server answered with, or `undefined` when the response named
-   * none — or named one the kit would not act on (`detail` says which).
+   * The id the server answered with; absent when the response named none —
+   * or named one the kit would not act on (`detail` says which).
    */
-  readonly id: string | undefined;
+  readonly id?: string;
   /** The id of the rule whose probe created it. */
   readonly rule: string;
   readonly disposal: Disposal;
-  readonly detail: string | undefined;
+  readonly detail?: string;
 }
 
 /** @internal */
@@ -1352,7 +1353,7 @@ export const pass = (
   _tag: "Passed",
   rule,
   probes,
-  note: Option.getOrUndefined(note),
+  ...someMember("note", note),
 });
 
 /** @internal */
@@ -1560,7 +1561,7 @@ export const finding = (
   detail: args.detail,
   expected: args.expected,
   observed: args.observed,
-  probe: args.probe,
+  ...definedMember("probe", args.probe),
 });
 
 /**

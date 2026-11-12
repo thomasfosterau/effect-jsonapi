@@ -78,7 +78,7 @@ const peopleFamily = {
           MutableHashMap.set(store, "2", personRow("2", input.name));
           return { id: "2" };
         }),
-      update: (input: { readonly id: string; readonly name?: string | undefined }) =>
+      update: (input: { readonly id: string; readonly name?: string }) =>
         Effect.map(Effect.service(Store), (store) => {
           MutableHashMap.set(store, input.id, personRow(input.id, input.name ?? "?"));
           return { id: input.id };

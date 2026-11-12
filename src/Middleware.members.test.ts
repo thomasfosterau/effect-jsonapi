@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
@@ -332,7 +333,10 @@ describe("an undeclared member of a declared `filter` map or `page` key set (#32
 });
 
 describe("Middleware.checkQueryParameters on members (#321)", () => {
-  const check = Middleware.checkQueryParameters;
+  // The 400 document, or `undefined` when every name is acceptable: the
+  // assertions below read the document itself.
+  const check = (names: Iterable<string>, options?: Middleware.QueryParameterCheck) =>
+    Option.getOrUndefined(Middleware.checkQueryParameters(names, options));
 
   it("admits a `page` or `filter` member only by its own name or a declared prefix", () => {
     const declared = ["page[limit]", "page[offset]", "filter[status]"];

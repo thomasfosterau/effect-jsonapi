@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
@@ -254,7 +255,10 @@ describe("a bracketed `include` / `sort` (#329)", () => {
 });
 
 describe("Middleware.checkQueryParameters on a bracketed `include` / `sort` (#329)", () => {
-  const check = Middleware.checkQueryParameters;
+  // The 400 document, or `undefined` when every name is acceptable: the
+  // assertions below read the document itself.
+  const check = (names: Iterable<string>, options?: Middleware.QueryParameterCheck) =>
+    Option.getOrUndefined(Middleware.checkQueryParameters(names, options));
 
   it("rejects a bracketed member beside the declared bare parameter", () => {
     const declared = ["include", "sort"];

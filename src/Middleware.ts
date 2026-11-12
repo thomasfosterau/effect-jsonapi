@@ -98,7 +98,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaIssue from "effect/SchemaIssue";
-import { HttpServerRespondable } from "effect/http";
+import { Headers, HttpServerRespondable } from "effect/http";
 import { HttpServerRequest, ParsedSearchParams } from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import type { HttpApiEndpoint } from "effect/http-api";
@@ -131,7 +131,7 @@ import {
   isMemberName,
 } from "./internal/vocabulary.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
-import { definedMember, someMember } from "./internal/members.js";
+import { someMember } from "./internal/members.js";
 
 // ---------------------------------------------------------------------------
 // Tracing
@@ -216,10 +216,7 @@ export interface NegotiationOptions {
  * @since 0.1.0
  * @category utils
  */
-export const contentTypeIsAcceptable = (
-  header: string | undefined,
-  options?: NegotiationOptions,
-): boolean => {
+export const contentTypeIsAcceptable = (header?: string, options?: NegotiationOptions): boolean => {
   if (header === undefined) return true;
   const { base, parameters } = parseMediaType(header.trim());
   if (base !== MEDIA_TYPE) return true;
@@ -245,10 +242,7 @@ export const contentTypeIsAcceptable = (
  * @since 0.1.0
  * @category utils
  */
-export const acceptIsAcceptable = (
-  header: string | undefined,
-  options?: NegotiationOptions,
-): boolean => {
+export const acceptIsAcceptable = (header?: string, options?: NegotiationOptions): boolean => {
   if (header === undefined) return true;
   const entries = header.split(",").map((entry) => entry.trim());
   return Arr.some(entries, (entry) => {
@@ -267,41 +261,46 @@ export const acceptIsAcceptable = (
  * Effect's HttpApi — for use in a plain framework hook that owns the URL
  * (e.g. a SvelteKit hook) rather than an `HttpApi`.
  *
- * Returns the {@link ApiError} the spec requires when negotiation fails — a 415
- * {@link UnsupportedMediaType} for an unacceptable `Content-Type`, or a 406
- * {@link NotAcceptable} for an unacceptable `Accept` — or `undefined` when the
- * request is acceptable. Render the returned error to a JSON:API error document
- * with `ApiError.toDocument(error)`.
+ * Takes the request's headers as any `Headers.Input` — a web `Headers`
+ * (`request.headers`), an effect `Headers`, or a plain record — and reads its
+ * `Content-Type` and `Accept`. Returns the {@link ApiError} the spec requires
+ * when negotiation fails — a 415 {@link UnsupportedMediaType} for an
+ * unacceptable `Content-Type`, or a 406 {@link NotAcceptable} for an
+ * unacceptable `Accept` — or `None` when the request is acceptable. Render
+ * the returned error to a JSON:API error document with
+ * `ApiError.toDocument(error)`.
  *
  * @example
  * ```ts
+ * import { strictEqual } from "node:assert"
+ * import { Option } from "effect"
  * import { ApiError, Middleware } from "@thomasfosterau/effect-jsonapi"
  *
  * // inside a framework hook, from the request headers:
- * const error = Middleware.negotiate({
- *   contentType: "application/vnd.api+json",
- *   accept: "application/vnd.api+json"
+ * const request = new Request("https://example.com/articles", {
+ *   method: "POST",
+ *   headers: { "content-type": "application/vnd.api+json; charset=utf-8" }
  * })
- * if (error !== undefined) {
+ * const status = Option.map(Middleware.negotiate(request.headers), (error) =>
  *   // render the spec error body for the hook's response
- *   const body = ApiError.toDocument(error)
- *   body.errors[0]?.status // "415" (content type) or "406" (accept)
- * }
+ *   ApiError.toDocument(error).errors[0]?.status
+ * )
+ * strictEqual(Option.getOrUndefined(status), "415")
  * ```
  *
  * @since 0.3.0
  * @category utils
  */
 export const negotiate = (
-  headers: {
-    readonly contentType?: string | undefined;
-    readonly accept?: string | undefined;
-  },
+  headers: Headers.Input,
   options?: NegotiationOptions,
-): UnsupportedMediaType | NotAcceptable | undefined => {
-  if (!contentTypeIsAcceptable(headers.contentType, options)) return new UnsupportedMediaType();
-  if (!acceptIsAcceptable(headers.accept, options)) return new NotAcceptable();
-  return undefined;
+): Option.Option<UnsupportedMediaType | NotAcceptable> => {
+  const read = Headers.fromInput(headers);
+  if (!contentTypeIsAcceptable(Option.getOrUndefined(Headers.get(read, "content-type")), options))
+    return Option.some(new UnsupportedMediaType());
+  if (!acceptIsAcceptable(Option.getOrUndefined(Headers.get(read, "accept")), options))
+    return Option.some(new NotAcceptable());
+  return Option.none();
 };
 
 /**
@@ -480,7 +479,7 @@ export const schemaErrorDocument = (
     errors: errors.map(({ detail, source, meta }) => ({
       status: String(BadRequest.status),
       code: BadRequest.code,
-      ...definedMember("title", BadRequest.title),
+      ...someMember("title", BadRequest.title),
       detail,
       ...someMember("source", source),
       ...someMember("meta", meta),
@@ -665,7 +664,7 @@ export interface QueryParameterOptions {
    * cannot switch that 400 off, so a spec family is never silently ignored
    * (#261).
    */
-  readonly allowedQueryParameters?: ReadonlyArray<string> | undefined;
+  readonly allowedQueryParameters?: ReadonlyArray<string>;
 }
 
 /**
@@ -699,7 +698,7 @@ export interface SchemaErrorsOptions extends QueryParameterOptions {
    * every endpoint the layer serves. Only the encoded document decides, so
    * the check also covers a document built without the builders.
    */
-  readonly checkLinkage?: boolean | undefined;
+  readonly checkLinkage?: boolean;
 }
 
 /**
@@ -892,7 +891,7 @@ const rejectQueryParameters = (
     errors: rejected.map((parameter) => ({
       status: String(BadRequest.status),
       code: BadRequest.code,
-      ...definedMember("title", BadRequest.title),
+      ...someMember("title", BadRequest.title),
       detail: Option.getOrElse(
         Option.map(Option.liftPredicate(baseName(parameter), isFamily), (family) =>
           unsupportedDetail(parameter, family, declared),
@@ -929,7 +928,7 @@ export interface QueryParameterCheck extends QueryParameterOptions {
    * resource type with no attribute) supports no value of it, so leaves it
    * out, as {@link SchemaErrorsLive} does. Defaults to none.
    */
-  readonly declared?: ReadonlyArray<string> | undefined;
+  readonly declared?: ReadonlyArray<string>;
 }
 
 /**
@@ -946,7 +945,7 @@ export interface QueryParameterCheck extends QueryParameterOptions {
  * `fields[TYPE]`, ignoring it would also break §Sparse Fieldsets, under which
  * an endpoint "MUST NOT include additional [fields]" beyond the requested set.
  * Returns that 400 document — one error object per offending parameter, each
- * naming it in `source.parameter` — or `undefined` when every parameter is
+ * naming it in `source.parameter` — or `None` when every parameter is
  * acceptable.
  *
  * A parameter is acceptable when its family base name (everything before the
@@ -985,13 +984,15 @@ export interface QueryParameterCheck extends QueryParameterOptions {
  *
  * @example
  * ```ts
+ * import { Option } from "effect"
  * import { Middleware } from "@thomasfosterau/effect-jsonapi"
  *
  * // the names of the request's query parameters, e.g. from `URLSearchParams`
  * const names = new URLSearchParams("q=hello&unknown=1&fooBar=2&foo!=3&_=4").keys()
  *
  * const document = Middleware.checkQueryParameters(names, { declared: ["q"] })
- * document?.errors.map((error) => error.source) // [{ parameter: "unknown" }, { parameter: "foo!" }]
+ * Option.map(document, (document) => document.errors.map((error) => error.source))
+ * // Some([{ parameter: "unknown" }, { parameter: "foo!" }])
  * ```
  *
  * @since 0.17.0
@@ -1000,10 +1001,8 @@ export interface QueryParameterCheck extends QueryParameterOptions {
 export const checkQueryParameters = (
   names: Iterable<string>,
   options?: QueryParameterCheck,
-): typeof WireDocument.Type | undefined =>
-  Option.getOrUndefined(
-    rejectQueryParameters(names, options?.declared ?? [], allowedBaseNames(options)),
-  );
+): Option.Option<typeof WireDocument.Type> =>
+  rejectQueryParameters(names, options?.declared ?? [], allowedBaseNames(options));
 
 // What an endpoint supports, for `checkQueryParameters`: the wire names its
 // query schema declares (`declaredNames`; none when it could accept a name
@@ -1086,26 +1085,22 @@ export const contentNegotiationLayer = (
     Effect.succeed<typeof ContentNegotiation.Service>(
       Effect.fnUntraced(function* (httpEffect) {
         const request = yield* HttpServerRequest;
-        const error = yield* Effect.sync(() =>
-          negotiate(
-            { contentType: request.headers["content-type"], accept: request.headers["accept"] },
-            options,
-          ),
-        ).pipe(
+        const error = yield* Effect.sync(() => negotiate(request.headers, options)).pipe(
           Effect.tap((error) =>
             Effect.annotateCurrentSpan(
-              error === undefined
-                ? { "jsonapi.negotiation.outcome": "accepted" }
-                : {
-                    "jsonapi.negotiation.outcome": "rejected",
-                    "jsonapi.negotiation.rule":
-                      error instanceof UnsupportedMediaType ? "content_type" : "accept",
-                  },
+              Option.match(error, {
+                onNone: () => ({ "jsonapi.negotiation.outcome": "accepted" }),
+                onSome: (error) => ({
+                  "jsonapi.negotiation.outcome": "rejected",
+                  "jsonapi.negotiation.rule":
+                    error instanceof UnsupportedMediaType ? "content_type" : "accept",
+                }),
+              }),
             ),
           ),
           Effect.withSpan(Span.negotiate),
         );
-        if (error !== undefined) return yield* error;
+        if (Option.isSome(error)) return yield* error.value;
         return yield* httpEffect;
       }),
     ),
@@ -1171,7 +1166,7 @@ const payloadRefusal = (
           {
             status: String(error.status),
             code: error.code,
-            title: error.title,
+            ...someMember("title", error.title),
             detail,
             source: { pointer },
           },

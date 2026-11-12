@@ -281,11 +281,9 @@ export interface Options<R> {
    * `(effect) => ServerErrors.respond(effect, { materialise })` to add the
    * application's own.
    */
-  readonly respond?:
-    | (<A, E>(
-        effect: Effect.Effect<A, E, R>,
-      ) => Effect.Effect<A | HttpServerResponse.HttpServerResponse, never, R>)
-    | undefined;
+  readonly respond?: <A, E>(
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A | HttpServerResponse.HttpServerResponse, never, R>;
 }
 
 /**
@@ -438,7 +436,7 @@ export interface WebHandler<R> {
 export const webHandler = <ApiId extends string, Groups extends HttpApiGroup.Constraint, R = never>(
   api: HttpApi.HttpApi<ApiId, Groups>,
   families: ReadonlyArray<Family<R>>,
-  options?: Options<R> & { readonly disableLogger?: boolean | undefined },
+  options?: Options<R> & { readonly disableLogger?: boolean },
 ): WebHandler<R> => {
   const web = HttpRouter.toWebHandler(layer(api, families, options), {
     disableLogger: options?.disableLogger ?? true,

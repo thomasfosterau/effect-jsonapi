@@ -43,7 +43,7 @@ describe("ApiError.make", () => {
   it("exposes status / code / title statics", () => {
     expect(ArticleNotFound.status).toBe(404);
     expect(ArticleNotFound.code).toBe("not_found");
-    expect(ArticleNotFound.title).toBe("Resource not found");
+    expect(ArticleNotFound.title).toEqual(Option.some("Resource not found"));
   });
 
   it("defaults code to the snake_cased tag", () => {
@@ -212,7 +212,7 @@ describe("ApiError.make source", () => {
     class MaybePointed extends ApiError.make<MaybePointed>()("MaybePointed", {
       status: 404,
       fields: { id: Schema.String, pointer: Schema.optionalKey(Schema.String) },
-      source: (e) => (e.pointer === undefined ? undefined : { pointer: e.pointer }),
+      source: (e) => Option.map(Option.fromUndefinedOr(e.pointer), (pointer) => ({ pointer })),
     }) {}
 
     const bare = Schema.encodeSync(MaybePointed.wire)(new MaybePointed({ id: "1" }));
