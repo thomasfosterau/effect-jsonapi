@@ -1024,7 +1024,7 @@ describe("github example: heterogeneous search", () => {
         );
 
         const types = Arr.sort(
-          [...new Set(document.data.map((result) => result.type))],
+          Arr.dedupe(document.data.map((result) => result.type)),
           Order.String,
         );
         expect(types).toEqual(["issues", "repositories", "users"]);

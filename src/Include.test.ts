@@ -1,3 +1,5 @@
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as R from "effect/Record";
 import * as Option from "effect/Option";
 import * as HashMap from "effect/HashMap";
 import { it } from "@effect/vitest";
@@ -317,9 +319,7 @@ describe("the advertised parameter", () => {
 
   it("is absent from a query that declares no include surface", () => {
     const query = Query.schema(Article, { include: false });
-    expect(Object.keys((query.from as { readonly fields: object }).fields)).not.toContain(
-      "include",
-    );
+    expect(R.keys((query.from as { readonly fields: object }).fields)).not.toContain("include");
   });
 
   it("decodes through a whole query schema", () => {
@@ -449,15 +449,17 @@ describe("feeding the resolver", () => {
   };
   const person = (id: string): Handlers.ResourceValue => ({ type: "people", id });
 
-  const rows = new Map<string, Handlers.ResourceValue>(
-    [article, comment5, person("9"), person("7")].map((row) => [`${row.type}:${row.id}`, row]),
+  const rows = MutableHashMap.fromIterable(
+    [article, comment5, person("9"), person("7")].map(
+      (row) => [`${row.type}:${row.id}`, row] as const,
+    ),
   );
   const loader =
     (type: string): Handlers.IncludeTarget =>
     (idList) =>
       Effect.sync(() =>
         idList.flatMap((id) => {
-          const row = rows.get(`${type}:${id}`);
+          const row = Option.getOrUndefined(MutableHashMap.get(rows, `${type}:${id}`));
           return row === undefined ? [] : [row];
         }),
       );
@@ -502,7 +504,7 @@ describe("feeding the resolver", () => {
       // same declaration — which is the whole point: nothing the resolver hoists
       // can be stripped on encode for want of an arm.
       const admitted = surface.included.members.map((member) => member.type);
-      expect(Arr.sort([...new Set(resolved?.map((r) => r.type))], Order.String)).toEqual(
+      expect(Arr.sort(Arr.dedupe(resolved?.map((r) => r.type) ?? []), Order.String)).toEqual(
         Arr.sort([...admitted], Order.String),
       );
       // …and the union is not simply wide enough to admit anything.

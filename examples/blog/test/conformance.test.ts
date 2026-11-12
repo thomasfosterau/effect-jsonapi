@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import { Conformance } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
 import { BlogLive, discardArticle } from "../handlers.js";
@@ -109,7 +110,7 @@ layer(RunLive)("blog: JSON:API conformance", (it) => {
       // (#301). `report.samples` records each such read with its status (#319).
       // Keyed by type, so a sample that did not resolve shows up under its type.
       expect(
-        Object.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
+        R.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
         Conformance.format(report),
       ).toEqual({ articles: 200 });
     }),

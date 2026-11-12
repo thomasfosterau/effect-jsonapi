@@ -518,7 +518,7 @@ const isResourceData = (observation: Observation): boolean =>
   );
 
 /** The members a resource identifier object may carry (§Resource Identifier Objects). */
-const IDENTIFIER_MEMBERS: ReadonlyArray<string> = ["type", "id", "lid", "meta"];
+const IDENTIFIER_MEMBERS: HashSet.HashSet<string> = HashSet.make("type", "id", "lid", "meta");
 
 /** An extension member's name: an alphanumeric namespace, one colon, and a member name. */
 const EXTENSION_MEMBER = /^[A-Za-z0-9]+:[^:]+$/;
@@ -553,7 +553,7 @@ const notAnIdentifier = (value: Schema.Json): Option.Option<string> => {
   }
   return Arr.match(
     R.keys(objectIn(value)).filter(
-      (key) => !IDENTIFIER_MEMBERS.includes(key) && !ignoredMember(key),
+      (key) => !HashSet.has(IDENTIFIER_MEMBERS, key) && !ignoredMember(key),
     ),
     {
       onEmpty: () => Option.none(),

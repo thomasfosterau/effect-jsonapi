@@ -1,3 +1,4 @@
+import * as R from "effect/Record";
 import { it } from "@effect/vitest";
 import * as Arr from "effect/Array";
 import { cast } from "effect/Function";
@@ -43,7 +44,7 @@ const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUns
 const definedAttributes = <A extends Record<string, unknown>>(
   attributes: A,
 ): { readonly [K in keyof A]: Exclude<A[K], undefined> } =>
-  Object.fromEntries(Object.entries(attributes).filter(([, value]) => value !== undefined)) as {
+  R.fromEntries(R.toEntries(attributes).filter(([, value]) => value !== undefined)) as {
     readonly [K in keyof A]: Exclude<A[K], undefined>;
   };
 
@@ -369,7 +370,7 @@ describe("endpoint conventions", () => {
 
   it("groups take the resource type as their identifier", () => {
     expect(articles.identifier).toBe("articles");
-    expect(Object.keys(articles.endpoints)).toEqual([
+    expect(R.keys(articles.endpoints)).toEqual([
       "get",
       "list",
       "create",
@@ -390,7 +391,7 @@ describe("endpoint conventions", () => {
       Endpoint.collection([Article, Person], { name: "search", path: "/search" }),
     );
     expect(group.identifier).toBe("search");
-    expect(Object.keys(group.endpoints)).toEqual(["search"]);
+    expect(R.keys(group.endpoints)).toEqual(["search"]);
   });
 });
 
@@ -1088,7 +1089,7 @@ describe("Endpoint.resource / Group.resource", () => {
   it("Group.resource builds a group named after the resource with that endpoint set", () => {
     const group = Group.resource(Article, { errors: [ArticleNotFound] });
     expect(group.identifier).toBe("articles");
-    expect(Object.keys(group.endpoints)).toEqual(fullEndpointNames);
+    expect(R.keys(group.endpoints)).toEqual(fullEndpointNames);
   });
 
   it("derives query parameters: list & to-many related carry a query schema; create/update/delete don't", () => {
@@ -1096,7 +1097,7 @@ describe("Endpoint.resource / Group.resource", () => {
       page: Query.Page.Offset,
       filter: { author: Schema.optionalKey(Schema.String) },
     });
-    const byName = Object.fromEntries(endpoints.map((endpoint) => [endpoint.identifier, endpoint]));
+    const byName = R.fromEntries(endpoints.map((endpoint) => [endpoint.identifier, endpoint]));
     expect(byName.list.query).toBeDefined();
     expect(byName.comments.query).toBeDefined(); // paginated related collection
     expect(byName.author.query).toBeDefined(); // include/fields on the to-one related URL
@@ -1106,7 +1107,7 @@ describe("Endpoint.resource / Group.resource", () => {
   });
 
   it("conventional methods and paths", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article).map((endpoint) => [endpoint.identifier, endpoint]),
     );
     expect([byName.delete.method, byName.delete.path]).toEqual(["DELETE", "/articles/:id"]);
@@ -1125,16 +1126,16 @@ describe("Endpoint.resource / Group.resource", () => {
       endpoints: { create: false, update: false, delete: false },
       relationships: false,
     });
-    expect(Object.keys(group.endpoints)).toEqual(["get", "list"]);
+    expect(R.keys(group.endpoints)).toEqual(["get", "list"]);
   });
 
   it("`relationships: false` keeps CRUD but drops relationship endpoints", () => {
     const group = Group.resource(Article, { relationships: false });
-    expect(Object.keys(group.endpoints)).toEqual(["get", "list", "create", "update", "delete"]);
+    expect(R.keys(group.endpoints)).toEqual(["get", "list", "create", "update", "delete"]);
   });
 
   it("`endpoints` object can rename/repath and re-error individual endpoints", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article, {
         endpoints: {
           get: { name: "show", path: "/articles/:id/full" },
@@ -1150,7 +1151,7 @@ describe("Endpoint.resource / Group.resource", () => {
 
   it("`relationships` object excludes named relationships (others stay)", () => {
     const group = Group.resource(Article, { relationships: { comments: false } });
-    const keys = Object.keys(group.endpoints);
+    const keys = R.keys(group.endpoints);
     // author relationship endpoints remain; comments' are gone
     expect(keys).toContain("author");
     expect(keys).not.toContain("comments");
@@ -1158,7 +1159,7 @@ describe("Endpoint.resource / Group.resource", () => {
   });
 
   it("per-endpoint `include: false` removes `?include=` for just that endpoint", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article, {
         include: true,
         endpoints: { get: { include: false } },
@@ -1180,7 +1181,7 @@ describe("Endpoint.resource / Group.resource", () => {
       attributes: { name: Schema.NonEmptyString },
       meta: Schema.Struct({ revision: Schema.Int }),
     });
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Widget, {
         relationships: false,
         meta: (base) => Schema.Struct({ ...base.fields, total: Schema.Int }),
@@ -1351,7 +1352,7 @@ describe("Endpoint.create / Endpoint.update payload override", () => {
   });
 
   it("threads through Endpoint.resource's per-endpoint create/update config", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article, {
         relationships: false,
         endpoints: {
@@ -1371,7 +1372,7 @@ describe("Endpoint.create / Endpoint.update payload override", () => {
   });
 
   it("leaves Endpoint.resource's write payloads enveloped when no override is given (regression)", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article, { relationships: false }).map((endpoint) => [
         endpoint.identifier,
         endpoint,
@@ -1574,7 +1575,7 @@ describe("Endpoint.delete success override", () => {
   });
 
   it("threads through Endpoint.resource's per-endpoint delete config", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article, {
         relationships: false,
         endpoints: { delete: { success: Tombstone } },
@@ -1584,7 +1585,7 @@ describe("Endpoint.delete success override", () => {
   });
 
   it("leaves Endpoint.resource's delete at 204 when no override is given (regression)", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article, { relationships: false }).map((endpoint) => [
         endpoint.identifier,
         endpoint,
@@ -1711,7 +1712,7 @@ describe("Endpoint.list query override", () => {
   });
 
   it("threads through Endpoint.resource's per-endpoint list config", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article, {
         relationships: false,
         endpoints: { list: { query: FlatListQuery } },
@@ -1726,7 +1727,7 @@ describe("Endpoint.list query override", () => {
   });
 
   it("leaves Endpoint.resource's list query package-composed when no override is given (regression)", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article, { relationships: false, page: Query.Page.Offset }).map(
         (endpoint) => [endpoint.identifier, endpoint],
       ),
@@ -1843,7 +1844,7 @@ describe("Endpoint include path constraints", () => {
   });
 
   it("threads through Endpoint.resource, per endpoint and top level", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article, {
         include: { depth: 1 },
         endpoints: { get: { include: { paths: ["author"] } } },
@@ -1865,7 +1866,7 @@ describe("Endpoint include path constraints", () => {
   });
 
   it("leaves Endpoint.resource advertising the full depth-2 graph by default (regression)", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article, { relationships: false }).map((endpoint) => [
         endpoint.identifier,
         endpoint,
@@ -2011,7 +2012,7 @@ describe("primary-data success override", () => {
   });
 
   it("threads through Endpoint.resource's per-endpoint get/list/create/update config", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article, {
         relationships: false,
         endpoints: {
@@ -2034,7 +2035,7 @@ describe("primary-data success override", () => {
   });
 
   it("leaves Endpoint.resource's documents at the resource's own when no override is given (regression)", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article, { relationships: false }).map((endpoint) => [
         endpoint.identifier,
         endpoint,
@@ -2578,7 +2579,7 @@ describe("Endpoint.get query override", () => {
   });
 
   it("threads through Endpoint.resource's per-endpoint get config", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article, {
         relationships: false,
         endpoints: { get: { query: FlatGetQuery } },
@@ -2590,7 +2591,7 @@ describe("Endpoint.get query override", () => {
   });
 
   it("leaves Endpoint.resource's get query package-composed when no override is given (regression)", () => {
-    const byName = Object.fromEntries(
+    const byName = R.fromEntries(
       Endpoint.resource(Article, { relationships: false }).map((endpoint) => [
         endpoint.identifier,
         endpoint,

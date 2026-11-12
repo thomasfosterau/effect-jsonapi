@@ -5,6 +5,8 @@
  * refused, and the web handler answers documents, negotiated 400s, and the
  * error seam's 404 / 409 through the flat presets end to end.
  */
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as R from "effect/Record";
 import { assert, describe, expect, it, onTestFinished } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Context from "effect/Context";
@@ -27,7 +29,9 @@ import * as ResourceHandlers from "./ResourceHandlers.js";
 import * as ServerErrors from "./ServerErrors.js";
 import { stringify } from "./internal/json.js";
 
-class Store extends Context.Service<Store, Map<string, Person>>()("test/Store") {}
+class Store extends Context.Service<Store, MutableHashMap.MutableHashMap<string, Person>>()(
+  "test/Store",
+) {}
 
 const Person = Resource.make("people", { attributes: { name: Schema.NonEmptyString } });
 const Contest = Resource.make("contests", { attributes: { name: Schema.NonEmptyString } });
@@ -59,27 +63,28 @@ const peopleFamily = {
     ops: {
       list: () =>
         Effect.map(Effect.service(Store), (store) => {
-          const items = [...store.values()];
+          const items = Arr.fromIterable(MutableHashMap.values(store));
           return { items, totalCount: items.length };
         }),
       get: (id) =>
         Effect.flatMap(Effect.service(Store), (store) =>
-          Option.match(Option.fromNullishOr(store.get(id)), {
+          Option.match(MutableHashMap.get(store, id), {
             onNone: () => new ServerErrors.NotFound({ resource: "people", id }),
             onSome: Effect.succeed,
           }),
         ),
       create: (input: { readonly name: string }) =>
         Effect.map(Effect.service(Store), (store) => {
-          store.set("2", personRow("2", input.name));
+          MutableHashMap.set(store, "2", personRow("2", input.name));
           return { id: "2" };
         }),
       update: (input: { readonly id: string; readonly name?: string | undefined }) =>
         Effect.map(Effect.service(Store), (store) => {
-          store.set(input.id, personRow(input.id, input.name ?? "?"));
+          MutableHashMap.set(store, input.id, personRow(input.id, input.name ?? "?"));
           return { id: input.id };
         }),
-      delete: (id) => Effect.map(Effect.service(Store), (store) => void store.delete(id)),
+      delete: (id) =>
+        Effect.map(Effect.service(Store), (store) => void MutableHashMap.remove(store, id)),
     },
   }),
 } satisfies Registry.FamilyFor<typeof people.group>;
@@ -101,14 +106,14 @@ const families: ReadonlyArray<Registry.Family<Store>> = [peopleFamily, contestsF
 
 describe("registry ↔ contract", () => {
   it("gives every group a family with exactly its endpoint names", () => {
-    Arr.forEach(Object.entries(Api.groups), ([identifier, group]) => {
+    Arr.forEach(R.toEntries(Api.groups), ([identifier, group]) => {
       const family = families.find((f) => f.group === identifier);
       assert(family !== undefined, identifier);
-      expect(Arr.sort(Object.keys(family.handlers), Order.String)).toEqual(
-        Arr.sort(Object.keys(group.endpoints), Order.String),
+      expect(Arr.sort(R.keys<string, unknown>(family.handlers), Order.String)).toEqual(
+        Arr.sort(R.keys<string, unknown>(group.endpoints), Order.String),
       );
       expect(() => Registry.checkFamily(Api, family)).not.toThrow();
-      Arr.forEach(Object.keys(group.endpoints), (endpoint) => {
+      Arr.forEach(R.keys<string, unknown>(group.endpoints), (endpoint) => {
         expect(Option.isSome(Registry.handlerFor(families, identifier, endpoint))).toBe(true);
       });
     });
@@ -139,7 +144,7 @@ describe("the router, over HTTP", () => {
   const { isApiPath, negotiate } = Negotiation.make({ api: Api });
 
   /** The host's front door: negotiate, relabel, dispatch with a fresh per-request context. */
-  const serve = async (request: Request, store = new Map<string, Person>()) => {
+  const serve = async (request: Request, store = MutableHashMap.empty<string, Person>()) => {
     const { handler, dispose } = Registry.webHandler(Api, families);
     onTestFinished(() => dispose());
     const verdict = negotiate(request);
@@ -154,7 +159,7 @@ describe("the router, over HTTP", () => {
   });
 
   it("builds a Fetch-shaped handler at module init and answers a document", async () => {
-    const store = new Map([["1", personRow("1", "Ada")]]);
+    const store = MutableHashMap.make(["1", personRow("1", "Ada")] as const);
     const response = await json(
       await serve(
         new Request("https://example.test/people/1", { headers: { accept: MEDIA_TYPE } }),
@@ -173,7 +178,7 @@ describe("the router, over HTTP", () => {
   });
 
   it("answers a list with pagination links carrying the query", async () => {
-    const store = new Map([["1", personRow("1", "Ada")]]);
+    const store = MutableHashMap.make(["1", personRow("1", "Ada")] as const);
     const response = await json(
       await serve(
         new Request("https://example.test/people?page[limit]=1", {
@@ -204,7 +209,7 @@ describe("the router, over HTTP", () => {
           headers: { "content-type": MEDIA_TYPE, accept: MEDIA_TYPE },
           body: stringify({ id: "2", name: "Bob" }),
         }),
-        new Map([["1", personRow("1", "Ada")]]),
+        MutableHashMap.make(["1", personRow("1", "Ada")] as const),
       ),
     );
     expect(conflict.status).toBe(409);
@@ -215,7 +220,7 @@ describe("the router, over HTTP", () => {
   });
 
   it("creates through the relabelled write and answers 201; deletes with 204", async () => {
-    const store = new Map<string, Person>();
+    const store = MutableHashMap.empty<string, Person>();
     const created = await json(
       await serve(
         new Request("https://example.test/people", {
@@ -236,7 +241,7 @@ describe("the router, over HTTP", () => {
       store,
     );
     expect(removed.status).toBe(204);
-    expect(store.has("2")).toBe(false);
+    expect(MutableHashMap.has(store, "2")).toBe(false);
   });
 
   it("answers a schema failure with the middleware's 400, and the seam's §5 statuses at the front door", async () => {
@@ -270,12 +275,12 @@ describe("the router, over HTTP", () => {
     // `Middleware.layer` negotiates itself: an application/json Accept is a 406 from inside the api.
     const rejected = await handler(
       new Request("https://example.test/people/1", { headers: { accept: "application/json" } }),
-      Context.make(Store, new Map()),
+      Context.make(Store, MutableHashMap.empty()),
     );
     expect(rejected.status).toBe(406);
     const ok = await handler(
       new Request("https://example.test/people/9", { headers: { accept: MEDIA_TYPE } }),
-      Context.make(Store, new Map()),
+      Context.make(Store, MutableHashMap.empty()),
     );
     // The catalogue still maps NotFound first; the extra arm only sees what it declines.
     expect(ok.status).toBe(404);
@@ -294,7 +299,10 @@ describe("the router, over HTTP", () => {
       headers: { "content-type": MEDIA_TYPE, accept: MEDIA_TYPE },
       body: '{"name":"Bob"}',
     });
-    return handler(Negotiation.requestForRouter(request), Context.make(Store, new Map()));
+    return handler(
+      Negotiation.requestForRouter(request),
+      Context.make(Store, MutableHashMap.empty()),
+    );
   };
 
   it("serves a create under a custom middleware set that does not provide CreatedLocation", async () => {

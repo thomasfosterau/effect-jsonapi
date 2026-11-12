@@ -11,6 +11,9 @@
  * within two releases — one `import type` added to `Resource.ts` is enough to
  * break it silently. So this walks the real import graph instead.
  */
+import * as Option from "effect/Option";
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as MutableHashMap from "effect/MutableHashMap";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -184,13 +187,13 @@ const parseSpecifiers = (file: string): ReadonlyArray<string> => {
  * specifiers do not change during the run, so each is parsed once; the walks
  * themselves still run per entry, so every assertion sees its own graph.
  */
-const specifierCache = new Map<string, ReadonlyArray<string>>();
+const specifierCache = MutableHashMap.empty<string, ReadonlyArray<string>>();
 
 const specifiersOf = (file: string): ReadonlyArray<string> => {
-  const cached = specifierCache.get(file);
+  const cached = Option.getOrUndefined(MutableHashMap.get(specifierCache, file));
   if (cached !== undefined) return cached;
   const found = parseSpecifiers(file);
-  specifierCache.set(file, found);
+  MutableHashMap.set(specifierCache, file, found);
   return found;
 };
 
@@ -213,16 +216,16 @@ interface Graph {
   /** Files reached, relative to the entry's own directory. */
   readonly modules: ReadonlyArray<string>;
   /** Bare specifiers reached, each mapped to the chain of files that reached it. */
-  readonly externals: ReadonlyMap<string, ReadonlyArray<string>>;
+  readonly externals: MutableHashMap.MutableHashMap<string, ReadonlyArray<string>>;
 }
 
 /** Walks the transitive import graph from `entry`, recording how each external was reached. */
 const graphFrom = (entry: string, dir: string): Graph => {
-  const modules = new Set<string>();
-  const externals = new Map<string, ReadonlyArray<string>>();
+  const modules = MutableHashSet.empty<string>();
+  const externals = MutableHashMap.empty<string, ReadonlyArray<string>>();
   const walk = (file: string, trail: ReadonlyArray<string>): void => {
-    if (modules.has(file)) return;
-    modules.add(file);
+    if (MutableHashSet.has(modules, file)) return;
+    MutableHashSet.add(modules, file);
     const here = [...trail, path.relative(dir, file)];
     Arr.forEach(specifiersOf(file), (specifier) => {
       if (specifier.startsWith(".")) {
@@ -233,15 +236,15 @@ const graphFrom = (entry: string, dir: string): Graph => {
           `${path.relative(dir, file)} imports unresolvable "${specifier}"`,
         );
         walk(resolved, here);
-      } else if (!externals.has(specifier)) {
-        externals.set(specifier, here);
+      } else if (!MutableHashMap.has(externals, specifier)) {
+        MutableHashMap.set(externals, specifier, here);
       }
     });
   };
   walk(entry, []);
   return {
     modules: Arr.sort(
-      [...modules].map((file) => path.relative(dir, file)),
+      Arr.fromIterable(modules).map((file) => path.relative(dir, file)),
       Order.String,
     ),
     externals,
@@ -284,7 +287,7 @@ const isPermitted = (specifier: string): boolean =>
 /** Externals of `graph` that are not permitted, each with the chain that reached it. */
 const foreign = (graph: Graph): ReadonlyArray<string> =>
   Arr.sort(
-    [...graph.externals.entries()]
+    Arr.fromIterable(graph.externals)
       .filter(([specifier]) => !isPermitted(specifier))
       .map(([specifier, trail]) => `${specifier} via ${trail.join(" -> ")}`),
     Order.String,
@@ -295,7 +298,7 @@ const foreign = (graph: Graph): ReadonlyArray<string> =>
  * effect-ext subpaths, labelled with `label`.
  */
 const beyondEffect = (label: string, graph: Graph): ReadonlyArray<string> =>
-  [...graph.externals.keys()]
+  Arr.fromIterable(MutableHashMap.keys(graph.externals))
     .filter((specifier) => !isEffect(specifier) && !SCHEMA_TIER_EFFECT_EXT.includes(specifier))
     .map((specifier) => `${label}: ${specifier}`);
 
@@ -340,7 +343,7 @@ const HTTP_MODULES = PUBLIC_MODULES.filter((module) => !SCHEMA_MODULES.includes(
 
 const httpSurface = (graph: Graph): ReadonlyArray<string> =>
   Arr.sort(
-    [...graph.externals.entries()]
+    Arr.fromIterable(graph.externals)
       .filter(([specifier]) => isHttpSurface(specifier))
       .map(([specifier, trail]) => `${specifier} via ${trail.join(" -> ")}`),
     Order.String,
@@ -367,7 +370,7 @@ describe("schema-only entry point", () => {
   });
 
   it("declares `effect` and the schema tier's effect-ext subpaths as its only externals", () => {
-    const externals = [...schema.externals.keys()];
+    const externals = Arr.fromIterable(MutableHashMap.keys(schema.externals));
     expect(externals.filter((specifier) => !isEffect(specifier))).toEqual(
       Arr.sort([...SCHEMA_TIER_EFFECT_EXT], Order.String),
     );
@@ -481,20 +484,20 @@ describe("effect-ext subpaths", () => {
     });
     expect(
       graphs.flatMap(([file, graph]) =>
-        [...graph.externals.keys()]
+        Arr.fromIterable(MutableHashMap.keys(graph.externals))
           .filter((specifier) => !isEffect(specifier) || isHttpSurface(specifier))
           .map((specifier) => `${file}: ${specifier}`),
       ),
     ).toEqual([]);
     // Control: the walk reached effect at all.
-    expect(graphs.every(([, graph]) => graph.externals.size > 0)).toBe(true);
+    expect(graphs.every(([, graph]) => MutableHashMap.size(graph.externals) > 0)).toBe(true);
   });
 });
 
 describe("root entry point", { timeout: LOAD_TIMEOUT }, () => {
   it("still exports every namespace, unchanged", async () => {
     const index = await import("@thomasfosterau/effect-jsonapi");
-    expect(Arr.sort(Object.keys(index), Order.String)).toEqual([
+    expect(Arr.sort(R.keys(index), Order.String)).toEqual([
       "ApiError",
       "Assemble",
       "Atomic",
@@ -527,9 +530,9 @@ describe("root entry point", { timeout: LOAD_TIMEOUT }, () => {
     const index = await import("@thomasfosterau/effect-jsonapi");
     const schema = await import("@thomasfosterau/effect-jsonapi/schema");
     // Not a second API: same modules, fewer of them.
-    Arr.forEach(Object.keys(schema), (name) => {
+    Arr.forEach(R.keys(schema), (name) => {
       expect(index[name as keyof typeof index], `${name} differs between entry points`).toBe(
-        schema[name as keyof typeof schema],
+        schema[name],
       );
     });
   });
@@ -595,7 +598,7 @@ describe("package exports map", () => {
   });
 
   it("points every declared subpath at a real source module", () => {
-    Arr.forEach(Object.entries(manifest.exports), ([subpath, target]) => {
+    Arr.forEach(R.toEntries(manifest.exports), ([subpath, target]) => {
       const source = path.join(SRC, `${path.basename(target.default, ".js")}.ts`);
       expect(fs.existsSync(source), `${subpath} -> ${target.default} has no source`).toBe(true);
     });
@@ -661,7 +664,9 @@ describe("built artifact", () => {
   it.skipIf(!hasDist)("ships declarations that never name effect-ext", () => {
     expect(
       ["index", "schema", ...PUBLIC_MODULES].flatMap((entry) =>
-        [...graphFrom(path.join(DIST, `${entry}.d.ts`), DIST).externals.keys()]
+        Arr.fromIterable(
+          MutableHashMap.keys(graphFrom(path.join(DIST, `${entry}.d.ts`), DIST).externals),
+        )
           .filter((specifier) => specifier.startsWith("@thomasfosterau/effect-ext"))
           .map((specifier) => `dist/${entry}.d.ts: ${specifier}`),
       ),

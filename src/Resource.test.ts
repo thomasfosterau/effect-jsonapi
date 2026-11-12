@@ -2,10 +2,10 @@ import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Brand from "effect/Brand";
 import * as Option from "effect/Option";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
-import * as R from "effect/Record";
 import * as Types from "effect/Types";
 import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js";
 import * as Filter from "./Filter.js";
@@ -413,7 +413,7 @@ describe("Resource relationships", () => {
   });
 
   it("exposes relationship descriptors for graph walking", () => {
-    expect(Object.keys(Article.relationships)).toEqual(["author", "comments"]);
+    expect(R.keys(Article.relationships)).toEqual(["author", "comments"]);
     expect(Article.relationships.author.kind).toBe("optional");
     expect(Article.relationships.comments.kind).toBe("many");
     expect(Comment.relationships.author.kind).toBe("one");
@@ -781,7 +781,7 @@ describe("AnyMeta", () => {
 describe("Resource.attributes / Resource.relationships", () => {
   it("extracts the attribute field map", () => {
     const fields = attributesOf(Article);
-    expect(Object.keys(fields)).toEqual(["title", "body", "createdAt"]);
+    expect(R.keys(fields)).toEqual(["title", "body", "createdAt"]);
     // the extracted schemas are the ones the resource was defined with
     expect(Schema.decodeSync(fields.title)("Hello")).toBe("Hello");
   });
@@ -801,7 +801,7 @@ describe("Resource.attributes / Resource.relationships", () => {
 
   it("extracts the relationship descriptor record", () => {
     const rels = relationshipsOf(Article);
-    expect(Object.keys(rels)).toEqual(["author", "comments"]);
+    expect(R.keys(rels)).toEqual(["author", "comments"]);
     expect(rels.author.kind).toBe("optional");
     expect(rels.comments.ref().type).toBe("comments");
     // it is the same record the resource exposes
@@ -933,7 +933,7 @@ describe("Resource.extend", () => {
       attributes: { firstName: "John", lastName: "Doe", nickname: "JD" },
     });
     expect(decoded.attributes.nickname).toBe("JD");
-    expect(Object.keys(Named.relationships)).toEqual([]);
+    expect(R.keys(Named.relationships)).toEqual([]);
   });
 
   it("derives the included union from the merged relationship graph", () => {
@@ -963,8 +963,8 @@ describe("Resource.extend", () => {
   });
 
   it("leaves the base resource unchanged", () => {
-    expect(Object.keys(attributesOf(Account))).toEqual(["email", "createdAt"]);
-    expect(Object.keys(Account.relationships)).toEqual(["profile"]);
+    expect(R.keys(attributesOf(Account))).toEqual(["email", "createdAt"]);
+    expect(R.keys(Account.relationships)).toEqual(["profile"]);
   });
 });
 
@@ -1075,7 +1075,7 @@ describe("Resource attribute annotations", () => {
   });
 
   it("exposes a key for every attribute", () => {
-    expect(Object.keys(attributeAnnotations(Widget))).toEqual(["name", "note", "plain"]);
+    expect(R.keys(attributeAnnotations(Widget))).toEqual(["name", "note", "plain"]);
   });
 });
 
@@ -1250,7 +1250,7 @@ describe("Resource.extend custom id injection", () => {
 
   it("still inherits the base's attributes and relationships", () => {
     expect(attributeKeys(Admin)).toEqual(["email", "level"]);
-    expect(Object.keys(Admin.relationships)).toEqual(["organisation"]);
+    expect(R.keys(Admin.relationships)).toEqual(["organisation"]);
     const decoded = Schema.decodeSync(Admin)({
       type: "admins",
       id: "1",
@@ -1569,12 +1569,12 @@ describe("Resource.attribute", () => {
   });
 
   it("makes a non-nullable attribute clearable on update when asked", () => {
-    const R = Resource("clears", {
+    const res = Resource("clears", {
       attributes: { bio: attribute(Schema.String, { clearable: true }) },
     });
-    type UpdateAttrs = NonNullable<(typeof R.updatePayload.Type)["data"]["attributes"]>;
+    type UpdateAttrs = NonNullable<(typeof res.updatePayload.Type)["data"]["attributes"]>;
     expectTypeOf<UpdateAttrs["bio"]>().toEqualTypeOf<string | null | undefined>();
-    const decoded = Schema.decodeSync(R.updatePayload)({
+    const decoded = Schema.decodeSync(res.updatePayload)({
       data: { type: "clears", id: "1", attributes: { bio: null } },
     });
     expect(decoded.data.attributes?.bio).toBeNull();
@@ -1645,7 +1645,7 @@ describe("Resource.attribute with resource: false (input-only)", () => {
 
   it("omits input-only attributes from the resource object schema", () => {
     expect(attributeKeys(Upload)).toEqual(["fileName"]);
-    expect(Object.keys(Upload.fields.attributes.fields)).toEqual(["fileName"]);
+    expect(R.keys(Upload.fields.attributes.fields)).toEqual(["fileName"]);
     expectTypeOf<(typeof Upload.Type)["attributes"]>().toEqualTypeOf<{
       readonly fileName: string;
     }>();
@@ -1739,8 +1739,8 @@ describe("Resource.attribute with resource: false (input-only)", () => {
 
   it("keeps input-only attributes out of attributeKeys, attributeAnnotations, filterable and sortable", () => {
     expect(attributeKeys(Upload)).toEqual(["fileName"]);
-    expect(Object.keys(attributeAnnotations(Upload))).toEqual(["fileName"]);
-    expect(Object.keys(filterable(Upload))).toEqual(["fileName"]);
+    expect(R.keys(attributeAnnotations(Upload))).toEqual(["fileName"]);
+    expect(R.keys(filterable(Upload))).toEqual(["fileName"]);
     expect(sortable(Upload)).toEqual(["fileName"]);
   });
 
@@ -1758,8 +1758,8 @@ describe("Resource.attribute with resource: false (input-only)", () => {
   });
 
   it("exposes the declared map through declaredAttributes, the resource-object map through attributes", () => {
-    expect(Object.keys(attributesOf(Upload))).toEqual(["fileName"]);
-    expect(Object.keys(declaredAttributes(Upload))).toEqual(["fileName", "file", "secret", "note"]);
+    expect(R.keys(attributesOf(Upload))).toEqual(["fileName"]);
+    expect(R.keys(declaredAttributes(Upload))).toEqual(["fileName", "file", "secret", "note"]);
     expect(Upload.declaredAttributes).toBe(declaredAttributes(Upload));
     expectTypeOf(declaredAttributes(Upload)).toHaveProperty("file");
     expectTypeOf(attributesOf(Upload)).not.toHaveProperty("file");
@@ -1770,7 +1770,7 @@ describe("Resource.attribute with resource: false (input-only)", () => {
   it("is inherited through Resource.extend", () => {
     const Image = extend(Upload, "images", { attributes: { width: Schema.Int } });
     expect(attributeKeys(Image)).toEqual(["fileName", "width"]);
-    expect(Object.keys(declaredAttributes(Image))).toEqual([
+    expect(R.keys(declaredAttributes(Image))).toEqual([
       "fileName",
       "file",
       "secret",
@@ -1801,11 +1801,11 @@ describe("Resource.attribute with resource: false (input-only)", () => {
     const Image = extend(Upload, "images", { inheritId: true, attributes: { width: Schema.Int } });
     // base-anchored: the base's resource-object attributes
     const Anchored = family(Upload, [Image]);
-    expect(Object.keys(Anchored.fields.attributes.fields)).toEqual(["fileName"]);
+    expect(R.keys(Anchored.fields.attributes.fields)).toEqual(["fileName"]);
     expect(attributeKeys(Anchored)).toEqual(["fileName"]);
     // name-only: the by-key intersection of the members' resource-object fields
     const Named = family("blobs", [Upload, Image]);
-    expect(Object.keys(Named.fields.attributes.fields)).toEqual(["fileName"]);
+    expect(R.keys(Named.fields.attributes.fields)).toEqual(["fileName"]);
     // a family declares nothing itself: its declared map is its resource-object map
     expect(declaredAttributes(Named)).toBe(Named.fields.attributes.fields);
     expect(declaredAttributes(Anchored)).toBe(Anchored.fields.attributes.fields);
@@ -1996,9 +1996,9 @@ describe("Resource.attribute `resource` option", () => {
     const shown = attribute(Schema.String, { resource: true });
     const optional = attribute(Schema.String, { resource: "optional" });
     const inputOnly = attribute(Schema.String, { resource: false });
-    const R = Resource("literals", { attributes: { shown, optional, inputOnly } });
-    expect(attributeKeys(R)).toEqual(["shown", "optional"]);
-    expectTypeOf<(typeof R.Type)["attributes"]>().toEqualTypeOf<{
+    const res = Resource("literals", { attributes: { shown, optional, inputOnly } });
+    expect(attributeKeys(res)).toEqual(["shown", "optional"]);
+    expectTypeOf<(typeof res.Type)["attributes"]>().toEqualTypeOf<{
       readonly shown: string;
       readonly optional?: string;
     }>();
@@ -2026,9 +2026,9 @@ describe("Resource.annotate / Resource.annotations", () => {
     expect(annotated.Id).toBeDefined();
     expect(annotated.identifier).toBeDefined();
     expect(annotated.localIdentifier).toBeDefined();
-    expect(Object.keys(annotated.declaredAttributes)).toEqual(["name"]);
-    expect(Object.keys(annotated.createPayload.fields)).toEqual(["data"]);
-    expect(Object.keys(annotated.updatePayload.fields)).toEqual(["data"]);
+    expect(R.keys(annotated.declaredAttributes)).toEqual(["name"]);
+    expect(R.keys(annotated.createPayload.fields)).toEqual(["data"]);
+    expect(R.keys(annotated.updatePayload.fields)).toEqual(["data"]);
     expect(attributeKeys(annotated)).toEqual(["name"]);
     expect(annotated.ref("1")).toEqual({ type: "widgets", id: "1" });
     expect(annotated.lidRef("a")).toEqual({ type: "widgets", lid: "a" });
@@ -2188,7 +2188,7 @@ describe("Resource.attributeDescriptors", () => {
   });
 
   const descriptors = attributeDescriptors(Thing);
-  const byKey = Object.fromEntries(descriptors.map((descriptor) => [descriptor.key, descriptor]));
+  const byKey = R.fromEntries(descriptors.map((descriptor) => [descriptor.key, descriptor]));
 
   it("reports every declared attribute in declaration order, input-only ones included", () => {
     expect(descriptors.map((descriptor) => descriptor.key)).toEqual([

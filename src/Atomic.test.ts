@@ -1,3 +1,4 @@
+import * as R from "effect/Record";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Match from "effect/Match";
@@ -565,15 +566,15 @@ describe("operationsFor", () => {
     const operations = Atomic.operationsFor(Article);
 
     // resource-level operations
-    expect(Object.keys(operations)).toEqual(["add", "update", "remove", "relationships"]);
+    expect(R.keys(operations)).toEqual(["add", "update", "remove", "relationships"]);
     // relationship operations, by relationship key and kind
-    expect(Object.keys(operations.relationships)).toEqual(["author", "comments", "subscribers"]);
+    expect(R.keys(operations.relationships)).toEqual(["author", "comments", "subscribers"]);
     // `optional` to-one → update only
-    expect(Object.keys(operations.relationships.author)).toEqual(["update"]);
+    expect(R.keys(operations.relationships.author)).toEqual(["update"]);
     // `many` to-many → add / update / remove
-    expect(Object.keys(operations.relationships.comments)).toEqual(["add", "update", "remove"]);
+    expect(R.keys(operations.relationships.comments)).toEqual(["add", "update", "remove"]);
     // `paginated` to-many → add / update / remove (managed through operations, not inline)
-    expect(Object.keys(operations.relationships.subscribers)).toEqual(["add", "update", "remove"]);
+    expect(R.keys(operations.relationships.subscribers)).toEqual(["add", "update", "remove"]);
   });
 
   it("the record's schemas decode their wire forms", () => {
@@ -595,7 +596,7 @@ describe("operationsFor", () => {
 
   it("resources without relationships derive only resource operations", () => {
     const operations = Atomic.operationsFor(Person);
-    expect(Object.keys(operations.relationships)).toEqual([]);
+    expect(R.keys(operations.relationships)).toEqual([]);
   });
 });
 

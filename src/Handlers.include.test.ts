@@ -1,3 +1,6 @@
+import * as Option from "effect/Option";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as R from "effect/Record";
 import { it } from "@effect/vitest";
 import { describe, expect, expectTypeOf } from "vite-plus/test";
 import * as Arr from "effect/Array";
@@ -24,11 +27,16 @@ const store = (
   options?: { readonly delay?: Record<string, number> },
 ) => {
   const calls: Array<Call> = [];
-  const byType = new Map<string, Map<string, Handlers.ResourceValue>>();
+  const byType = MutableHashMap.empty<
+    string,
+    MutableHashMap.MutableHashMap<string, Handlers.ResourceValue>
+  >();
   Arr.forEach(rows, (row) => {
-    const existing = byType.get(row.type) ?? new Map<string, Handlers.ResourceValue>();
-    existing.set(row.id, row);
-    byType.set(row.type, existing);
+    const existing = Option.getOrElse(MutableHashMap.get(byType, row.type), () =>
+      MutableHashMap.empty<string, Handlers.ResourceValue>(),
+    );
+    MutableHashMap.set(existing, row.id, row);
+    MutableHashMap.set(byType, row.type, existing);
   });
 
   const target =
@@ -37,8 +45,11 @@ const store = (
       Effect.suspend(() => {
         calls.push({ type, ids });
         const found = ids.flatMap((id) => {
-          const row = byType.get(type)?.get(id);
-          return row === undefined ? [] : [row];
+          return Arr.fromOption(
+            Option.flatMap(MutableHashMap.get(byType, type), (rowsOfType) =>
+              MutableHashMap.get(rowsOfType, id),
+            ),
+          );
         });
         const delay = options?.delay?.[type];
         return delay === undefined
@@ -47,7 +58,7 @@ const store = (
       });
 
   const targets = (...types: ReadonlyArray<string>): Record<string, Handlers.IncludeTarget> =>
-    Object.fromEntries(types.map((type) => [type, target(type)]));
+    R.fromEntries(types.map((type) => [type, target(type)]));
 
   return {
     calls,
@@ -277,7 +288,7 @@ describe("Handlers.resolveIncluded — batching is per level, not per resource",
       expect(db.calls[0].type).toBe("people");
       // 50 articles, 25 distinct authors: the level is deduplicated before loading
       expect(db.calls[0].ids.length).toBe(25);
-      expect(new Set(db.calls[0].ids).size).toBe(25);
+      expect(Arr.dedupe(db.calls[0].ids).length).toBe(25);
       expect(db.calls[1].type).toBe("companies");
       expect(db.calls[1].ids.length).toBe(5);
 

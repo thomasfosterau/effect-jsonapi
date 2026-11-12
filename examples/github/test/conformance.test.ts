@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import { Conformance } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
 import { discardIssue, discardRepository, GitHubLive } from "../handlers.js";
@@ -131,7 +132,7 @@ layer(RunLive)("github: JSON:API conformance", (it) => {
       // `labels` and `issueComments` have no `GET /:type/:id` endpoint, so their
       // samples key relationship and related reads only, and record no read.
       expect(
-        Object.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
+        R.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
         Conformance.format(report),
       ).toEqual({ users: 200, repositories: 200, issues: 200, pulls: 200 });
     }),

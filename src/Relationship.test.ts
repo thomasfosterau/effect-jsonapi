@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { AnyMeta } from "./Document.js";
 import * as Relationship from "./Relationship.js";
@@ -333,7 +334,7 @@ describe("Relationship.paginated `order`", () => {
       },
     });
     const schema = Relationship.schemaFor(Page.relationships.revisions);
-    expect(Object.keys(schema.fields)).toEqual(["links", "meta"]);
+    expect(R.keys(schema.fields)).toEqual(["links", "meta"]);
     expect(Schema.decodeSync(schema)({ links: { related: "/pages/1/revisions" } })).toEqual({
       links: { related: "/pages/1/revisions" },
     });
