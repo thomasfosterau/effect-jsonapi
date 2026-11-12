@@ -376,14 +376,14 @@ export type ReadOnlyHandlers<
   readonly list: (request: {
     readonly query: TQuery;
   }) => Effect.Effect<
-    Assemble.CollectionDocument<TResource>,
+    Assemble.CollectionDocument<TResource, Assemble.TargetsIncluded<Targets>>,
     ReadError<E, Targets>,
     R | RV | RL | Handlers.IncludeTargetServices<Targets>
   >;
   readonly get: (
     request: GetRequest<TId>,
   ) => Effect.Effect<
-    Assemble.ResourceDocument<TResource>,
+    Assemble.ResourceDocument<TResource, Assemble.TargetsIncluded<Targets>>,
     ReadError<E, Targets>,
     R | RV | RC | Handlers.IncludeTargetServices<Targets>
   >;
@@ -418,7 +418,7 @@ export type CrudHandlers<
   readonly create: (request: {
     readonly payload: TCreate;
   }) => Effect.Effect<
-    Assemble.ResourceDocument<TResource> | Committed,
+    Assemble.ResourceDocument<TResource, never> | Committed,
     E | ET,
     R | RV | RC | RT | Exclude<RW, Tx>
   >;
@@ -426,7 +426,7 @@ export type CrudHandlers<
     readonly params: { readonly id: TId };
     readonly payload: TUpdate;
   }) => Effect.Effect<
-    Assemble.ResourceDocument<TResource> | Committed,
+    Assemble.ResourceDocument<TResource, never> | Committed,
     E | ET | ApiError.Conflict,
     R | RV | RC | RT | Exclude<RW, Tx>
   >;

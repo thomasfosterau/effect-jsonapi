@@ -4480,6 +4480,15 @@ export interface FlatDocumentOptions<Included extends Schema.Top, TM extends Sch
   readonly toManyMeta?: TM | undefined;
 }
 
+// `never` is what a flat group without an include surface passes as
+// `Included` (the `included` of no surface, #595). It reads as `Schema.Top`,
+// the unconstrained `included` such a group always declared, so only a group
+// that has a surface gets the narrower type, and the handlers typed against a
+// surface-less group still match.
+type IncludedOrNone<Included extends Schema.Top> = [Included] extends [never]
+  ? Schema.Top
+  : Included;
+
 /**
  * The `success:` document of a flat `get` / `create` / `update`: a
  * single-resource data document over the **wire** form of `resource`
@@ -4513,7 +4522,7 @@ export const ResourceDocument = <
 >(
   resource: S,
   options?: FlatDocumentOptions<Included, TM>,
-): DataDocument<WireSchema<S, TM>, WireSchema<Included, TM>> =>
+): DataDocument<WireSchema<S, TM>, WireSchema<IncludedOrNone<Included>, TM>> =>
   asJsonApi(
     DataDocument(
       wire(resource, { toManyMeta: options?.toManyMeta }),
@@ -4672,7 +4681,7 @@ export const FlatCollectionDocument = <
 >(
   resource: S,
   options?: FlatDocumentOptions<Included, TM>,
-): CollectionDocument<WireSchema<S, TM>, WireSchema<Included, TM>> =>
+): CollectionDocument<WireSchema<S, TM>, WireSchema<IncludedOrNone<Included>, TM>> =>
   asJsonApi(
     CollectionDocument(
       wire(resource, { toManyMeta: options?.toManyMeta }),
