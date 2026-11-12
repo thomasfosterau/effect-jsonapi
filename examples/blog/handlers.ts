@@ -167,10 +167,10 @@ const resolveIncluded = (article: Article, include: ReadonlyArray<string> | unde
       included.push(store.people.get(author.id)!);
   }
   if (include?.includes("tags")) {
-    for (const identifier of article.relationships?.tags.data ?? []) {
+    Arr.forEach(article.relationships?.tags.data ?? [], (identifier) => {
       const tag = store.tags.get(identifier.id);
       if (tag !== undefined) included.push(tag);
-    }
+    });
   }
   return included;
 };
@@ -233,17 +233,14 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       }
 
       // sort=-createdAt,title
-      for (const term of (query.sort ?? []).toReversed()) {
+      articles = Arr.reduce((query.sort ?? []).toReversed(), articles, (sorted, term) => {
         const ascending = Order.make<(typeof articles)[number]>((a, b) => {
           const left = a.attributes[term.field];
           const right = b.attributes[term.field];
           return left < right ? -1 : left > right ? 1 : 0;
         });
-        articles = Arr.sort(
-          articles,
-          term.direction === "desc" ? Order.flip(ascending) : ascending,
-        );
-      }
+        return Arr.sort(sorted, term.direction === "desc" ? Order.flip(ascending) : ascending);
+      });
 
       // page[offset]=0&page[limit]=10
       const total = articles.length;
@@ -267,10 +264,13 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     })
     .handle("create", ({ payload }) => {
       const title = payload.data.attributes.title;
-      for (const existing of store.articles.values()) {
-        if (existing.attributes.title === title) {
-          return Effect.fail(new TitleTaken({ title }));
-        }
+      if (
+        Arr.some(
+          Arr.fromIterable(store.articles.values()),
+          (existing) => existing.attributes.title === title,
+        )
+      ) {
+        return Effect.fail(new TitleTaken({ title }));
       }
       const id = Article.Id.make(`${store.articles.size + 1}`);
       const article = Article.make({
@@ -431,9 +431,9 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
         Effect.tap(() => requireComments(payload.data)),
         Effect.map((article) => {
           const linked = store.articleComments.get(article.id) ?? [];
-          for (const identifier of payload.data) {
+          Arr.forEach(payload.data, (identifier) => {
             if (!linked.includes(identifier.id)) linked.push(identifier.id);
-          }
+          });
           store.articleComments.set(article.id, linked);
           return Handlers.linkage(
             linked.map((id) => Comment.ref(id)),
@@ -818,12 +818,12 @@ const applyOperation = (
           const comment = getComment(draft, lids, remove.ref);
           draft.comments.delete(comment.id);
           // unlink it from any article's paginated comments relationship
-          for (const [articleId, ids] of draft.articleComments) {
+          Arr.forEach(draft.articleComments, ([articleId, ids]) => {
             draft.articleComments.set(
               articleId,
               ids.filter((id) => id !== comment.id),
             );
-          }
+          });
           return Atomic.emptyResult;
         }),
         Match.exhaustive,

@@ -392,17 +392,17 @@ const resolveIssueIncluded = (
       }
     }
   }
-  for (const key of ["author", "assignee"] as const) {
+  Arr.forEach(["author", "assignee"] as const, (key) => {
     if (include.includes(key)) {
       const ref = issue.relationships?.[key].data;
       if (ref != null && store.users.has(ref.id)) included.push(store.users.get(ref.id)!);
     }
-  }
+  });
   if (include.includes("labels")) {
-    for (const ref of issue.relationships?.labels.data ?? []) {
+    Arr.forEach(issue.relationships?.labels.data ?? [], (ref) => {
       const label = store.labels.get(ref.id);
       if (label !== undefined) included.push(label);
-    }
+    });
   }
   return included;
 };
@@ -428,10 +428,10 @@ const resolvePullIncluded = (
     if (ref !== undefined && store.users.has(ref.id)) included.push(store.users.get(ref.id)!);
   }
   if (include.includes("reviewers")) {
-    for (const ref of pull.relationships?.reviewers.data ?? []) {
+    Arr.forEach(pull.relationships?.reviewers.data ?? [], (ref) => {
       const reviewer = store.users.get(ref.id);
       if (reviewer !== undefined) included.push(reviewer);
-    }
+    });
   }
   return included;
 };
@@ -441,7 +441,7 @@ const sortBy = <A extends { readonly attributes: any }>(
   items: Array<A>,
   sort: ReadonlyArray<{ readonly field: string; readonly direction: "asc" | "desc" }> | undefined,
 ): Array<A> => {
-  for (const term of (sort ?? []).toReversed()) {
+  Arr.forEach((sort ?? []).toReversed(), (term) => {
     const ascending = Order.make<A>((a, b) => {
       const left = a.attributes[term.field];
       const right = b.attributes[term.field];
@@ -453,7 +453,7 @@ const sortBy = <A extends { readonly attributes: any }>(
       items.length,
       ...Arr.sort(items, term.direction === "desc" ? Order.flip(ascending) : ascending),
     );
-  }
+  });
   return items;
 };
 
@@ -726,10 +726,14 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
       const name = payload.data.attributes.name;
       // `owner` is a required (`one`) relationship — the payload always carries it.
       const owner = payload.data.relationships.owner.data.id;
-      for (const existing of store.repositories.values()) {
-        if (existing.attributes.name === name && existing.relationships?.owner.data.id === owner) {
-          return Effect.fail(new RepositoryNameTaken({ name }));
-        }
+      if (
+        Arr.some(
+          Arr.fromIterable(store.repositories.values()),
+          (existing) =>
+            existing.attributes.name === name && existing.relationships?.owner.data.id === owner,
+        )
+      ) {
+        return Effect.fail(new RepositoryNameTaken({ name }));
       }
       const repository = Repository.make({
         id: Repository.Id.make(`${store.repositories.size + 1}`),

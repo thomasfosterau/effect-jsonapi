@@ -224,7 +224,7 @@ const graphFrom = (entry: string, dir: string): Graph => {
     if (modules.has(file)) return;
     modules.add(file);
     const here = [...trail, path.relative(dir, file)];
-    for (const specifier of specifiersOf(file)) {
+    Arr.forEach(specifiersOf(file), (specifier) => {
       if (specifier.startsWith(".")) {
         const resolved = resolveRelative(file, specifier);
         // An unresolvable relative import is a broken graph, not a pass.
@@ -236,7 +236,7 @@ const graphFrom = (entry: string, dir: string): Graph => {
       } else if (!externals.has(specifier)) {
         externals.set(specifier, here);
       }
-    }
+    });
   };
   walk(entry, []);
   return {
@@ -527,11 +527,11 @@ describe("root entry point", { timeout: LOAD_TIMEOUT }, () => {
     const index = await import("@thomasfosterau/effect-jsonapi");
     const schema = await import("@thomasfosterau/effect-jsonapi/schema");
     // Not a second API: same modules, fewer of them.
-    for (const name of Object.keys(schema)) {
+    Arr.forEach(Object.keys(schema), (name) => {
       expect(index[name as keyof typeof index], `${name} differs between entry points`).toBe(
         schema[name as keyof typeof schema],
       );
-    }
+    });
   });
 });
 
@@ -595,10 +595,10 @@ describe("package exports map", () => {
   });
 
   it("points every declared subpath at a real source module", () => {
-    for (const [subpath, target] of Object.entries(manifest.exports)) {
+    Arr.forEach(Object.entries(manifest.exports), ([subpath, target]) => {
       const source = path.join(SRC, `${path.basename(target.default, ".js")}.ts`);
       expect(fs.existsSync(source), `${subpath} -> ${target.default} has no source`).toBe(true);
-    }
+    });
   });
 });
 

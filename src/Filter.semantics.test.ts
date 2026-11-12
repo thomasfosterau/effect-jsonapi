@@ -1,3 +1,4 @@
+import * as Arr from "effect/Array";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 import * as Filter from "./Filter.js";
@@ -51,16 +52,19 @@ describe("filter profile §6.1 — the evaluation model", () => {
   it("F-EVAL-4 / F-EVAL-5: an absent member and a null member are one and the same NULL", () => {
     const absent: Row = {};
     const explicit: Row = { status: NULL };
-    for (const node of [
-      Filter.eq("status", "open"),
-      Filter.ne("status", "open"),
-      Filter.isIn("status", ["open"]),
-      Filter.notIn("status", ["open"]),
-      Filter.isNull("status"),
-      Filter.isNull("status", true),
-    ] as ReadonlyArray<Filter.Node>) {
-      expect(evaluate(node, absent)).toBe(evaluate(node, explicit));
-    }
+    Arr.forEach(
+      [
+        Filter.eq("status", "open"),
+        Filter.ne("status", "open"),
+        Filter.isIn("status", ["open"]),
+        Filter.notIn("status", ["open"]),
+        Filter.isNull("status"),
+        Filter.isNull("status", true),
+      ] as ReadonlyArray<Filter.Node>,
+      (node) => {
+        expect(evaluate(node, absent)).toBe(evaluate(node, explicit));
+      },
+    );
   });
 
   it("F-EVAL-4: a to-one relationship field is the related id, NULL when the linkage is empty", () => {
@@ -105,16 +109,16 @@ describe("filter profile §6.2 — comparison domains", () => {
       "2026-01-01T00:00:00.000Z",
       "2026-01-01T00:00:00.001Z",
     ];
-    for (let i = 0; i < instants.length; i++) {
-      for (let j = 0; j < instants.length; j++) {
+    Arr.forEach(instants, (left) => {
+      Arr.forEach(instants, (right) => {
         const chronological =
-          DateTime.toEpochMillis(DateTime.makeUnsafe(instants[i])) <
-          DateTime.toEpochMillis(DateTime.makeUnsafe(instants[j]));
-        expect(evaluate(Filter.lt("createdAt", instants[j]), { createdAt: instants[i] })).toBe(
+          DateTime.toEpochMillis(DateTime.makeUnsafe(left)) <
+          DateTime.toEpochMillis(DateTime.makeUnsafe(right));
+        expect(evaluate(Filter.lt("createdAt", right), { createdAt: left })).toBe(
           truth(chronological),
         );
-      }
-    }
+      });
+    });
     // exact at the precision the grammar can express: no rounding to match
     expect(
       evaluate(Filter.eq("createdAt", "2026-01-01T00:00:00.000Z"), {
@@ -153,7 +157,7 @@ describe("filter profile §6.3.1 — the comparison truth table", () => {
     value: 2,
   });
 
-  for (const op of ["eq", "ne", "lt", "lte", "gt", "gte"] as const) {
+  Arr.forEach(["eq", "ne", "lt", "lte", "gt", "gte"] as const, (op) => {
     it(`F-CMP-1 / F-CMP-2: ${op}`, () => {
       // F-CMP-1: NULL on the left is UNKNOWN, for every comparison
       expect(evaluate(node(op), { age: NULL })).toBe("UNKNOWN");
@@ -162,18 +166,18 @@ describe("filter profile §6.3.1 — the comparison truth table", () => {
         expect(evaluate(node(op), { age: value })).toBe(expected[op][index]);
       });
     });
-  }
+  });
 
   it("F-CMP-3: eq and ne do not partition — a NULL is in neither", () => {
     const row: Row = { status: NULL };
     expect(matches(Filter.eq("status", "done"), row)).toBe(false);
     expect(matches(Filter.ne("status", "done"), row)).toBe(false);
     // and they do partition everywhere else
-    for (const status of ["done", "open"]) {
+    Arr.forEach(["done", "open"], (status) => {
       expect(matches(Filter.eq("status", "done"), { status })).not.toBe(
         matches(Filter.ne("status", "done"), { status }),
       );
-    }
+    });
   });
 });
 
@@ -188,16 +192,16 @@ describe("filter profile §6.3.2 — membership", () => {
       { row: { title: "a" } as Row, in: "TRUE", nin: "FALSE" },
       { row: { title: "z" } as Row, in: "FALSE", nin: "TRUE" },
     ] as const;
-    for (const { row, in: inTruth, nin } of table) {
+    Arr.forEach(table, ({ row, in: inTruth, nin }) => {
       expect(evaluate(isIn, row)).toBe(inTruth);
       expect(evaluate(notIn, row)).toBe(nin);
-    }
+    });
   });
 
   it("F-IN-3: SQL's NOT IN and the negation of IN coincide, because a list never holds NULL", () => {
-    for (const row of [{ title: NULL }, { title: "a" }, { title: "z" }] as ReadonlyArray<Row>) {
+    Arr.forEach([{ title: NULL }, { title: "a" }, { title: "z" }] as ReadonlyArray<Row>, (row) => {
       expect(evaluate(notIn, row)).toBe(evaluate(Filter.not(isIn) as Filter.Node, row));
-    }
+    });
   });
 
   it("F-IN-4: order and multiplicity of a list carry no meaning", () => {
@@ -207,11 +211,11 @@ describe("filter profile §6.3.2 — membership", () => {
       { title: "z" },
       { title: NULL },
     ];
-    for (const row of rows) {
+    Arr.forEach(rows, (row) => {
       expect(evaluate(Filter.isIn("title", ["b", "a", "b"]) as Filter.Node, row)).toBe(
         evaluate(isIn, row),
       );
-    }
+    });
   });
 });
 
@@ -221,63 +225,64 @@ describe("filter profile §6.3.3 — the connectives", () => {
   const row: Row = { age: NULL, flag: true };
 
   it("F-LOGIC-1: the fixtures realise each truth value", () => {
-    for (const value of values) expect(evaluate(leaf(value), row)).toBe(value);
+    Arr.forEach(values, (value) => {
+      expect(evaluate(leaf(value), row)).toBe(value);
+    });
   });
 
   it("F-LOGIC-1: And and Or fold the Kleene tables", () => {
-    for (const a of values) {
-      for (const b of values) {
+    Arr.forEach(values, (a) => {
+      Arr.forEach(values, (b) => {
         expect(evaluate(Filter.and(leaf(a), leaf(b)) as Filter.Node, row)).toBe(AND[a][b]);
         expect(evaluate(Filter.or(leaf(a), leaf(b)) as Filter.Node, row)).toBe(OR[a][b]);
         expect(evaluate(Filter.not(leaf(a)) as Filter.Node, row)).toBe(NOT[a]);
-      }
-    }
+      });
+    });
   });
 
   it("F-AND-1: the folds are commutative, associative and idempotent, so §3.2's sorting is safe", () => {
-    for (const a of values) {
-      for (const b of values) {
+    Arr.forEach(values, (a) => {
+      Arr.forEach(values, (b) => {
         expect(AND[a][b]).toBe(AND[b][a]);
         expect(OR[a][b]).toBe(OR[b][a]);
         expect(AND[a][a]).toBe(a);
         expect(OR[a][a]).toBe(a);
-        for (const c of values) {
+        Arr.forEach(values, (c) => {
           expect(AND[AND[a][b]][c]).toBe(AND[a][AND[b][c]]);
           expect(OR[OR[a][b]][c]).toBe(OR[a][OR[b][c]]);
-        }
-      }
-    }
+        });
+      });
+    });
   });
 
   it("F-AND-2: And([]) matches everything and Or([]) matches nothing", () => {
-    for (const candidate of [{ status: "open" }, { status: NULL }, {}] as ReadonlyArray<Row>) {
+    Arr.forEach([{ status: "open" }, { status: NULL }, {}] as ReadonlyArray<Row>, (candidate) => {
       expect(matches({ _tag: "And", members: [] }, candidate)).toBe(true);
       expect(matches({ _tag: "Or", members: [] }, candidate)).toBe(false);
-    }
+    });
   });
 });
 
 describe("filter profile §6.3.4 — isnull", () => {
   it("F-ISNULL-1 / F-ISNULL-2: total, never UNKNOWN", () => {
-    for (const row of [
-      { deletedAt: NULL },
-      { deletedAt: "2026-01-01T00:00:00.000Z" },
-      {},
-    ] as ReadonlyArray<Row>) {
-      for (const negated of [false, true]) {
-        expect(evaluate(Filter.isNull("deletedAt", negated), row)).not.toBe("UNKNOWN");
-      }
-    }
+    Arr.forEach(
+      [{ deletedAt: NULL }, { deletedAt: "2026-01-01T00:00:00.000Z" }, {}] as ReadonlyArray<Row>,
+      (row) => {
+        Arr.forEach([false, true], (negated) => {
+          expect(evaluate(Filter.isNull("deletedAt", negated), row)).not.toBe("UNKNOWN");
+        });
+      },
+    );
     expect(evaluate(Filter.isNull("deletedAt"), { deletedAt: NULL })).toBe("TRUE");
     expect(evaluate(Filter.isNull("deletedAt", true), { deletedAt: NULL })).toBe("FALSE");
   });
 
   it("F-ISNULL-3: negated isnull is exactly Not(isnull)", () => {
-    for (const row of [{ deletedAt: NULL }, { deletedAt: "x" }, {}] as ReadonlyArray<Row>) {
+    Arr.forEach([{ deletedAt: NULL }, { deletedAt: "x" }, {}] as ReadonlyArray<Row>, (row) => {
       expect(evaluate(Filter.isNull("deletedAt", true), row)).toBe(
         evaluate(Filter.not(Filter.isNull("deletedAt")) as Filter.Node, row),
       );
-    }
+    });
   });
 
   it("F-ISNULL-4: on a field that can never be NULL it is a constant, not an error", () => {
@@ -302,32 +307,34 @@ describe("filter profile §6.5 — the consequences", () => {
     expect(rows.map((row) => matches(everything, row))).toEqual([true, true, false, false]);
     // the complement of a filter names the NULLs explicitly
     const complement = Filter.or(Filter.not(a), Filter.isNull("title")) as Filter.Node;
-    for (const row of rows) expect(matches(a, row) || matches(complement, row)).toBe(true);
+    Arr.forEach(rows, (row) => {
+      expect(matches(a, row) || matches(complement, row)).toBe(true);
+    });
   });
 
   it("F-CONS-2: De Morgan holds in both directions, for all three values", () => {
-    for (const row of rows) {
+    Arr.forEach(rows, (row) => {
       expect(evaluate(Filter.not(Filter.and(a, b)) as Filter.Node, row)).toBe(
         evaluate(Filter.or(Filter.not(a), Filter.not(b)) as Filter.Node, row),
       );
       expect(evaluate(Filter.not(Filter.or(a, b)) as Filter.Node, row)).toBe(
         evaluate(Filter.and(Filter.not(a), Filter.not(b)) as Filter.Node, row),
       );
-    }
+    });
   });
 
   it("F-CONS-3: Not(In) is NotIn", () => {
     const list = Filter.isIn("title", ["a", "b"]) as Filter.Node;
-    for (const row of rows) {
+    Arr.forEach(rows, (row) => {
       expect(evaluate(Filter.not(list) as Filter.Node, row)).toBe(
         evaluate(Filter.notIn("title", ["a", "b"]) as Filter.Node, row),
       );
-    }
+    });
   });
 
   it("F-CONS-4: Not(Not(x)) is x, so leaving a double negation unsimplified is syntax only", () => {
-    for (const row of rows) {
+    Arr.forEach(rows, (row) => {
       expect(evaluate(Filter.not(Filter.not(a)) as Filter.Node, row)).toBe(evaluate(a, row));
-    }
+    });
   });
 });

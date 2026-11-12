@@ -6,6 +6,7 @@
  * relationship document.
  */
 import { it } from "@effect/vitest";
+import * as Arr from "effect/Array";
 import * as DateTime from "effect/DateTime";
 import { describe, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
@@ -485,9 +486,9 @@ describe("Assemble.collection", () => {
         { totalCount: 3, offset: 0, limit: 10, baseUrl },
         { viewer: ADMIN, capabilities: familyCapabilities },
       );
-      for (const resource of document.data) {
+      Arr.forEach(document.data, (resource) => {
         expect(resource.meta).toEqual({ canEdit: true, canDelete: true });
-      }
+      });
     }),
   );
 

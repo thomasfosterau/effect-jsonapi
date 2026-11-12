@@ -532,7 +532,7 @@ const sortBy = <A extends { readonly attributes: any }>(
   items: Array<A>,
   sort: ReadonlyArray<{ readonly field: string; readonly direction: "asc" | "desc" }> | undefined,
 ): Array<A> => {
-  for (const term of (sort ?? []).toReversed()) {
+  Arr.forEach((sort ?? []).toReversed(), (term) => {
     const ascending = Ord.make<A>((a, b) => {
       const left = a.attributes[term.field];
       const right = b.attributes[term.field];
@@ -544,7 +544,7 @@ const sortBy = <A extends { readonly attributes: any }>(
       items.length,
       ...Arr.sort(items, term.direction === "desc" ? Ord.flip(ascending) : ascending),
     );
-  }
+  });
   return items;
 };
 

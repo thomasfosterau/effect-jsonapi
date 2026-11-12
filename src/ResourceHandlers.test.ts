@@ -925,9 +925,13 @@ describe("list", () => {
     it.effect("carries `?include=` and a `filter[…]` member into all five links", () =>
       Effect.gen(function* () {
         const included = yield* linksFor({ limit: 1, offset: 1, include: ["birthPlace"] });
-        for (const link of included) expect(link).toContain("include=birthPlace");
+        Arr.forEach(included, (link) => {
+          expect(link).toContain("include=birthPlace");
+        });
         const filtered = yield* linksFor({ limit: 1, offset: 1, q: "a" });
-        for (const link of filtered) expect(link).toContain("filter[q]=a");
+        Arr.forEach(filtered, (link) => {
+          expect(link).toContain("filter[q]=a");
+        });
       }),
     );
 

@@ -4,6 +4,7 @@
  * list, the slug, the list-input factory, and the tri-state reader.
  */
 import { describe, expect, it } from "vite-plus/test";
+import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as FlatQuery from "./FlatQuery.js";
@@ -61,9 +62,9 @@ describe("SortParam", () => {
   });
 
   it("rejects an empty value, a trailing comma, a dotted name, whitespace and a fourth key", () => {
-    for (const bad of ["", "a,", "a.b", "a, b", "a,b,c,d", "-", "1a"]) {
+    Arr.forEach(["", "a,", "a.b", "a, b", "a,b,c,d", "-", "1a"], (bad) => {
       expect(() => sort(bad), bad).toThrow();
-    }
+    });
     expect(FlatQuery.MAX_SORT_FIELDS).toBe(3);
     expect(sort("a,b,c")).toHaveLength(3);
   });
@@ -105,9 +106,9 @@ describe("slug", () => {
   it("accepts lowercase kebab-case and rejects everything else", () => {
     expect(decode(Slug)("my-post-title")).toBe("my-post-title");
     expect(decode(Slug)("a1")).toBe("a1");
-    for (const bad of ["My-Post", "my_post", "-lead", "trail-", "a--b", "", "a b"]) {
+    Arr.forEach(["My-Post", "my_post", "-lead", "trail-", "a--b", "", "a b"], (bad) => {
       expect(() => decode(Slug)(bad), bad).toThrow();
-    }
+    });
   });
 
   it("rejects a reserved segment and a slug past the length bound", () => {
