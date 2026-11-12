@@ -7,12 +7,14 @@
  *   and **no** `meta` member at all (absent, not optional), so a handler can't
  *   read page math off a document that has none, and the result is not
  *   mistakable for a paginated `CollectionDocument`;
- * - given a `self` (#242), its document has `links.self` — required for a
- *   `string`, optional for a `string | undefined` — and still no `meta`;
- *   `query` rides on `self` and is rejected without it;
- * - given a `meta` (#253), its document has `meta` typed as passed —
- *   required for an object type, optional for one `| undefined` — alongside
- *   `links` or without it, and still no `meta` member when none is passed.
+ * - given a `self` (#242), its document has a required `links.self` and still
+ *   no `meta`; `query` rides on `self` and is rejected without it;
+ * - given a `meta` (#253), its document has `meta` typed as passed and
+ *   required, alongside `links` or without it, and still no `meta` member
+ *   when none is passed;
+ * - a `self` or `meta` that may be `undefined`, or is explicitly `undefined`,
+ *   is rejected (#533): the absent sentinel is `never`, and the key is
+ *   passed only when it is defined.
  *
  * Type-checked by `tsconfig.json`; the `@ts-expect-error` annotations are the
  * assertions.
@@ -58,7 +60,7 @@ assertType<
   Equals<
     typeof whole,
     Effect.Effect<
-      Assemble.UnpaginatedCollectionDocument<Person, undefined, undefined, never>,
+      Assemble.UnpaginatedCollectionDocument<Person, never, never, never>,
       Assemble.IncludeError
     >
   >
@@ -91,7 +93,7 @@ assertType<
   Equals<
     typeof linked,
     Effect.Effect<
-      Assemble.UnpaginatedCollectionDocument<Person, string, undefined, never>,
+      Assemble.UnpaginatedCollectionDocument<Person, string, never, never>,
       Assemble.IncludeError
     >
   >
@@ -103,62 +105,20 @@ assertType<unknown>(linkedDocument.meta);
 // @ts-expect-error — nor is it a paginated document
 assertType<Assemble.CollectionDocument<Person>>(linkedDocument);
 
-// A `self` the caller may not have (`exactOptionalPropertyTypes` threading):
-// `links` is optional, so it has to be checked before it is read.
-// oxlint-disable-next-line effect/prefer-option-over-null -- the union under test: the type of a `self` the caller may not have
-type MaybeSelf = string | undefined;
-declare const optionalSelf: MaybeSelf;
-const optionallyLinked = Assemble.unpaginatedCollection(people, {
-  self: optionalSelf,
-  query: pairs,
-});
-assertType<
-  Equals<
-    typeof optionallyLinked,
-    Effect.Effect<
-      Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf, undefined, never>,
-      Assemble.IncludeError
-    >
-  >
->(true);
-declare const optionallyLinkedDocument: Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>;
-assertType<MaybeSelf>(optionallyLinkedDocument.links?.self);
-// @ts-expect-error — `links` may be absent
-assertType<string>(optionallyLinkedDocument.links.self);
-// …and is genuinely optional, not required-but-maybe-`undefined`: a linkless
-// document is one of the optionally-linked ones.
-declare const linkless: Assemble.UnpaginatedCollectionDocument<Person>;
-assertType<Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>>(linkless);
-
-// The same `self` forwarded from the caller's own bare-optional option: under
-// `exactOptionalPropertyTypes`, `o.self` reads as `string | undefined` and has
-// to be accepted, with the same optional `links`.
+// A `self` the caller may not have is passed only when it is defined: the
+// option takes no explicit `undefined` (#533), so a maybe-`undefined` value —
+// a caller's own bare-optional `o.self` under `exactOptionalPropertyTypes` —
+// is rejected rather than read as "maybe linked".
 declare const callerOptions: { readonly self?: string };
-const forwarded = Assemble.unpaginatedCollection(people, {
-  self: callerOptions.self,
-  query: pairs,
-});
-assertType<
-  Equals<
-    typeof forwarded,
-    Effect.Effect<
-      Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf, undefined, never>,
-      Assemble.IncludeError
-    >
-  >
->(true);
-
-// An explicit `undefined` is no `self` at all.
-const unlinked = Assemble.unpaginatedCollection(people, { self: undefined });
-assertType<
-  Equals<
-    typeof unlinked,
-    Effect.Effect<
-      Assemble.UnpaginatedCollectionDocument<Person, undefined, undefined, never>,
-      Assemble.IncludeError
-    >
-  >
->(true);
+// @ts-expect-error — `self` takes a string, not `string | undefined`
+export const forwarded = Assemble.unpaginatedCollection(people, { self: callerOptions.self });
+// @ts-expect-error — nor an explicit `undefined`: omit the key
+export const unlinked = Assemble.unpaginatedCollection(people, { self: undefined });
+// The idiomatic forward passes the key only when it is defined.
+export const branched =
+  callerOptions.self === undefined
+    ? Assemble.unpaginatedCollection(people)
+    : Assemble.unpaginatedCollection(people, { self: callerOptions.self, query: pairs });
 
 // `query` is carried on `self`: with no `self` there is nothing to carry it.
 // @ts-expect-error — `query` without `self`
@@ -199,12 +159,12 @@ assertType<
   Equals<
     typeof stamped,
     Effect.Effect<
-      Assemble.UnpaginatedCollectionDocument<Person, undefined, Generated, never>,
+      Assemble.UnpaginatedCollectionDocument<Person, never, Generated, never>,
       Assemble.IncludeError
     >
   >
 >(true);
-declare const stampedDocument: Assemble.UnpaginatedCollectionDocument<Person, undefined, Generated>;
+declare const stampedDocument: Assemble.UnpaginatedCollectionDocument<Person, never, Generated>;
 assertType<string>(stampedDocument.meta.generatedAt);
 assertType<"fresh" | "stale">(stampedDocument.meta.cache);
 // @ts-expect-error — `meta` is passed through as given: no `totalCount` appears
@@ -222,12 +182,7 @@ assertType<
   Equals<
     typeof literal,
     Effect.Effect<
-      Assemble.UnpaginatedCollectionDocument<
-        Person,
-        undefined,
-        { readonly generatedAt: "now" },
-        never
-      >,
+      Assemble.UnpaginatedCollectionDocument<Person, never, { readonly generatedAt: "now" }, never>,
       Assemble.IncludeError
     >
   >
@@ -238,7 +193,7 @@ assertType<
 declare const generatedAt: string;
 const fresh = Assemble.unpaginatedCollection(people, { meta: { generatedAt, cache: "fresh" } });
 export const cached: Effect.Effect<
-  Assemble.UnpaginatedCollectionDocument<Person, undefined, Generated>,
+  Assemble.UnpaginatedCollectionDocument<Person, never, Generated>,
   Assemble.IncludeError
 > = fresh;
 
@@ -261,49 +216,12 @@ declare const bothDocument: Assemble.UnpaginatedCollectionDocument<Person, strin
 assertType<string>(bothDocument.links.self);
 assertType<string>(bothDocument.meta.generatedAt);
 
-// A `meta` forwarded from the caller's own bare-optional option: under
-// `exactOptionalPropertyTypes`, `o.meta` reads as `Generated | undefined` and
-// has to be accepted; the document's `meta` is then optional.
-declare const callerMeta: { readonly self?: string; readonly meta?: Generated };
-// oxlint-disable-next-line effect/prefer-option-over-null -- the union under test: the type of a `meta` the caller may not have
-type MaybeGenerated = Generated | undefined;
-const forwardedMeta = Assemble.unpaginatedCollection(people, {
-  self: callerMeta.self,
-  meta: callerMeta.meta,
-});
-assertType<
-  Equals<
-    typeof forwardedMeta,
-    Effect.Effect<
-      Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf, MaybeGenerated, never>,
-      Assemble.IncludeError
-    >
-  >
->(true);
-declare const forwardedMetaDocument: Assemble.UnpaginatedCollectionDocument<
-  Person,
-  MaybeSelf,
-  MaybeGenerated
->;
-assertType<MaybeGenerated>(forwardedMetaDocument.meta);
-// @ts-expect-error — `meta` may be absent
-assertType<string>(forwardedMetaDocument.meta.generatedAt);
-// …and is genuinely optional, not required-but-maybe-`undefined`: a document
-// with no `meta` is one of the optionally-stamped ones.
-declare const metaless: Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>;
-assertType<Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf, MaybeGenerated>>(metaless);
-
-// An explicit `undefined` is no `meta` at all.
-const unstamped = Assemble.unpaginatedCollection(people, { meta: undefined });
-assertType<
-  Equals<
-    typeof unstamped,
-    Effect.Effect<
-      Assemble.UnpaginatedCollectionDocument<Person, undefined, undefined, never>,
-      Assemble.IncludeError
-    >
-  >
->(true);
+// A `meta` the caller may not have is likewise passed only when it is defined.
+declare const callerMeta: { readonly meta?: Generated };
+// @ts-expect-error — `meta` takes an object, not `Generated | undefined`
+export const forwardedMeta = Assemble.unpaginatedCollection(people, { meta: callerMeta.meta });
+// @ts-expect-error — nor an explicit `undefined`: omit the key
+export const unstamped = Assemble.unpaginatedCollection(people, { meta: undefined });
 
 // JSON:API `meta` is an object.
 // @ts-expect-error — not an object

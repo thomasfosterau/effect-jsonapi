@@ -1009,15 +1009,6 @@ describe("relationship URL helpers", () => {
     });
   });
 
-  it("paginatedRelationship with self: undefined keeps the default self link", () => {
-    expect(Handlers.paginatedRelationship("people", "9", "articles", { self: undefined })).toEqual({
-      links: {
-        self: "/people/9/relationships/articles",
-        related: "/people/9/articles",
-      },
-    });
-  });
-
   it("paginatedRelationship with self: false omits the self link", () => {
     const value = Handlers.paginatedRelationship("people", "9", "articles", { self: false });
     expect(value).toEqual({ links: { related: "/people/9/articles" } });

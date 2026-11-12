@@ -313,7 +313,7 @@ export type Option = boolean | "required";
  * @since 0.15.0
  * @category type-level
  */
-export type HeadersFor<O> = [O] extends [false | undefined]
+export type HeadersFor<O extends Option> = [O] extends [false]
   ? never
   : [O] extends ["required"]
     ? HeadersRequiredSchema
@@ -328,7 +328,7 @@ export type HeadersFor<O> = [O] extends [false | undefined]
  * @since 0.15.0
  * @category type-level
  */
-export type Applied<E, O> = [O] extends [false | undefined]
+export type Applied<E, O extends Option> = [O] extends [false]
   ? E
   : E extends HttpApiEndpoint.HttpApiEndpoint<
         infer Id,
@@ -378,7 +378,7 @@ export const headersFor = (option?: Option): Opt.Option<Schema.Top> =>
  * @category utils
  * @internal
  */
-export const applied = <E, O extends Option | undefined>(endpoint: E, option: O): Applied<E, O> =>
+export const applied = <E, O extends Option = false>(endpoint: E, option?: O): Applied<E, O> =>
   (option === undefined || option === false
     ? endpoint
     : (endpoint as { middleware: (key: typeof Middleware) => E }).middleware(

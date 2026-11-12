@@ -868,16 +868,7 @@ describe("Assemble.unpaginatedCollection", () => {
           targets: registry([place]).targets,
         };
         const linkless = yield* Assemble.unpaginatedCollection(whole, options);
-        // A `self` the handler turns out not to have (typed `string | undefined`,
-        // as an optional threaded through would be) drops the query with the link.
-        const absentSelf = [self].find((url) => url.startsWith("ftp:"));
-        const dropped = yield* Assemble.unpaginatedCollection(whole, {
-          ...options,
-          self: absentSelf,
-          query,
-        });
-        expect(dropped).not.toHaveProperty("links");
-        expect(dropped).toStrictEqual(linkless);
+        expect(linkless).not.toHaveProperty("links");
         // With `self`, the document is the linkless one plus `links` — the
         // rest is untouched.
         const { links, ...rest } = yield* Assemble.unpaginatedCollection(whole, {
@@ -943,15 +934,6 @@ describe("Assemble.unpaginatedCollection", () => {
       Effect.gen(function* () {
         const bare = yield* Assemble.unpaginatedCollection(whole, options);
         expect(bare).not.toHaveProperty("meta");
-        // A `meta` the handler turns out not to have (typed `… | undefined`,
-        // as an optional threaded through would be) adds no member.
-        const absentMeta = [meta].find((value) => value.generatedAt === "");
-        const dropped = yield* Assemble.unpaginatedCollection(whole, {
-          ...options,
-          meta: absentMeta,
-        });
-        expect(dropped).not.toHaveProperty("meta");
-        expect(dropped).toStrictEqual(bare);
       }),
     );
   });

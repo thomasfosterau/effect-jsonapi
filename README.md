@@ -1787,7 +1787,7 @@ const document = Assemble.unpaginatedCollection(colours, {
 // succeeds with { data: [...], included: [...], jsonapi: { version: "1.1" } }
 ```
 
-To give the collection its own `self` link, pass `self` (its absolute URL) and, optionally, `query` — the request's canonical pairs (`Query.canonicalPairs(listQuery)(query)`), serialised onto `self` the way `Assemble.collection` serialises them onto its pagination links. The document then carries `links: { self }` and still no `meta`; the return type follows the `self` you pass (`links` required for a `string`, optional for a `string | undefined`), and `query` is a type error without `self`. With no `self` the output is exactly as above:
+To give the collection its own `self` link, pass `self` (its absolute URL) and, optionally, `query` — the request's canonical pairs (`Query.canonicalPairs(listQuery)(query)`), serialised onto `self` the way `Assemble.collection` serialises them onto its pagination links. The document then carries `links: { self }` and still no `meta`; the return type follows the `self` you pass (`links` required whenever you pass one), and `query` is a type error without `self`. A `self` you may not have is passed only when it is defined: the option takes no explicit `undefined`. With no `self` the output is exactly as above:
 
 ```ts
 const document = Assemble.unpaginatedCollection(colours, {
@@ -1798,7 +1798,7 @@ const document = Assemble.unpaginatedCollection(colours, {
 // succeeds with { data: [...], links: { self: "https://example.test/colours?sort=name" }, jsonapi: … }
 ```
 
-Document-level metadata that isn't page math (a generation timestamp, a cache hint, an application-specific summary) goes in `meta`, which the document carries as given. The return type follows it the way it follows `self`: `meta` of the type you pass, optional when that type admits `undefined` (your own optional `meta` forwarded as is), and no `meta` member at all without it. An object literal keeps its literal type (`meta` is inferred `const`, as on `Handlers.collection`, since the document emits that very value), and a value typed by an `interface` with no index signature is rejected, as `Handlers.collection` rejects it: spread it (`{ ...stamp }`) or use a `type` alias. `meta.totalCount` gets no special treatment: it is emitted verbatim, and with `self` makes the document structurally assignable to `CollectionDocument`. A collection whose total matters is a page, and goes through `Assemble.collection`:
+Document-level metadata that isn't page math (a generation timestamp, a cache hint, an application-specific summary) goes in `meta`, which the document carries as given. The return type follows it the way it follows `self`: `meta` of the type you pass, and no `meta` member at all without it (pass it only when it is defined, as for `self`). An object literal keeps its literal type (`meta` is inferred `const`, as on `Handlers.collection`, since the document emits that very value), and a value typed by an `interface` with no index signature is rejected, as `Handlers.collection` rejects it: spread it (`{ ...stamp }`) or use a `type` alias. `meta.totalCount` gets no special treatment: it is emitted verbatim, and with `self` makes the document structurally assignable to `CollectionDocument`. A collection whose total matters is a page, and goes through `Assemble.collection`:
 
 ```ts
 const document = Assemble.unpaginatedCollection(colours, {

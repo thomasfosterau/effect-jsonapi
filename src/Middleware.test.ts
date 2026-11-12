@@ -270,8 +270,6 @@ describe("Middleware.schemaErrorDocument", () => {
       include: true,
       fields: false,
       sort: ["title", "createdAt"],
-      page: undefined,
-      filter: undefined,
     });
     const withMeta = (detail: string, parameter: string, meta: ErrorMeta) => ({
       ...bad(detail, { parameter }),

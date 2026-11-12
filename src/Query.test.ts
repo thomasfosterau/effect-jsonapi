@@ -723,7 +723,6 @@ describe("include: repeated keys", () => {
     fields: true,
     sort: true,
     page: Query.Page.Offset,
-    filter: undefined,
   });
   const decode = Schema.decodeUnknownSync(query);
 
@@ -759,8 +758,6 @@ describe("include: repeated keys", () => {
       include: { paths: ["author"] },
       fields: false,
       sort: false,
-      page: undefined,
-      filter: undefined,
     });
     const narrow = Schema.decodeUnknownSync(constrained);
     expect(narrow({ include: ["author"] })).toEqual({ include: ["author"] });
@@ -784,7 +781,6 @@ describe("sort and fields[TYPE]: repeated keys (issue #102)", () => {
     fields: true,
     sort: true,
     page: Query.Page.Offset,
-    filter: undefined,
   });
   const decode = Schema.decodeUnknownSync(query);
 

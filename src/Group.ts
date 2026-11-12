@@ -174,8 +174,8 @@ export const resource = <
   const Sort extends
     | boolean
     | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
-  const Page extends Schema.Struct.Fields | undefined = undefined,
-  const Filter extends Schema.Struct.Fields | undefined = undefined,
+  const Page extends Schema.Struct.Fields = never,
+  const Filter extends Schema.Struct.Fields = never,
   const GMeta extends Schema.Top = Meta,
   const GIdem extends Idempotency.Option = false,
   const GRelInclude extends Endpoint.ResourceRelationshipIncludeOption = false,
@@ -276,7 +276,7 @@ export interface FlatReadOnlyOptions<
   R extends Schema.Top,
   List extends Query.FlatListStruct,
   Filters extends ReadonlyArray<Extract<keyof List["fields"], string>>,
-  Surface extends AnySurface | undefined,
+  Surface extends AnySurface,
   TM extends Schema.Top = never,
 > {
   readonly resource: R;
@@ -313,7 +313,7 @@ export interface FlatOptions<
   R extends Schema.Top,
   List extends Query.FlatListStruct,
   Filters extends ReadonlyArray<Extract<keyof List["fields"], string>>,
-  Surface extends AnySurface | undefined,
+  Surface extends AnySurface,
   Create extends Schema.Top,
   Update extends Schema.Top,
   Hidden extends boolean = false,
@@ -350,13 +350,13 @@ const SHARED_FLAT_OPTIONS = {
 // it widened to the constraint's `Schema.Top`, whose `DecodingServices` are
 // `unknown`, so every endpoint's success schema, and a typed client's methods,
 // asked for `unknown` services (#595).
-type SurfaceIncluded<Surface extends AnySurface | undefined> = NonNullable<Surface>["included"];
+type SurfaceIncluded<Surface extends AnySurface> = Surface["included"];
 
 const flatWire = <
   R extends Schema.Top,
   List extends Query.FlatListStruct,
   const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>>,
-  Surface extends AnySurface | undefined,
+  Surface extends AnySurface,
   TM extends Schema.Top,
 >(
   options: FlatReadOnlyOptions<R, List, Filters, Surface, TM>,
@@ -421,7 +421,7 @@ export const flatReadOnly = <
   IdSchema extends Schema.Codec<unknown, string>,
   List extends Query.FlatListStruct,
   const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>> = readonly [],
-  Surface extends AnySurface | undefined = undefined,
+  Surface extends AnySurface = never,
   TM extends Schema.Top = never,
 >(
   options: FlatReadOnlyOptions<
@@ -493,7 +493,7 @@ export const flat = <
   Create extends Schema.Top,
   Update extends Schema.Top,
   const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>> = readonly [],
-  Surface extends AnySurface | undefined = undefined,
+  Surface extends AnySurface = never,
   const Hidden extends boolean = false,
   TM extends Schema.Top = never,
 >(
