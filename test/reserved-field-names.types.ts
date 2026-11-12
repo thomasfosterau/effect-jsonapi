@@ -11,7 +11,7 @@
  * is exported so an unused-local error can never stand in for the assertion an
  * `@ts-expect-error` expects.
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 
 const Person = Resource.make("people", { attributes: { name: Schema.String } });

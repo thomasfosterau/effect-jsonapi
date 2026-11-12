@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Rec from "effect/Record";
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import * as Document from "./Document.js";
 import * as Handlers from "./Handlers.js";
 import * as Query from "./Query.js";
@@ -1264,7 +1264,7 @@ describe("Handlers.DocumentValue / Document.Value", () => {
       id: "1",
       attributes: { title: "Hi" },
     });
-    const doc: Document.Value<typeof Article, typeof Article, typeof Document.AnyMeta> = {
+    const doc: Document.Value<typeof Article, typeof Article> = {
       data: item,
       included: [item],
       meta: { note: "x" },

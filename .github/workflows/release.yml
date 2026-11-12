@@ -45,10 +45,17 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - name: Setup toolchain
-        uses: $/.github/actions/setup
+      # Vite+, Node.js, pnpm and the dependency cache, then a frozen-lockfile
+      # install with `--ignore-scripts`. The repository's `prepare` does not
+      # run here (see the `publish` job).
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1.22.0
         with:
-          run-prepare: "false"
+          node-version: "*"
+          version-file: pnpm-workspace.yaml
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile", "--ignore-scripts"]
       - name: Select mode
         id: mode
         uses: changesets/action/select-mode@v2.1.2
@@ -71,10 +78,17 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - name: Setup toolchain
-        uses: $/.github/actions/setup
+      # Vite+, Node.js, pnpm and the dependency cache, then a frozen-lockfile
+      # install with `--ignore-scripts`. The repository's `prepare` does not
+      # run here (see the `publish` job).
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1.22.0
         with:
-          run-prepare: "false"
+          node-version: "*"
+          version-file: pnpm-workspace.yaml
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile", "--ignore-scripts"]
       - name: Create or update the version PR
         uses: changesets/action/version@v2.1.2
         with:
@@ -103,18 +117,16 @@ jobs:
       id-token: write # OIDC: prove this workflow's identity to npm (no token needed)
     env:
       # pnpm 11 defaults `verify-deps-before-run` to `install`: before any
-      # `pnpm run` / `pnpm exec` (the setup action's `pnpm run prepare`, then
-      # `pnpm run version` / `pnpm run release`) it compares node_modules with
-      # the manifests and, if a manifest looks newer than the last install,
-      # re-installs WITH lifecycle scripts, ignoring the setup action's
+      # `pnpm run` / `pnpm exec` (`pnpm run version` / `pnpm run release`) it
+      # compares node_modules with the manifests and, if a manifest looks newer than the last install,
+      # re-installs WITH lifecycle scripts, ignoring the setup step's
       # `--ignore-scripts`. That re-install runs every `allowBuilds`
       # dependency's build script (`esbuild`, `fallow`, `msgpackr-extract`)
       # inside this job, which holds `id-token: write`. It triggers whenever a
       # manifest's mtime moves after the install, e.g. a `git checkout` /
       # `git reset --hard` by the Changesets action before `pnpm run version`.
-      # Set here rather than in `.github/actions/setup` because that action
-      # is shared with CI, which keeps the default (a job-level
-      # `env` reaches the composite action's steps too). pnpm 11 reads only
+      # Set per job rather than for the whole workflow file's setup because CI,
+      # which shares the setup, keeps the default. pnpm 11 reads only
       # the `pnpm_config_*` spelling for this setting;
       # `npm_config_verify_deps_before_run` is ignored.
       pnpm_config_verify_deps_before_run: "false"
@@ -126,18 +138,26 @@ jobs:
           persist-credentials: false
 
       # Installs with --ignore-scripts (dependency install scripts never run in
-      # the privileged publish job — the Shai-Hulud vector). `run-prepare:
-      # "false"` also skips the repository's `prepare` (`vp config` git hooks +
+      # the privileged publish job — the Shai-Hulud vector). No step runs the
+      # repository's `prepare` either (`vp config` git hooks +
       # `effect-tsgo patch`, which executes dependency code): nothing here
       # needs it — `vp run build` emits a byte-identical `dist/` on the
       # unpatched toolchain — and without `vp config` no git hook runs when the
       # Changesets action commits the version bump. That only holds because
       # `pnpm_config_verify_deps_before_run` is off for this job (see the job
       # `env` above).
-      - name: Setup toolchain
-        uses: $/.github/actions/setup
+      # Node.js is pinned on this job to a release whose bundled npm is at
+      # least 11.5.1 (26.13.1 bundles npm 11.20.0), the floor for npm's OIDC
+      # trusted publishing, so the job never depends on what `*` resolves to
+      # on the day. Bump it by hand; Dependabot does not see it.
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1.22.0
         with:
-          run-prepare: "false"
+          node-version: "26.13.1"
+          version-file: pnpm-workspace.yaml
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile", "--ignore-scripts"]
 
       - name: Build
         run: pnpm exec vp run build

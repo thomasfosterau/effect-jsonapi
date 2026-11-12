@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Order, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Order from "effect/Order";
+import * as Schema from "effect/Schema";
 import { HttpRouter, UrlParams } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import * as ApiError from "./ApiError.js";

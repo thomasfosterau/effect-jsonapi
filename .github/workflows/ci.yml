@@ -1,8 +1,8 @@
 name: CI
 
-# ONE job on ONE Node.js line, the latest stable release (`node-version: "*"`
-# with `check-latest` in .github/actions/setup; never `latest`, which can
-# resolve to a pre-release, #535), like every other repository in the
+# ONE job on ONE Node.js line, the latest stable release (`node-version: "*"`,
+# which Vite+ resolves to the newest non-pre-release; never `latest`, which
+# resolves to a pre-release, #535), like every other repository in the
 # programme (#211). The pipeline's task graph lives in vite.config.ts (the
 # root `check` aggregate), not in GitHub Actions `needs:`. Copied in shape
 # from effect-drizzle-ext (the library reference); the docgen step is this
@@ -44,8 +44,24 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup toolchain
-        uses: $/.github/actions/setup
+      # Vite+ (the catalog's `vite-plus` pin), Node.js, the `packageManager`
+      # pnpm and the dependency cache, then a frozen-lockfile install.
+      # `--ignore-scripts` blocks dependency lifecycle scripts (a common
+      # supply-chain vector, SECURITY.md); the repository's OWN `prepare`
+      # (`vp config && effect-tsgo patch --typescript --oxlint`, the patched
+      # binaries every gate runs on) is first-party and runs as the next step,
+      # so the exception is visible on its own line.
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1.22.0
+        with:
+          node-version: "*"
+          version-file: pnpm-workspace.yaml
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile", "--ignore-scripts"]
+
+      - name: Patch the toolchain (repository `prepare` script)
+        run: pnpm run prepare
 
       - name: Restore the Vite+ task cache
         uses: actions/cache@v6.1.0

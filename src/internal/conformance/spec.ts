@@ -14,16 +14,14 @@
  * @since 0.15.0
  * @internal
  */
-import {
-  Array as Arr,
-  Effect,
-  Match,
-  Option,
-  Predicate,
-  Record as Rec,
-  Result,
-  Schema,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Match from "effect/Match";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Rec from "effect/Record";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { declaresName } from "../declaredQuery.js";
 import * as Linkage from "../linkage.js";
 import { MEDIA_TYPE } from "../media.js";
@@ -1156,7 +1154,7 @@ const overFieldsetEndpoints = (
   probe: (
     target: ReturnType<typeof readable>["resolved"][number],
     tally: Tally,
-  ) => Effect.Effect<void, never, never>,
+  ) => Effect.Effect<void>,
 ) =>
   Effect.gen(function* () {
     const candidates = readable(ctx).resolved.filter(({ endpoint }) =>
@@ -1831,7 +1829,7 @@ const typesShown = (
   Arr.dedupeWith(
     Arr.filterMap(resourcesOf(baseline.body), ({ resource }) => {
       const type = resource["type"];
-      return Predicate.isString(type) && keySafe(type)
+      return P.isString(type) && keySafe(type)
         ? Result.succeed({ type, attributes: attributeNamesOf([resource]) })
         : Result.failVoid;
     }),
@@ -2182,7 +2180,7 @@ const decodeSelfLink = Schema.decodeUnknownOption(
 const selfLink = (observation: Observation): Option.Option<string> =>
   Option.flatMap(observation.body, decodeSelfLink).pipe(
     Option.map(({ data }) =>
-      Predicate.isString(data.links.self) ? data.links.self : data.links.self.href,
+      P.isString(data.links.self) ? data.links.self : data.links.self.href,
     ),
   );
 

@@ -1,5 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Duration, Effect, Schema } from "effect";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import * as Handlers from "./Handlers.js";
 import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
@@ -779,11 +781,7 @@ describe("Handlers.resolveIncluded — types", () => {
     });
 
     expectTypeOf(resolved).toEqualTypeOf<
-      Effect.Effect<
-        ReadonlyArray<typeof Person.Type | typeof Comment.Type> | undefined,
-        never,
-        never
-      >
+      Effect.Effect<ReadonlyArray<typeof Person.Type | typeof Comment.Type> | undefined>
     >();
 
     const included = await run(resolved);

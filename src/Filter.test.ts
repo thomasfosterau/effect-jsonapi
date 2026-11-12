@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Schema, SchemaGetter } from "effect";
+import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
 import * as Filter from "./Filter.js";
 import * as Relationship from "./Relationship.js";
 import { attribute, filterable, make as Resource } from "./Resource.js";

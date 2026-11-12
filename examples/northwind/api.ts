@@ -19,7 +19,7 @@
  * - `search` is a heterogeneous endpoint across products, customers and
  *   suppliers — a single global catalog search
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { HttpApi } from "effect/http-api";
 import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi";
 import {

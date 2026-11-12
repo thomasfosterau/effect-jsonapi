@@ -47,7 +47,12 @@
  *
  * @since 0.1.0
  */
-import { Array as Arr, Effect, HashMap, HashSet, Option, Record as Rec } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as HashMap from "effect/HashMap";
+import * as HashSet from "effect/HashSet";
+import * as Option from "effect/Option";
+import * as Rec from "effect/Record";
 import type { JsonApiObject } from "./Document.js";
 import { serialise, withPagePairs } from "./internal/canonical.js";
 import { assign } from "./internal/define.js";

@@ -1,5 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Record as Rec, Schema, SchemaGetter } from "effect";
+import * as Rec from "effect/Record";
+import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
 import * as Endpoint from "./Endpoint.js";
 import * as Filter from "./Filter.js";
 import * as Query from "./Query.js";

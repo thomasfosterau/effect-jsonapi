@@ -17,7 +17,9 @@
  *     façade synthesises locally all reach `Client.errorMessage` — so the
  *     wording cannot drift between the three paths.
  */
-import { Effect, Layer, Option } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { ApiError, Atomic, Client } from "@thomasfosterau/effect-jsonapi";

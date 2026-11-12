@@ -33,7 +33,12 @@
  * @since 0.16.0
  */
 import { pathToJsonPointer as toPointer } from "@thomasfosterau/effect-ext/Issues";
-import { Array as Arr, Effect, Match, Option, Predicate, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Match from "effect/Match";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import { HttpServerResponse } from "effect/http";
 import * as ApiError from "./ApiError.js";
@@ -336,13 +341,13 @@ const decodeValidationIssue = Schema.decodeUnknownOption(ValidationIssue);
 
 /** A Standard Schema path segment is either a property key or a `{ key }` object. */
 const pathSegment = (segment: string | number | { readonly key: unknown }): PropertyKey =>
-  Predicate.isObject(segment) ? String(segment.key) : segment;
+  P.isObject(segment) ? String(segment.key) : segment;
 
 const VALIDATION = { status: "400", code: "validation", title: "Validation failed" } as const;
 
 /** A decoded {@link ValidationIssue} as its error object. */
 const validationIssueToError = (issue: typeof ValidationIssue.Type): ErrorObject => {
-  if (Predicate.isString(issue)) return { ...VALIDATION, detail: issue };
+  if (P.isString(issue)) return { ...VALIDATION, detail: issue };
   const pointer = pathToJsonPointer([...ATTRIBUTES_PREFIX, ...(issue.path ?? []).map(pathSegment)]);
   return { ...VALIDATION, detail: issue.message, source: { pointer } };
 };
@@ -361,7 +366,7 @@ const isApiError = (
   const ctor: Partial<ApiErrorConstructor> | undefined = (
     error as { readonly constructor?: Partial<ApiErrorConstructor> }
   ).constructor;
-  return ctor !== undefined && Predicate.isNumber(ctor.status) && Schema.isSchema(ctor.wire);
+  return ctor !== undefined && P.isNumber(ctor.status) && Schema.isSchema(ctor.wire);
 };
 
 const apiErrorToJsonapi = (
@@ -566,12 +571,23 @@ export interface RespondOptions {
    * the cause a defect.
    */
   readonly materialise?: ((cause: unknown) => Option.Option<JsonapiError>) | undefined;
+  /**
+   * Mapping arms consulted **before** {@link fromTaggedError}: the place an
+   * application renders a cause the package already maps its own way (an
+   * `ApiError.Conflict` with the application's wording, a `NotFound` with
+   * its own `code`). `none` hands the cause on to `fromTaggedError`, then
+   * to `materialise` (#565).
+   *
+   * @since 0.21.0
+   */
+  readonly override?: ((cause: unknown) => Option.Option<JsonapiError>) | undefined;
 }
 
 /**
  * Wraps a handler effect for registration with `HttpApiBuilder`: expected
- * failures — anything {@link fromTaggedError} (or the caller's
- * {@link RespondOptions.materialise}) maps — become JSON:API error responses
+ * failures — anything the caller's {@link RespondOptions.override},
+ * {@link fromTaggedError} or the caller's {@link RespondOptions.materialise}
+ * maps, consulted in that order — become JSON:API error responses
  * with the right status; anything else is logged with its original cause and
  * answered with the opaque {@link SERVER_ERROR}.
  *
@@ -599,7 +615,8 @@ export const respond = <A, E, R>(
   options?: RespondOptions,
 ): Effect.Effect<A | HttpServerResponse.HttpServerResponse, never, R> => {
   const materialise = (cause: unknown): Option.Option<JsonapiError> =>
-    fromTaggedError(cause).pipe(
+    (options?.override?.(cause) ?? Option.none<JsonapiError>()).pipe(
+      Option.orElse(() => fromTaggedError(cause)),
       Option.orElse(() => options?.materialise?.(cause) ?? Option.none()),
     );
   return effect.pipe(

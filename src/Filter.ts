@@ -41,7 +41,7 @@
  *
  * @since 0.13.0
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import type { FieldCodecs } from "./internal/filter.js";
 import { literalEncoder, operatorCheck, prepare } from "./internal/filter.js";
 import {
@@ -497,7 +497,7 @@ export type Ast<Fields extends FieldTypes = FieldTypes> =
  * @since 0.13.0
  * @category models
  */
-export type Node = Ast<FieldTypes>;
+export type Node = Ast;
 
 const Literal = Schema.Unknown;
 const LazyNode: Schema.Codec<Node> = Schema.suspend((): Schema.Codec<Node> => Ast);

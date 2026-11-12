@@ -5,7 +5,13 @@
  * arm), and `respond`'s two catch paths.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Cause, Effect, Exit, Option, Schema, SchemaIssue } from "effect";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
 import { HttpServerResponse } from "effect/http";
 import * as ApiError from "./ApiError.js";
 import * as ServerErrors from "./ServerErrors.js";
@@ -415,7 +421,7 @@ describe("JsonapiError.toDocument", () => {
   });
 });
 
-const responseOf = async (effect: Effect.Effect<unknown, never, never>) => {
+const responseOf = async (effect: Effect.Effect<unknown>) => {
   const value = await Effect.runPromise(effect);
   if (!HttpServerResponse.isHttpServerResponse(value)) throw new Error("expected a response");
   const web = HttpServerResponse.toWeb(value);
@@ -481,5 +487,29 @@ describe("respond", () => {
       ServerErrors.respond(Effect.fail(new ServerErrors.Forbidden({})), { materialise }),
     );
     expect(catalogue.status).toBe(403);
+  });
+
+  it("consults the caller's override ahead of the catalogue (#565)", async () => {
+    const override = (cause: unknown) =>
+      P.isTagged(cause, "Conflict")
+        ? Option.some(
+            new ServerErrors.JsonapiError({
+              status: 409,
+              errors: [{ status: "409", code: "conflict", detail: "Someone else changed it" }],
+            }),
+          )
+        : Option.none();
+    const overridden = await responseOf(
+      ServerErrors.respond(Effect.fail(new ApiError.Conflict({})), { override }),
+    );
+    expect(overridden.status).toBe(409);
+    expect(overridden.body.errors).toEqual([
+      { status: "409", code: "conflict", detail: "Someone else changed it" },
+    ]);
+    // a cause the override declines still reaches the catalogue
+    const declined = await responseOf(
+      ServerErrors.respond(Effect.fail(new ServerErrors.Forbidden({})), { override }),
+    );
+    expect(declined.status).toBe(403);
   });
 });

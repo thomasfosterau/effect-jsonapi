@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, Match, Result, Schema, SchemaTransformation, Tracer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
+import * as Tracer from "effect/Tracer";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
@@ -1642,7 +1648,6 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       code: "bad_request",
       title: "Bad Request",
       detail: "Request query failed validation",
-      meta: { detail: "Request query failed validation" },
     };
     // A rejected `include` path, with the vocabulary it renders as `meta`.
     const includable = (parameter: string) => ({

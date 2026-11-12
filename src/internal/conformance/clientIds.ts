@@ -21,7 +21,12 @@
  * @since 0.18.0
  * @internal
  */
-import { Array as Arr, Effect, Option, Predicate, Result, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { operationsEndpoint, sendOperations } from "./atomic.js";
 import {
   type Context,
@@ -357,7 +362,7 @@ const conflictIdRule = (channel: Channel, impl: Rule, see: string): RuleImpl => 
 const errorPointers = (observation: Observation): ReadonlyArray<string> =>
   Arr.filterMap(errorObjectsOf(observation.body), (error) => {
     const source = error["source"];
-    return isJsonObject(source) && Predicate.isString(source["pointer"])
+    return isJsonObject(source) && P.isString(source["pointer"])
       ? Result.succeed(source["pointer"])
       : Result.failVoid;
   });
@@ -423,7 +428,7 @@ const judgeUnsupported = (
       `${channel.under(target, id)} was refused over its \`type\` (${describe(observation)}), which says nothing of its id`,
     );
   const verdict = judgeStatus(impl, target, observation, 403, detail, made);
-  return observation.status === 403 && Predicate.isTagged(verdict, "Decided")
+  return observation.status === 403 && P.isTagged(verdict, "Decided")
     ? judgePointers(channel, impl, observation, channel.under(target, id))
     : verdict;
 };

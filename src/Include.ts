@@ -62,7 +62,8 @@
  *
  * @since 0.15.0
  */
-import { Array as Arr, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 import type { IncludedResources } from "./internal/includeGraph.js";
 import { includedResources, includePathsFor } from "./internal/includeGraph.js";
 import type { Any, IncludableKeys, IncludeDepth, IncludePathsTo, Target } from "./Resource.js";

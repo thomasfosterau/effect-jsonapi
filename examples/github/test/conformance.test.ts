@@ -9,7 +9,10 @@
  * off this list.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Effect, Order, Predicate } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Order from "effect/Order";
+import * as P from "effect/Predicate";
 import { Conformance } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
 import { discardIssue, discardRepository, GitHubLive } from "../handlers.js";
@@ -88,14 +91,14 @@ const WRITES: Conformance.Options["writes"] = {
  */
 const died = (run: Conformance.Report): ReadonlyArray<string> =>
   run.outcomes.flatMap((outcome) =>
-    Predicate.isTagged(outcome, "Errored") ? [`${outcome.rule.id}: ${outcome.message}`] : [],
+    P.isTagged(outcome, "Errored") ? [`${outcome.rule.id}: ${outcome.message}`] : [],
   );
 
 const report = await Effect.runPromise(
   Conformance.verify(Api, { ids: IDS, mutating: true, writes: WRITES }).pipe(
     Effect.provide(GitHubLive),
     Effect.scoped,
-  ) as Effect.Effect<Conformance.Report, never, never>,
+  ) as Effect.Effect<Conformance.Report>,
 );
 
 describe("github: JSON:API conformance", () => {
@@ -124,7 +127,7 @@ describe("github: JSON:API conformance", () => {
   it("breaks exactly the rules that are already filed", () => {
     const failing = Arr.sort(
       report.outcomes
-        .filter((outcome) => Predicate.isTagged(outcome, "Failed"))
+        .filter((outcome) => P.isTagged(outcome, "Failed"))
         .map((outcome) => outcome.rule.id),
       Order.String,
     );
@@ -139,7 +142,7 @@ describe("github: JSON:API conformance", () => {
 
   it("every failure names a rule, cites its section and shows the request", () => {
     for (const outcome of report.outcomes) {
-      if (!Predicate.isTagged(outcome, "Failed")) continue;
+      if (!P.isTagged(outcome, "Failed")) continue;
       expect(outcome.rule.requirement.length).toBeGreaterThan(20);
       expect(outcome.rule.reference).toMatch(/^https:\/\//);
       for (const finding of outcome.findings) {
@@ -272,7 +275,7 @@ describe("github: JSON:API conformance", () => {
       Conformance.verify(Api, { ids: IDS, tiers: ["spec"] }).pipe(
         Effect.provide(GitHubLive),
         Effect.scoped,
-      ) as Effect.Effect<Conformance.Report, never, never>,
+      ) as Effect.Effect<Conformance.Report>,
     );
     expect(specOnly.outcomes.every((outcome) => outcome.rule.tier === "spec")).toBe(true);
     expect(
@@ -280,7 +283,7 @@ describe("github: JSON:API conformance", () => {
       `a rule died — a defect, not a finding\n${Conformance.format(specOnly)}`,
     ).toEqual([]);
     const failing = specOnly.outcomes
-      .filter((outcome) => Predicate.isTagged(outcome, "Failed"))
+      .filter((outcome) => P.isTagged(outcome, "Failed"))
       .map((outcome) => outcome.rule.id);
     expect(failing).not.toContain("profile/document/jsonapi-member");
   });

@@ -11,7 +11,7 @@
  *                                  the related link (GET /articles/:id/comments)
  *   Comment ──author───▶ Person   `one`
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 export const Person = Resource.make("people", {
   attributes: {

@@ -28,7 +28,7 @@
  * is exported so an unused-local error can never stand in for the error an
  * `@ts-expect-error` expects.
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import type { HttpApiEndpoint } from "effect/http-api";
 import { Endpoint, Include, Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 

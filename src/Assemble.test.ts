@@ -6,7 +6,10 @@
  * relationship document.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Exit, Record as Rec, Schema } from "effect";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Rec from "effect/Record";
+import * as Schema from "effect/Schema";
 import * as ApiError from "./ApiError.js";
 import * as Assemble from "./Assemble.js";
 import type * as Handlers from "./Handlers.js";
@@ -115,7 +118,7 @@ const registry = (known: ReadonlyArray<Assemble.ResourceLike>) => {
   return { calls, targets };
 };
 
-const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
+const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
 
 // A free-form resource read from JSON text, as a handler gets one from a
 // database driver, and the JSON text a value serialises to.
@@ -932,6 +935,75 @@ describe("Assemble.relationship", () => {
     };
     expect(Assemble.relationship({ parent, key: "one" }).data).toBeNull();
     expect(Assemble.relationship({ parent, key: "missing" }).data).toBeNull();
+  });
+});
+
+describe("Assemble.collection linkTotal / lastUnknown (#569)", () => {
+  const page = [person("a"), person("b"), person("c")];
+  const baseUrl = "https://example.test/people";
+  const at = (offset: number, extra: { linkTotal?: number; lastUnknown?: boolean }, total = 42) =>
+    run(Assemble.collection(page, { totalCount: total, offset, limit: 3, baseUrl, ...extra }));
+
+  it("leaves the default unchanged", async () => {
+    const document = await at(0, {});
+    expect(document.links.last).toBe(`${baseUrl}?page[offset]=39&page[limit]=3`);
+    expect(document.links.next).toBe(`${baseUrl}?page[offset]=3&page[limit]=3`);
+  });
+
+  it("computes next / last from linkTotal while meta.totalCount keeps totalCount", async () => {
+    const document = await at(3, { linkTotal: 6 });
+    expect(document.meta.totalCount).toBe(42);
+    expect(document.links.next).toBeNull();
+    expect(document.links.last).toBe(`${baseUrl}?page[offset]=3&page[limit]=3`);
+  });
+
+  it("omits last when lastUnknown, keeping the other links exact", async () => {
+    const document = await at(3, { lastUnknown: true });
+    expect("last" in document.links).toBe(false);
+    expect(document.links.self).toBe(`${baseUrl}?page[offset]=3&page[limit]=3`);
+    expect(document.links.first).toBe(`${baseUrl}?page[offset]=0&page[limit]=3`);
+    expect(document.links.prev).toBe(`${baseUrl}?page[offset]=0&page[limit]=3`);
+    expect(document.links.next).toBe(`${baseUrl}?page[offset]=6&page[limit]=3`);
+  });
+
+  it("keeps last when lastUnknown is false", async () => {
+    expect("last" in (await at(0, { lastUnknown: false })).links).toBe(true);
+  });
+
+  it("omits last on an unpageable window too", async () => {
+    const document = await run(
+      Assemble.collection(page, { totalCount: 5, offset: 0, limit: 0, baseUrl, lastUnknown: true }),
+    );
+    expect("last" in document.links).toBe(false);
+  });
+
+  it.each([
+    { hasMore: true, next: true },
+    { hasMore: false, next: false },
+  ])("serves the search formula (hasMore $hasMore)", async ({ hasMore, next }) => {
+    const offset = 3;
+    const document = await at(
+      offset,
+      { linkTotal: offset + page.length + (hasMore ? 1 : 0), lastUnknown: true },
+      page.length,
+    );
+    expect(document.links.next).toBe(next ? `${baseUrl}?page[offset]=6&page[limit]=3` : null);
+    expect("last" in document.links).toBe(false);
+    expect(document.meta.totalCount).toBe(3);
+  });
+
+  it("carries both through edgePage", async () => {
+    const document = await run(
+      Assemble.edgePage(
+        "contributions",
+        { items: [person("a")], totalCount: 100 },
+        { limit: 1, offset: 0, linkTotal: 1, lastUnknown: true },
+        "https://example.test",
+      ),
+    );
+    expect(document.meta.totalCount).toBe(100);
+    expect(document.links.next).toBeNull();
+    expect("last" in document.links).toBe(false);
   });
 });
 

@@ -21,7 +21,8 @@
  * which maps the package to `./dist/index.d.ts` and therefore only means
  * anything after a build.
  */
-import { Effect, Schema } from "effect";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import { HttpApi, HttpApiClient } from "effect/http-api";
 import { Endpoint, Group, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 

@@ -9,7 +9,8 @@
  * accessor.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Option } from "effect";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { ApiError, Client, MEDIA_TYPE } from "@thomasfosterau/effect-jsonapi";
@@ -27,7 +28,7 @@ import { Article } from "../resources.js";
 
 const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
   Effect.runPromise(
-    effect.pipe(Effect.scoped, Effect.provide(ServerHttpClient)) as Effect.Effect<A, E, never>,
+    effect.pipe(Effect.scoped, Effect.provide(ServerHttpClient)) as Effect.Effect<A, E>,
   );
 
 /** A load balancer in front of the server, answering with its own opaque body. */

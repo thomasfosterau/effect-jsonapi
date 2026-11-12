@@ -7,19 +7,17 @@
  * and `list` through stand-in targets, and the §7.4 related handler.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import {
-  Array as Arr,
-  Cause,
-  Context,
-  Deferred,
-  Effect,
-  Exit,
-  Fiber,
-  Layer,
-  Option,
-  Order,
-  Schema,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Order from "effect/Order";
+import * as Schema from "effect/Schema";
 import * as ApiError from "./ApiError.js";
 import type * as Assemble from "./Assemble.js";
 import * as FlatQuery from "./FlatQuery.js";
@@ -235,7 +233,7 @@ const handlersFor = (ops: ReturnType<typeof makeOps>["ops"]) => {
   return { handlers, cacheStore, state, opened };
 };
 
-const failure = async <A, E>(effect: Effect.Effect<A, E, never>) => {
+const failure = async <A, E>(effect: Effect.Effect<A, E>) => {
   const exit = await Effect.runPromiseExit(effect);
   if (Exit.isSuccess(exit)) return expect.fail("expected a failure");
   const error = Cause.findErrorOption(exit.cause);
@@ -244,7 +242,7 @@ const failure = async <A, E>(effect: Effect.Effect<A, E, never>) => {
 };
 
 /** Runs `effect` to its success, failing the test on any other exit. */
-const success = async <A, E>(effect: Effect.Effect<A, E, never>): Promise<A> => {
+const success = async <A, E>(effect: Effect.Effect<A, E>): Promise<A> => {
   const exit = await Effect.runPromiseExit(effect);
   if (Exit.isFailure(exit)) return expect.fail(`expected a success: ${Cause.pretty(exit.cause)}`);
   return exit.value;

@@ -7,22 +7,20 @@
  * @since 0.15.0
  * @internal
  */
-import {
-  Array as Arr,
-  Cause,
-  Duration,
-  Effect,
-  Formatter,
-  HashSet,
-  Match,
-  MutableHashSet,
-  Option,
-  Predicate,
-  Result,
-  Schema,
-  SchemaAST,
-  type Scope,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Formatter from "effect/Formatter";
+import * as HashSet from "effect/HashSet";
+import * as Match from "effect/Match";
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import * as SchemaAST from "effect/SchemaAST";
+import type * as Scope from "effect/Scope";
 import {
   FetchHttpClient,
   HttpBody,
@@ -507,9 +505,7 @@ const literalsOf = (ast: SchemaAST.AST): ReadonlyArray<string> => {
   const encoded = SchemaAST.toEncoded(ast);
   if (SchemaAST.isSuspend(encoded)) return literalsOf(encoded.thunk());
   if (SchemaAST.isUnion(encoded)) return encoded.types.flatMap(literalsOf);
-  return SchemaAST.isLiteral(encoded) && Predicate.isString(encoded.literal)
-    ? [encoded.literal]
-    : [];
+  return SchemaAST.isLiteral(encoded) && P.isString(encoded.literal) ? [encoded.literal] : [];
 };
 
 /** The `type` literals of the resource identifiers linkage of this schema's wire shape holds. */
@@ -1273,7 +1269,7 @@ export const runner =
       redirects: ReadonlyArray<string>,
     ): Effect.Effect<Observation, never, Scope.Scope> =>
       Effect.flatMap(timed(step(sent, redirects), record, redirects, requestTimeout), (taken) =>
-        Predicate.isTagged(taken, "Answered")
+        P.isTagged(taken, "Answered")
           ? Effect.succeed(taken.observation)
           : send(taken.next, [...redirects, taken.next.url]),
       );
@@ -1391,7 +1387,7 @@ const UNRENDERABLE = "[unrenderable defect]";
  * anything else — a string, `null`, a plain object — as itself, not dressed up
  * as an `Error`; capped at {@link MESSAGE_LIMIT}. Total, so the report the
  * caller is building survives whatever it is given. Only a value that cannot be
- * read at all renders as {@link UNRENDERABLE}: one `Predicate.isError` throws
+ * read at all renders as {@link UNRENDERABLE}: one `P.isError` throws
  * on (a revoked `Proxy`, or one whose `getPrototypeOf` trap throws), or an
  * `Error` whose `name` or `message` throws when read or cannot become a string
  * (a Symbol, or an object whose `toString` throws). `Formatter.format` reads
@@ -1411,9 +1407,9 @@ export const renderThrown = (thrown: unknown): string =>
     Result.try({
       try: () =>
         capped(
-          Predicate.isError(thrown)
+          P.isError(thrown)
             ? errorMessage(thrown)
-            : Predicate.isString(thrown)
+            : P.isString(thrown)
               ? thrown
               : Formatter.format(thrown),
         ),
@@ -1478,18 +1474,18 @@ export const undecidedByRedirects = (
   const unread = sent.filter(({ unfollowed }) => Option.isSome(unfollowed));
   // A rule's `run` never returns `Errored` itself — `runRule` makes one from a
   // defect, after this — but `Outcome` admits it, and it is kept as it is.
-  if (Arr.isReadonlyArrayEmpty(unread) || Predicate.isTagged(outcome, "Errored")) {
+  if (Arr.isReadonlyArrayEmpty(unread) || P.isTagged(outcome, "Errored")) {
     return outcome;
   }
   const every = unread.length === sent.length;
   const redirected = `${every ? "every request the rule sent was" : `${unread.length} of ${sent.length} requests the rule sent were`} answered by a redirect the kit does not follow or read (${redirectsNamed(unread)})`;
-  if (Predicate.isTagged(outcome, "Skipped")) {
+  if (P.isTagged(outcome, "Skipped")) {
     return { ...outcome, reason: `${outcome.reason}; ${redirected}` };
   }
   const stands = failedOnRead(outcome, unread);
   if (Option.isSome(stands)) return stands.value;
   const own =
-    Predicate.isTagged(outcome, "Passed") && outcome.note !== undefined
+    P.isTagged(outcome, "Passed") && outcome.note !== undefined
       ? `; the rule's own note: ${outcome.note}`
       : "";
   return skip(
@@ -1505,7 +1501,7 @@ const failedOnRead = (
   outcome: Passed | Failed,
   unread: ReadonlyArray<Observation>,
 ): Option.Option<Failed> => {
-  if (Predicate.isTagged(outcome, "Passed")) return Option.none();
+  if (P.isTagged(outcome, "Passed")) return Option.none();
   const lost = unread.map(({ probe }) => probe);
   const findings = outcome.findings.filter(
     ({ probe }) => probe === undefined || !lost.includes(probe),
@@ -1682,9 +1678,9 @@ export const resourceLabel = (resource: {
   readonly lid?: unknown;
 }): string => {
   const { id, lid } = resource;
-  const member = Predicate.isString(id) ? id : Predicate.isString(lid) ? lid : (id ?? lid);
+  const member = P.isString(id) ? id : P.isString(lid) ? lid : (id ?? lid);
   return Arr.map([resource.type, member], (value) =>
-    Predicate.isString(value) ? value : Formatter.format(value),
+    P.isString(value) ? value : Formatter.format(value),
   ).join(":");
 };
 
@@ -1760,7 +1756,7 @@ export const sourceParametersOf = (observation: Observation): ReadonlyArray<stri
     .map((error) => error["source"])
     .filter(isJsonObject)
     .map((source) => source["parameter"])
-    .filter(Predicate.isString);
+    .filter(P.isString);
 
 /**
  * Appends query pairs to a path, percent-encoding values but leaving brackets
@@ -1823,8 +1819,7 @@ export const probeable = (ctx: Context, roles: ReadonlyArray<Role>): Probeable =
   for (const endpoint of ctx.endpoints) {
     if (!roles.includes(endpoint.role)) continue;
     const resolution = resolvePath(endpoint, ctx.options);
-    if (Predicate.isTagged(resolution, "Resolved"))
-      resolved.push({ endpoint, path: resolution.path });
+    if (P.isTagged(resolution, "Resolved")) resolved.push({ endpoint, path: resolution.path });
     else unresolved.push(resolution.reason);
   }
   return { resolved, unresolved };

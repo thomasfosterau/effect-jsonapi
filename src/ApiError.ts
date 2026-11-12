@@ -29,8 +29,11 @@
  *
  * @since 0.1.0
  */
-import type { Cause } from "effect";
-import { Array as Arr, Predicate, Schema, SchemaTransformation } from "effect";
+import type * as Cause from "effect/Cause";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import { HttpApiSchema } from "effect/http-api";
 import { ErrorDocument, ErrorObject } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
@@ -105,7 +108,7 @@ export interface Any extends Cause.YieldableError {
  * @category guards
  */
 export const isApiError = (input: unknown): input is Any =>
-  Predicate.hasProperty(input, TypeId) && input[TypeId] === TypeId;
+  P.hasProperty(input, TypeId) && input[TypeId] === TypeId;
 
 /**
  * The endpoint error schema derived from an error class: decodes a JSON:API
@@ -120,9 +123,7 @@ export interface Wire<
   Fields extends Schema.Struct.Fields,
 > extends Schema.decodeTo<
   Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Any>,
-  typeof WireDocument,
-  never,
-  never
+  typeof WireDocument
 > {}
 
 /**
@@ -267,15 +268,20 @@ const makeWire = (
                 ...definedMember("title", options.title),
                 ...definedMember("detail", detail),
                 ...definedMember("source", source),
+                // A `detail` field the error object's own `detail` already
+                // carries is not copied into `meta`, and an empty `meta` —
+                // every field optional and absent — is left out rather than
+                // sent as `{}` (#565). `decode` reads either place.
                 ...definedMember(
                   "meta",
-                  Arr.isReadonlyArrayNonEmpty(options.fieldKeys)
-                    ? Object.fromEntries(
-                        options.fieldKeys.flatMap((key) =>
-                          fields[key] === undefined ? [] : [[key, fields[key]]],
-                        ),
-                      )
-                    : undefined,
+                  Arr.match(
+                    options.fieldKeys.flatMap((key) =>
+                      fields[key] === undefined || (key === "detail" && fields[key] === detail)
+                        ? []
+                        : [[key, fields[key]] as const],
+                    ),
+                    { onEmpty: () => undefined, onNonEmpty: Object.fromEntries },
+                  ),
                 ),
               },
             ],

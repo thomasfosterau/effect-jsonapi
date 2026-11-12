@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import * as Filter from "./Filter.js";
 import * as Sort from "./Sort.js";
 

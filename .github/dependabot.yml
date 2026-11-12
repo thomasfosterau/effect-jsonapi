@@ -72,8 +72,7 @@ updates:
           - "@effect/tsgo"
         update-types: ["major", "minor", "patch"]
   # Actions are referenced by exact `@vX.Y.Z` tags and locked to their commits in
-  # .github/workflows/actions.lock; Dependabot keeps the tags current. It also
-  # scans the local composite action under .github/actions/.
+  # .github/workflows/actions.lock; Dependabot keeps the tags current.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

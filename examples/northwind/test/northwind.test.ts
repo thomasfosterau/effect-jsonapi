@@ -4,17 +4,15 @@
  * through the in-memory `HttpApiTest` client.
  */
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
-import {
-  Array as Arr,
-  Cause,
-  Effect,
-  Exit,
-  Order as Ord,
-  Predicate,
-  Record as Rec,
-  Result,
-  Schema,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Ord from "effect/Order";
+import * as P from "effect/Predicate";
+import * as Rec from "effect/Record";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Client } from "@thomasfosterau/effect-jsonapi";
 import { Api, ProductsQuery, SearchQuery } from "../api.js";
@@ -71,12 +69,12 @@ const buildClient = HttpApiTest.groups(Api, [
 
 const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
   Effect.runPromise(
-    effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E, never>,
+    effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E>,
   );
 
 const runExit = <A, E>(effect: Effect.Effect<A, E, any>): Promise<Exit.Exit<A, E>> =>
   Effect.runPromiseExit(
-    effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E, never>,
+    effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E>,
   );
 
 const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
@@ -381,7 +379,7 @@ describe("northwind example: pagination links carry the request's query (#447)",
           },
         });
         const next = first.links?.next;
-        assert(Predicate.isString(next));
+        assert(P.isString(next));
         const query = yield* Schema.decodeUnknownEffect(ProductsQuery)(searchOf(next));
         const second = yield* client.products.list({ query });
         return [first, second] as const;
@@ -427,7 +425,7 @@ describe("northwind example: pagination links carry the request's query (#447)",
       "/search?include=category&fields[products]=name&filter[q]=a&page[offset]=1&page[limit]=1",
     );
     const next = document.links?.next;
-    assert(Predicate.isString(next));
+    assert(P.isString(next));
     expect(Schema.decodeUnknownSync(SearchQuery)(searchOf(next))).toEqual({
       include: ["category"],
       fields: { products: ["name"] },

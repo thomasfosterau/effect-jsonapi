@@ -100,7 +100,11 @@
  *
  * @since 0.1.0
  */
-import { Array as Arr, Effect, Option, Order, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Order from "effect/Order";
+import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 import type { HttpApi, HttpApiGroup } from "effect/http-api";
 import { HttpApiClient } from "effect/http-api";

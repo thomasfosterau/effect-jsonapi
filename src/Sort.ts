@@ -28,7 +28,7 @@
  *
  * @since 0.13.0
  */
-import type { Schema } from "effect";
+import type * as Schema from "effect/Schema";
 
 /**
  * The annotation key under which an attribute schema carries its sort

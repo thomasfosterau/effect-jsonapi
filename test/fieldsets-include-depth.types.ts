@@ -108,7 +108,7 @@ assertType<
   Equals<Query.FieldsetResources<typeof Article>["type"], "articles" | "comments" | "tags">
 >(true);
 assertType<
-  Equals<Query.FieldsetResources<typeof Article, false>["type"], "articles" | "comments" | "tags">
+  Equals<Query.FieldsetResources<typeof Article>["type"], "articles" | "comments" | "tags">
 >(true);
 
 // ---------------------------------------------------------------------------

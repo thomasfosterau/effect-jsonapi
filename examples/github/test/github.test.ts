@@ -4,17 +4,15 @@
  * through the in-memory `HttpApiTest` client.
  */
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
-import {
-  Array as Arr,
-  Cause,
-  Effect,
-  Exit,
-  Order,
-  Predicate,
-  Record as Rec,
-  Result,
-  Schema,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Order from "effect/Order";
+import * as P from "effect/Predicate";
+import * as Rec from "effect/Record";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Client, Filter, Query } from "@thomasfosterau/effect-jsonapi";
 import { Api, IssuesQuery, SearchQuery } from "../api.js";
@@ -45,13 +43,11 @@ import { Issue, Label, PullRequest, Repository, User } from "../resources.js";
 const buildClient = HttpApiTest.groups(Api, ["users", "repositories", "issues", "pulls", "search"]);
 
 const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
-  Effect.runPromise(
-    effect.pipe(Effect.scoped, Effect.provide(GitHubLive)) as Effect.Effect<A, E, never>,
-  );
+  Effect.runPromise(effect.pipe(Effect.scoped, Effect.provide(GitHubLive)) as Effect.Effect<A, E>);
 
 const runExit = <A, E>(effect: Effect.Effect<A, E, any>): Promise<Exit.Exit<A, E>> =>
   Effect.runPromiseExit(
-    effect.pipe(Effect.scoped, Effect.provide(GitHubLive)) as Effect.Effect<A, E, never>,
+    effect.pipe(Effect.scoped, Effect.provide(GitHubLive)) as Effect.Effect<A, E>,
   );
 
 const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
@@ -357,7 +353,7 @@ describe("github example: pagination links carry the request's query (#447)", ()
           },
         });
         const next = first.links?.next;
-        assert(Predicate.isString(next));
+        assert(P.isString(next));
         const query = yield* Schema.decodeUnknownEffect(IssuesQuery)(searchOf(next));
         const second = yield* client.issues.list({ query });
         return [first, second] as const;
@@ -402,7 +398,7 @@ describe("github example: pagination links carry the request's query (#447)", ()
       "/search?include=owner&fields[repositories]=name&filter[q]=o&page[offset]=1&page[limit]=1",
     );
     const next = document.links?.next;
-    assert(Predicate.isString(next));
+    assert(P.isString(next));
     expect(Schema.decodeUnknownSync(SearchQuery)(searchOf(next))).toEqual({
       include: ["owner"],
       fields: { repositories: ["name"] },

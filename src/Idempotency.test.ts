@@ -1,5 +1,7 @@
 import { describe, expect, it, onTestFinished } from "vite-plus/test";
-import { Effect, Layer, Schema } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import * as ApiError from "./ApiError.js";

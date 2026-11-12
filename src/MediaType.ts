@@ -10,7 +10,7 @@
  *
  * @since 0.15.0
  */
-import type { Schema } from "effect";
+import type * as Schema from "effect/Schema";
 import { HttpApiSchema } from "effect/http-api";
 import { MEDIA_TYPE } from "./internal/media.js";
 

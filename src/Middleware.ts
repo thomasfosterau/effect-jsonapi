@@ -84,19 +84,17 @@
  *
  * @since 0.1.0
  */
-import {
-  Array as Arr,
-  Context,
-  Effect,
-  ErrorReporter,
-  Layer,
-  Match,
-  Option,
-  Record as Rec,
-  Schema,
-  SchemaAST,
-  SchemaIssue,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as ErrorReporter from "effect/ErrorReporter";
+import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
+import * as Option from "effect/Option";
+import * as Rec from "effect/Record";
+import * as Schema from "effect/Schema";
+import * as SchemaAST from "effect/SchemaAST";
+import * as SchemaIssue from "effect/SchemaIssue";
 import { HttpServerRespondable } from "effect/http";
 import { HttpServerRequest, ParsedSearchParams } from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";

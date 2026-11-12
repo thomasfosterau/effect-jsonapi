@@ -6,8 +6,10 @@
  *
  * @internal
  */
-import type { Schema } from "effect";
-import { Array as Arr, Option, SchemaAST } from "effect";
+import type * as Schema from "effect/Schema";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as SchemaAST from "effect/SchemaAST";
 import { compareCodePoints, isFilterKey, keySegments, orderOf } from "./filter.js";
 
 /** One flat `(key, value)` query pair, both sides un-encoded. */

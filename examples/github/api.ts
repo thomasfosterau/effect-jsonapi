@@ -16,7 +16,7 @@
  * - `search` is a heterogeneous endpoint across repositories, issues and
  *   users, like GitHub's global search
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { HttpApi, HttpApiMiddleware } from "effect/http-api";
 import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi";
 import {

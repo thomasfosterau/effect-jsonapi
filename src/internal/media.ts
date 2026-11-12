@@ -11,7 +11,7 @@
  * @since 0.1.0
  * @internal
  */
-import { Array as Arr } from "effect";
+import * as Arr from "effect/Array";
 
 /**
  * The JSON:API media type, per

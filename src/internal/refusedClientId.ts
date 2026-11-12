@@ -16,7 +16,11 @@
  *
  * @internal
  */
-import { Option, Predicate, Schema, SchemaAST, SchemaIssue } from "effect";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
+import * as SchemaAST from "effect/SchemaAST";
+import * as SchemaIssue from "effect/SchemaIssue";
 
 /**
  * The message of the issue a create payload's or an atomic `add` operation's
@@ -34,7 +38,7 @@ export const CLIENT_ID_UNSUPPORTED = "Client-generated ids are not supported by 
 // oxlint-disable-next-line effect/require-filter-metadata -- see above: this check must stay anonymous in consumers' OpenAPI
 const noClientId = Schema.makeFilter<unknown>(
   (input) =>
-    Predicate.hasProperty(input, "id")
+    P.hasProperty(input, "id")
       ? new SchemaIssue.Pointer(
           ["id"],
           new SchemaIssue.InvalidValue({ message: CLIENT_ID_UNSUPPORTED }, input.id),
@@ -100,7 +104,7 @@ export const refusedClientIdPointer = (leaf: {
   }
   if (prefix === 0) return Option.some("/data/id");
   const [member, index] = wire;
-  return prefix === 2 && member === OPERATIONS_MEMBER && Predicate.isNumber(index)
+  return prefix === 2 && member === OPERATIONS_MEMBER && P.isNumber(index)
     ? Option.some(`/${OPERATIONS_MEMBER}/${index}/data/id`)
     : Option.none();
 };

@@ -17,7 +17,7 @@
  * Type-checked by `tsconfig.json`; the `@ts-expect-error` annotations are the
  * assertions.
  */
-import type { Effect } from "effect";
+import type * as Effect from "effect/Effect";
 import { Assemble, Handlers } from "@thomasfosterau/effect-jsonapi";
 import type { Query } from "@thomasfosterau/effect-jsonapi";
 
@@ -39,10 +39,7 @@ const pagination = { totalCount: 3, offset: 0, limit: 10, baseUrl: "https://exam
 
 const paged = Assemble.collection(people, pagination);
 assertType<
-  Equals<
-    typeof paged,
-    Effect.Effect<Assemble.CollectionDocument<Person>, Assemble.IncludeError, never>
-  >
+  Equals<typeof paged, Effect.Effect<Assemble.CollectionDocument<Person>, Assemble.IncludeError>>
 >(true);
 declare const pagedDocument: Assemble.CollectionDocument<Person>;
 assertType<Handlers.LinksValue>(pagedDocument.links);
@@ -57,7 +54,7 @@ const whole = Assemble.unpaginatedCollection(people, { include: [], includable: 
 assertType<
   Equals<
     typeof whole,
-    Effect.Effect<Assemble.UnpaginatedCollectionDocument<Person>, Assemble.IncludeError, never>
+    Effect.Effect<Assemble.UnpaginatedCollectionDocument<Person>, Assemble.IncludeError>
   >
 >(true);
 declare const wholeDocument: Assemble.UnpaginatedCollectionDocument<Person>;
@@ -87,11 +84,7 @@ const linked = Assemble.unpaginatedCollection(people, {
 assertType<
   Equals<
     typeof linked,
-    Effect.Effect<
-      Assemble.UnpaginatedCollectionDocument<Person, string>,
-      Assemble.IncludeError,
-      never
-    >
+    Effect.Effect<Assemble.UnpaginatedCollectionDocument<Person, string>, Assemble.IncludeError>
   >
 >(true);
 declare const linkedDocument: Assemble.UnpaginatedCollectionDocument<Person, string>;
@@ -113,11 +106,7 @@ const optionallyLinked = Assemble.unpaginatedCollection(people, {
 assertType<
   Equals<
     typeof optionallyLinked,
-    Effect.Effect<
-      Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>,
-      Assemble.IncludeError,
-      never
-    >
+    Effect.Effect<Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>, Assemble.IncludeError>
   >
 >(true);
 declare const optionallyLinkedDocument: Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>;
@@ -140,11 +129,7 @@ const forwarded = Assemble.unpaginatedCollection(people, {
 assertType<
   Equals<
     typeof forwarded,
-    Effect.Effect<
-      Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>,
-      Assemble.IncludeError,
-      never
-    >
+    Effect.Effect<Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>, Assemble.IncludeError>
   >
 >(true);
 
@@ -153,7 +138,7 @@ const unlinked = Assemble.unpaginatedCollection(people, { self: undefined });
 assertType<
   Equals<
     typeof unlinked,
-    Effect.Effect<Assemble.UnpaginatedCollectionDocument<Person>, Assemble.IncludeError, never>
+    Effect.Effect<Assemble.UnpaginatedCollectionDocument<Person>, Assemble.IncludeError>
   >
 >(true);
 
@@ -197,8 +182,7 @@ assertType<
     typeof stamped,
     Effect.Effect<
       Assemble.UnpaginatedCollectionDocument<Person, undefined, Generated>,
-      Assemble.IncludeError,
-      never
+      Assemble.IncludeError
     >
   >
 >(true);
@@ -221,8 +205,7 @@ assertType<
     typeof literal,
     Effect.Effect<
       Assemble.UnpaginatedCollectionDocument<Person, undefined, { readonly generatedAt: "now" }>,
-      Assemble.IncludeError,
-      never
+      Assemble.IncludeError
     >
   >
 >(true);
@@ -247,8 +230,7 @@ assertType<
     typeof both,
     Effect.Effect<
       Assemble.UnpaginatedCollectionDocument<Person, string, Generated>,
-      Assemble.IncludeError,
-      never
+      Assemble.IncludeError
     >
   >
 >(true);
@@ -271,8 +253,7 @@ assertType<
     typeof forwardedMeta,
     Effect.Effect<
       Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf, MaybeGenerated>,
-      Assemble.IncludeError,
-      never
+      Assemble.IncludeError
     >
   >
 >(true);
@@ -294,7 +275,7 @@ const unstamped = Assemble.unpaginatedCollection(people, { meta: undefined });
 assertType<
   Equals<
     typeof unstamped,
-    Effect.Effect<Assemble.UnpaginatedCollectionDocument<Person>, Assemble.IncludeError, never>
+    Effect.Effect<Assemble.UnpaginatedCollectionDocument<Person>, Assemble.IncludeError>
   >
 >(true);
 

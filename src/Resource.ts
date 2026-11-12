@@ -45,17 +45,15 @@
  *
  * @since 0.1.0
  */
-import {
-  Array as Arr,
-  Effect,
-  Match,
-  Option,
-  Schema,
-  SchemaAST,
-  SchemaIssue,
-  SchemaTransformation,
-  Struct,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Match from "effect/Match";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as SchemaAST from "effect/SchemaAST";
+import * as SchemaIssue from "effect/SchemaIssue";
+import * as SchemaTransformation from "effect/SchemaTransformation";
+import * as Struct from "effect/Struct";
 import { AnyMeta, CollectionDocument, DataDocument, ResourceLinks } from "./Document.js";
 import * as Filter from "./Filter.js";
 import { resolveOperators } from "./internal/operators.js";
@@ -3906,7 +3904,7 @@ export const isFamily = (u: unknown): u is Family<string, ReadonlyArray<Any>, an
 export function family<const Name extends string, const Members extends ReadonlyArray<Any>>(
   name: Name,
   members: Members,
-): Family<Name, Members, undefined>;
+): Family<Name, Members>;
 export function family<
   const BaseType extends string,
   const BaseAttributes extends Schema.Struct.Fields,

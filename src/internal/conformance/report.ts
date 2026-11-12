@@ -10,7 +10,10 @@
  * @since 0.15.0
  * @internal
  */
-import { Array as Arr, Match, Predicate, Result } from "effect";
+import * as Arr from "effect/Array";
+import * as Match from "effect/Match";
+import * as P from "effect/Predicate";
+import * as Result from "effect/Result";
 import type { Disposal, Gap, Outcome, Rule, Tier, WriteRecord } from "./core.js";
 import { resolved, type SampleRecord } from "./samples.js";
 
@@ -278,7 +281,7 @@ export const format = (
     );
     out.push("");
     const ordered = Arr.flatMap(ORDER, (tag) =>
-      Arr.filter(outcomes, (outcome) => Predicate.isTagged(outcome, tag)),
+      Arr.filter(outcomes, (outcome) => P.isTagged(outcome, tag)),
     );
     for (const outcome of ordered) {
       out.push(indent(renderOutcome(outcome, width), "  "));

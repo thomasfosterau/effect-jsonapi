@@ -58,7 +58,7 @@
  * @see {@link https://jsonapi.org/ext/atomic/}
  * @since 0.1.0
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { AnyMeta, JsonApiObject, TopLevelLinks } from "./Document.js";
 import type { LinksValue, MetaValue, ResourceValue } from "./Handlers.js";
 import { ATOMIC_EXTENSION_URI, ATOMIC_MEDIA_TYPE } from "./internal/media.js";

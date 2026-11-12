@@ -1,5 +1,10 @@
 import { assert, describe, expect, expectTypeOf, it, onTestFinished } from "vite-plus/test";
-import { Cause, Effect, Exit, Layer, Result, Schema } from "effect";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
 import {
   HttpApi,
@@ -287,7 +292,7 @@ const withHandlers = <A, E>(effect: Effect.Effect<A, E, any>) =>
     Effect.scoped,
     Effect.provide(ArticlesLive),
     Effect.provide(Middleware.layer),
-  ) as Effect.Effect<A, E, never>;
+  ) as Effect.Effect<A, E>;
 
 // ---------------------------------------------------------------------------
 // Endpoint shapes
@@ -1202,7 +1207,7 @@ describe("Endpoint.resource / Group.resource", () => {
         Effect.scoped,
         Effect.provide(CommentsLive),
         Effect.provide(Middleware.layer),
-      ) as Effect.Effect<A, E, never>;
+      ) as Effect.Effect<A, E>;
 
     const result = await Effect.runPromise(
       withComments(
@@ -1397,7 +1402,7 @@ describe("HTTP round-trip with a flat write payload", () => {
         Effect.scoped,
         Effect.provide(FlatLive),
         Effect.provide(Middleware.layer),
-      ) as Effect.Effect<A, E, never>,
+      ) as Effect.Effect<A, E>,
     );
 
   it("creates from a flat body and still answers with a JSON:API document (201)", async () => {
@@ -2065,7 +2070,7 @@ describe("HTTP round-trip with a wire success document", () => {
         Effect.scoped,
         Effect.provide(WireLive),
         Effect.provide(Middleware.layer),
-      ) as Effect.Effect<A, E, never>,
+      ) as Effect.Effect<A, E>,
     );
 
   it("answers `get` with the wire document — links.self is a string on the client", async () => {
