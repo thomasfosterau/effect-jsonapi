@@ -4,7 +4,8 @@
  * arm of `fromTaggedError`, the `ApiError.make` pass-through (the Conflict
  * arm), and `respond`'s two catch paths.
  */
-import { assert, describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { assert, describe, expect } from "vite-plus/test";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -427,95 +428,112 @@ describe("JsonapiError.toDocument", () => {
   });
 });
 
-const responseOf = async (effect: Effect.Effect<unknown>) => {
-  const value = await Effect.runPromise(effect);
-  if (!HttpServerResponse.isHttpServerResponse(value)) throw new Error("expected a response");
-  const web = HttpServerResponse.toWeb(value);
-  return {
-    status: web.status,
-    contentType: web.headers.get("content-type"),
-    body: (await web.json()) as { errors: ReadonlyArray<{ code?: string }> },
-  };
-};
+const responseOf = (effect: Effect.Effect<unknown>) =>
+  Effect.gen(function* () {
+    const value = yield* effect;
+    if (!HttpServerResponse.isHttpServerResponse(value)) {
+      return yield* Effect.die(new Error("expected a response"));
+    }
+    const web = HttpServerResponse.toWeb(value);
+    return {
+      status: web.status,
+      contentType: web.headers.get("content-type"),
+      body: yield* Effect.tryPromise(
+        () => web.json() as Promise<{ errors: ReadonlyArray<{ code?: string }> }>,
+      ).pipe(Effect.orDie),
+    };
+  });
 
 describe("respond", () => {
-  it("passes a success through untouched", async () => {
-    expect(await Effect.runPromise(ServerErrors.respond(Effect.succeed({ data: 1 })))).toEqual({
-      data: 1,
-    });
-  });
+  it.effect("passes a success through untouched", () =>
+    Effect.gen(function* () {
+      expect(yield* ServerErrors.respond(Effect.succeed({ data: 1 }))).toEqual({
+        data: 1,
+      });
+    }),
+  );
 
-  it("answers a mapped failure as a JSON:API error response", async () => {
-    const response = await responseOf(
-      ServerErrors.respond(Effect.fail(new ServerErrors.NotFound({ resource: "people", id: "1" }))),
-    );
-    expect(response.status).toBe(404);
-    expect(response.contentType).toBe("application/vnd.api+json");
-    expect(response.body.errors[0]?.code).toBe("not-found");
-  });
+  it.effect("answers a mapped failure as a JSON:API error response", () =>
+    Effect.gen(function* () {
+      const response = yield* responseOf(
+        ServerErrors.respond(
+          Effect.fail(new ServerErrors.NotFound({ resource: "people", id: "1" })),
+        ),
+      );
+      expect(response.status).toBe(404);
+      expect(response.contentType).toBe("application/vnd.api+json");
+      expect(response.body.errors[0]?.code).toBe("not-found");
+    }),
+  );
 
-  it("answers a mapped defect too — a thrown ApiError reaches the seam", async () => {
-    const response = await responseOf(
-      ServerErrors.respond(
-        Effect.sync(() => {
-          throw new ApiError.UnsupportedIncludePath({ path: "x", includablePaths: [] });
-        }),
-      ),
-    );
-    expect(response.status).toBe(400);
-    expect(response.body.errors[0]?.code).toBe("unsupported.include-path");
-  });
+  it.effect("answers a mapped defect too — a thrown ApiError reaches the seam", () =>
+    Effect.gen(function* () {
+      const response = yield* responseOf(
+        ServerErrors.respond(
+          Effect.die(new ApiError.UnsupportedIncludePath({ path: "x", includablePaths: [] })),
+        ),
+      );
+      expect(response.status).toBe(400);
+      expect(response.body.errors[0]?.code).toBe("unsupported.include-path");
+    }),
+  );
 
-  it("answers an unmapped failure or defect with the opaque 500", async () => {
-    const failed = await responseOf(ServerErrors.respond(Effect.fail(new DbDown())));
-    expect(failed.status).toBe(500);
-    expect(failed.body.errors[0]?.code).toBe("internal");
-    const died = await responseOf(ServerErrors.respond(Effect.die("boom")));
-    expect(died.status).toBe(500);
-  });
+  it.effect("answers an unmapped failure or defect with the opaque 500", () =>
+    Effect.gen(function* () {
+      const failed = yield* responseOf(ServerErrors.respond(Effect.fail(new DbDown())));
+      expect(failed.status).toBe(500);
+      expect(failed.body.errors[0]?.code).toBe("internal");
+      const died = yield* responseOf(ServerErrors.respond(Effect.die("boom")));
+      expect(died.status).toBe(500);
+    }),
+  );
 
-  it("consults the caller's extra arms after the catalogue", async () => {
-    const materialise = (cause: unknown) =>
-      P.isObjectOrArray(cause) && "code" in cause && cause.code === "23505"
-        ? Option.some(
-            new ServerErrors.JsonapiError({
-              status: 409,
-              errors: [{ status: "409", code: "conflict" }],
-            }),
-          )
-        : Option.none();
-    const response = await responseOf(
-      ServerErrors.respond(Effect.fail({ code: "23505" }), { materialise }),
-    );
-    expect(response.status).toBe(409);
-    // …but the catalogue still wins for its own members.
-    const catalogue = await responseOf(
-      ServerErrors.respond(Effect.fail(new ServerErrors.Forbidden({})), { materialise }),
-    );
-    expect(catalogue.status).toBe(403);
-  });
+  it.effect("consults the caller's extra arms after the catalogue", () =>
+    Effect.gen(function* () {
+      const materialise = (cause: unknown) =>
+        P.isObjectOrArray(cause) && "code" in cause && cause.code === "23505"
+          ? Option.some(
+              new ServerErrors.JsonapiError({
+                status: 409,
+                errors: [{ status: "409", code: "conflict" }],
+              }),
+            )
+          : Option.none();
+      const response = yield* responseOf(
+        ServerErrors.respond(Effect.fail({ code: "23505" }), { materialise }),
+      );
+      expect(response.status).toBe(409);
+      // …but the catalogue still wins for its own members.
+      const catalogue = yield* responseOf(
+        ServerErrors.respond(Effect.fail(new ServerErrors.Forbidden({})), { materialise }),
+      );
+      expect(catalogue.status).toBe(403);
+    }),
+  );
 
-  it("consults the caller's override ahead of the catalogue (#565)", async () => {
-    const override = (cause: unknown) =>
-      P.isTagged(cause, "Conflict")
-        ? Option.some(
-            new ServerErrors.JsonapiError({
-              status: 409,
-              errors: [{ status: "409", code: "conflict", detail: "Someone else changed it" }],
-            }),
-          )
-        : Option.none();
-    const overridden = await responseOf(
-      ServerErrors.respond(Effect.fail(new ApiError.Conflict({})), { override }),
-    );
-    expect(overridden.status).toBe(409);
-    expect(overridden.body.errors).toEqual([
-      { status: "409", code: "conflict", detail: "Someone else changed it" },
-    ]);
-    // a cause the override declines still reaches the catalogue
-    const declined = await responseOf(
-      ServerErrors.respond(Effect.fail(new ServerErrors.Forbidden({})), { override }),
-    );
-    expect(declined.status).toBe(403);
-  });
+  it.effect("consults the caller's override ahead of the catalogue (#565)", () =>
+    Effect.gen(function* () {
+      const override = (cause: unknown) =>
+        P.isTagged(cause, "Conflict")
+          ? Option.some(
+              new ServerErrors.JsonapiError({
+                status: 409,
+                errors: [{ status: "409", code: "conflict", detail: "Someone else changed it" }],
+              }),
+            )
+          : Option.none();
+      const overridden = yield* responseOf(
+        ServerErrors.respond(Effect.fail(new ApiError.Conflict({})), { override }),
+      );
+      expect(overridden.status).toBe(409);
+      expect(overridden.body.errors).toEqual([
+        { status: "409", code: "conflict", detail: "Someone else changed it" },
+      ]);
+      // a cause the override declines still reaches the catalogue
+      const declined = yield* responseOf(
+        ServerErrors.respond(Effect.fail(new ServerErrors.Forbidden({})), { override }),
+      );
+      expect(declined.status).toBe(403);
+    }),
+  );
 });

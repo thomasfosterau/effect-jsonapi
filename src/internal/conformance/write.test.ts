@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as MutableHashMap from "effect/MutableHashMap";
@@ -103,25 +104,29 @@ const readBackAll = (ctx: Core.Context) =>
   );
 
 describe("the write fixture's id vetting", () => {
-  it("accepts an id it created, read back and removed when the server reuses it", async () => {
-    const ctx = context();
-    const readBack = createThen(ctx, () => readBackAll(ctx));
-    await Effect.runPromise(Effect.andThen(readBack, readBack));
-    // The read showed articles:100 while the kit held it, so it is not counted
-    // as seen: the second create, which the server answered with the same id,
-    // is the kit's too.
-    expect(MutableHashSet.has(ctx.observed, Core.idKey("articles", "100"))).toBe(false);
-    expect(ctx.writes.map(({ id, disposal, detail }) => ({ id, disposal, detail }))).toEqual([
-      { id: "100", disposal: "cleaned-up", detail: undefined },
-      { id: "100", disposal: "cleaned-up", detail: undefined },
-    ]);
-  });
+  it.effect("accepts an id it created, read back and removed when the server reuses it", () =>
+    Effect.gen(function* () {
+      const ctx = context();
+      const readBack = createThen(ctx, () => readBackAll(ctx));
+      yield* Effect.andThen(readBack, readBack);
+      // The read showed articles:100 while the kit held it, so it is not counted
+      // as seen: the second create, which the server answered with the same id,
+      // is the kit's too.
+      expect(MutableHashSet.has(ctx.observed, Core.idKey("articles", "100"))).toBe(false);
+      expect(ctx.writes.map(({ id, disposal, detail }) => ({ id, disposal, detail }))).toEqual([
+        { id: "100", disposal: "cleaned-up", detail: undefined },
+        { id: "100", disposal: "cleaned-up", detail: undefined },
+      ]);
+    }),
+  );
 
-  it("refuses an id it once held when a read after its removal showed another holder's", async () => {
-    const store = MutableHashMap.empty<string, string>();
-    const ctx = context(store);
-    await Effect.runPromise(
+  it.effect(
+    "refuses an id it once held when a read after its removal showed another holder's",
+    () =>
       Effect.gen(function* () {
+        const store = MutableHashMap.empty<string, string>();
+        const ctx = context(store);
+
         // 1–2. The kit takes articles:100, and removes it.
         yield* createThen(ctx, () => Effect.void);
         // 3. Someone else's articles:100, which a later read shows.
@@ -130,19 +135,18 @@ describe("the write fixture's id vetting", () => {
         MutableHashMap.remove(store, "100");
         // 4. The server answers a create with 100 again.
         yield* createThen(ctx, () => Effect.void);
+        expect(MutableHashSet.has(ctx.observed, Core.idKey("articles", "100"))).toBe(true);
+        expect(ctx.writes.map(({ id, disposal, detail }) => ({ id, disposal, detail }))).toEqual([
+          { id: "100", disposal: "cleaned-up", detail: undefined },
+          {
+            id: undefined,
+            disposal: "left",
+            detail:
+              "the create response named `articles:100`, which the kit did not create (a read earlier in this run returned it) — not touched",
+          },
+        ]);
       }),
-    );
-    expect(MutableHashSet.has(ctx.observed, Core.idKey("articles", "100"))).toBe(true);
-    expect(ctx.writes.map(({ id, disposal, detail }) => ({ id, disposal, detail }))).toEqual([
-      { id: "100", disposal: "cleaned-up", detail: undefined },
-      {
-        id: undefined,
-        disposal: "left",
-        detail:
-          "the create response named `articles:100`, which the kit did not create (a read earlier in this run returned it) — not touched",
-      },
-    ]);
-  });
+  );
 });
 
 describe("read-back comparison", () => {

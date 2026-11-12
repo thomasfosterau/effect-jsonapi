@@ -1,4 +1,5 @@
-import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { describe, expect, expectTypeOf } from "vite-plus/test";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -96,134 +97,148 @@ const graph: ReadonlyArray<Handlers.ResourceValue> = [
   { type: "holdings", id: "h1" },
 ];
 
-const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
-
 describe("Handlers.resolveIncluded — nothing requested", () => {
-  it("resolves to undefined when no `include` was requested, so the member is omitted", async () => {
-    const db = store(graph);
-    expect(
-      await run(Handlers.resolveIncluded(article1, undefined, db.targets("people"))),
-    ).toBeUndefined();
-    // and nothing was loaded to find that out
-    expect(db.calls).toEqual([]);
-  });
+  it.effect("resolves to undefined when no `include` was requested, so the member is omitted", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      expect(
+        yield* Handlers.resolveIncluded(article1, undefined, db.targets("people")),
+      ).toBeUndefined();
+      // and nothing was loaded to find that out
+      expect(db.calls).toEqual([]);
+    }),
+  );
 
-  it("resolves to [] for `?include=` with no paths: the request carried `include` (#232)", async () => {
-    const db = store(graph);
-    expect(await run(Handlers.resolveIncluded(article1, [], db.targets("people")))).toEqual([]);
-    // nothing to walk, so nothing loaded
-    expect(db.calls).toEqual([]);
-  });
+  it.effect(
+    "resolves to [] for `?include=` with no paths: the request carried `include` (#232)",
+    () =>
+      Effect.gen(function* () {
+        const db = store(graph);
+        expect(yield* Handlers.resolveIncluded(article1, [], db.targets("people"))).toEqual([]);
+        // nothing to walk, so nothing loaded
+        expect(db.calls).toEqual([]);
+      }),
+  );
 
-  it("resolves to [] — not undefined — when the walk ran and came back empty", async () => {
-    const db = store(graph);
-    const empty: Handlers.ResourceValue = { type: "articles", id: "7" };
-    expect(await run(Handlers.resolveIncluded(empty, ["author"], db.targets("people")))).toEqual(
-      [],
-    );
-    // an empty page is the same statement
-    expect(await run(Handlers.resolveIncluded([], ["author"], db.targets("people")))).toEqual([]);
-    expect(await run(Handlers.resolveIncluded(null, ["author"], db.targets("people")))).toEqual([]);
-  });
+  it.effect("resolves to [] — not undefined — when the walk ran and came back empty", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const empty: Handlers.ResourceValue = { type: "articles", id: "7" };
+      expect(yield* Handlers.resolveIncluded(empty, ["author"], db.targets("people"))).toEqual([]);
+      // an empty page is the same statement
+      expect(yield* Handlers.resolveIncluded([], ["author"], db.targets("people"))).toEqual([]);
+      expect(yield* Handlers.resolveIncluded(null, ["author"], db.targets("people"))).toEqual([]);
+    }),
+  );
 });
 
 describe("Handlers.resolveIncluded — single level", () => {
-  it("resolves a to-one path", async () => {
-    const db = store(graph);
-    const included = await run(
-      Handlers.resolveIncluded(article1, ["author"], db.targets("people")),
-    );
-    expect(ids(included)).toEqual(["people:9"]);
-    expect(db.log()).toEqual(["people:9"]);
-  });
+  it.effect("resolves a to-one path", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const included = yield* Handlers.resolveIncluded(article1, ["author"], db.targets("people"));
+      expect(ids(included)).toEqual(["people:9"]);
+      expect(db.log()).toEqual(["people:9"]);
+    }),
+  );
 
-  it("resolves a to-many path, in linkage order", async () => {
-    const db = store(graph);
-    const included = await run(Handlers.resolveIncluded(article1, ["tags"], db.targets("tags")));
-    expect(ids(included)).toEqual(["tags:1", "tags:2"]);
-    // one call for both tags, not one per tag
-    expect(db.log()).toEqual(["tags:1,2"]);
-  });
+  it.effect("resolves a to-many path, in linkage order", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const included = yield* Handlers.resolveIncluded(article1, ["tags"], db.targets("tags"));
+      expect(ids(included)).toEqual(["tags:1", "tags:2"]);
+      // one call for both tags, not one per tag
+      expect(db.log()).toEqual(["tags:1,2"]);
+    }),
+  );
 
-  it("resolves several paths as one level, one call per type", async () => {
-    const db = store(graph);
-    const included = await run(
-      Handlers.resolveIncluded(
+  it.effect("resolves several paths as one level, one call per type", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const included = yield* Handlers.resolveIncluded(
         article1,
         ["author", "tags", "comments"],
         db.targets("people", "tags", "comments"),
-      ),
-    );
-    expect(ids(included)).toEqual(["people:9", "tags:1", "tags:2", "comments:5", "comments:12"]);
-    expect(db.log()).toEqual(["people:9", "tags:1,2", "comments:5,12"]);
-  });
+      );
+      expect(ids(included)).toEqual(["people:9", "tags:1", "tags:2", "comments:5", "comments:12"]);
+      expect(db.log()).toEqual(["people:9", "tags:1,2", "comments:5,12"]);
+    }),
+  );
 
-  it("emits in walk order, not in the order the batches complete", async () => {
-    // people is the slowest loader, but `author` is the first path.
-    const db = store(graph, { delay: { people: 20, tags: 5 } });
-    const included = await run(
-      Handlers.resolveIncluded(
+  it.live("emits in walk order, not in the order the batches complete", () =>
+    Effect.gen(function* () {
+      // people is the slowest loader, but `author` is the first path.
+      const db = store(graph, { delay: { people: 20, tags: 5 } });
+      const included = yield* Handlers.resolveIncluded(
         article1,
         ["author", "tags", "comments"],
         db.targets("people", "tags", "comments"),
-      ),
-    );
-    expect(ids(included)).toEqual(["people:9", "tags:1", "tags:2", "comments:5", "comments:12"]);
-  });
+      );
+      expect(ids(included)).toEqual(["people:9", "tags:1", "tags:2", "comments:5", "comments:12"]);
+    }),
+  );
 });
 
 describe("Handlers.resolveIncluded — multi level", () => {
-  it("walks a dotted path one level at a time", async () => {
-    const db = store(graph);
-    const included = await run(
-      Handlers.resolveIncluded(article1, ["comments.author"], db.targets("comments", "people")),
-    );
-    expect(ids(included)).toEqual(["comments:5", "comments:12", "people:9", "people:2"]);
-    // level 1: both comments in one call; level 2: both authors in one call
-    expect(db.log()).toEqual(["comments:5,12", "people:9,2"]);
-  });
+  it.effect("walks a dotted path one level at a time", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const included = yield* Handlers.resolveIncluded(
+        article1,
+        ["comments.author"],
+        db.targets("comments", "people"),
+      );
+      expect(ids(included)).toEqual(["comments:5", "comments:12", "people:9", "people:2"]);
+      // level 1: both comments in one call; level 2: both authors in one call
+      expect(db.log()).toEqual(["comments:5,12", "people:9,2"]);
+    }),
+  );
 
-  it("walks three levels with one call per type per level", async () => {
-    const db = store(graph);
-    const included = await run(
-      Handlers.resolveIncluded(
+  it.effect("walks three levels with one call per type per level", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const included = yield* Handlers.resolveIncluded(
         article1,
         ["comments.author.employer"],
         db.targets("comments", "people", "companies"),
-      ),
-    );
-    expect(ids(included)).toEqual([
-      "comments:5",
-      "comments:12",
-      "people:9",
-      "people:2",
-      "companies:acme",
-    ]);
-    // people:9 and people:2 share an employer — one company call, one id
-    expect(db.log()).toEqual(["comments:5,12", "people:9,2", "companies:acme"]);
-  });
+      );
+      expect(ids(included)).toEqual([
+        "comments:5",
+        "comments:12",
+        "people:9",
+        "people:2",
+        "companies:acme",
+      ]);
+      // people:9 and people:2 share an employer — one company call, one id
+      expect(db.log()).toEqual(["comments:5,12", "people:9,2", "companies:acme"]);
+    }),
+  );
 
-  it("charges nothing extra for a path that is another path's prefix", async () => {
-    const db = store(graph);
-    const included = await run(
-      Handlers.resolveIncluded(
+  it.effect("charges nothing extra for a path that is another path's prefix", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const included = yield* Handlers.resolveIncluded(
         article1,
         ["comments", "comments.author"],
         db.targets("comments", "people"),
-      ),
-    );
-    expect(ids(included)).toEqual(["comments:5", "comments:12", "people:9", "people:2"]);
-    expect(db.log()).toEqual(["comments:5,12", "people:9,2"]);
-  });
+      );
+      expect(ids(included)).toEqual(["comments:5", "comments:12", "people:9", "people:2"]);
+      expect(db.log()).toEqual(["comments:5,12", "people:9,2"]);
+    }),
+  );
 
-  it("charges nothing for a repeated path", async () => {
-    const db = store(graph);
-    const included = await run(
-      Handlers.resolveIncluded(article1, ["author", "author"], db.targets("people")),
-    );
-    expect(ids(included)).toEqual(["people:9"]);
-    expect(db.log()).toEqual(["people:9"]);
-  });
+  it.effect("charges nothing for a repeated path", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const included = yield* Handlers.resolveIncluded(
+        article1,
+        ["author", "author"],
+        db.targets("people"),
+      );
+      expect(ids(included)).toEqual(["people:9"]);
+      expect(db.log()).toEqual(["people:9"]);
+    }),
+  );
 });
 
 describe("Handlers.resolveIncluded — batching is per level, not per resource", () => {
@@ -248,135 +263,149 @@ describe("Handlers.resolveIncluded — batching is per level, not per resource",
     }),
   );
 
-  it("issues one call per level over a whole page, whatever the page size", async () => {
-    const db = store([...people, ...companies]);
-    const included = await run(
-      Handlers.resolveIncluded(page, ["author.employer"], db.targets("people", "companies")),
-    );
+  it.effect("issues one call per level over a whole page, whatever the page size", () =>
+    Effect.gen(function* () {
+      const db = store([...people, ...companies]);
+      const included = yield* Handlers.resolveIncluded(
+        page,
+        ["author.employer"],
+        db.targets("people", "companies"),
+      );
 
-    expect(db.calls.length).toBe(2);
-    expect(db.calls[0].type).toBe("people");
-    // 50 articles, 25 distinct authors: the level is deduplicated before loading
-    expect(db.calls[0].ids.length).toBe(25);
-    expect(new Set(db.calls[0].ids).size).toBe(25);
-    expect(db.calls[1].type).toBe("companies");
-    expect(db.calls[1].ids.length).toBe(5);
+      expect(db.calls.length).toBe(2);
+      expect(db.calls[0].type).toBe("people");
+      // 50 articles, 25 distinct authors: the level is deduplicated before loading
+      expect(db.calls[0].ids.length).toBe(25);
+      expect(new Set(db.calls[0].ids).size).toBe(25);
+      expect(db.calls[1].type).toBe("companies");
+      expect(db.calls[1].ids.length).toBe(5);
 
-    expect(included).toHaveLength(30);
-  });
+      expect(included).toHaveLength(30);
+    }),
+  );
 
-  it("scales with distinct resources, not with references", async () => {
-    const db = store([...people, ...companies]);
-    const small = await run(
-      Handlers.resolveIncluded(
+  it.effect("scales with distinct resources, not with references", () =>
+    Effect.gen(function* () {
+      const db = store([...people, ...companies]);
+      const small = yield* Handlers.resolveIncluded(
         page.slice(0, 2),
         ["author.employer"],
         db.targets("people", "companies"),
-      ),
-    );
-    expect(ids(small)).toEqual(["people:0", "people:1", "companies:0", "companies:1"]);
-    expect(db.calls.length).toBe(2);
-  });
+      );
+      expect(ids(small)).toEqual(["people:0", "people:1", "companies:0", "companies:1"]);
+      expect(db.calls.length).toBe(2);
+    }),
+  );
 
-  it("bounds a level's fan-out with `concurrency`", async () => {
-    const inFlight = { now: 0, peak: 0 };
-    const watched =
-      (rows: ReadonlyArray<Handlers.ResourceValue>): Handlers.IncludeTarget =>
-      () =>
-        Effect.gen(function* () {
-          inFlight.now++;
-          inFlight.peak = Math.max(inFlight.peak, inFlight.now);
-          yield* Effect.sleep(Duration.millis(10));
-          inFlight.now--;
-          return rows;
-        });
+  it.live("bounds a level's fan-out with `concurrency`", () =>
+    Effect.gen(function* () {
+      const inFlight = { now: 0, peak: 0 };
+      const watched =
+        (rows: ReadonlyArray<Handlers.ResourceValue>): Handlers.IncludeTarget =>
+        () =>
+          Effect.gen(function* () {
+            inFlight.now++;
+            inFlight.peak = Math.max(inFlight.peak, inFlight.now);
+            yield* Effect.sleep(Duration.millis(10));
+            inFlight.now--;
+            return rows;
+          });
 
-    const primary: Handlers.ResourceValue = {
-      type: "articles",
-      id: "1",
-      relationships: {
-        author: one("people", "9"),
-        tags: many("tags", "1"),
-        comments: many("comments", "5"),
-      },
-    };
-    const targets = {
-      people: watched([{ type: "people", id: "9" }]),
-      tags: watched([{ type: "tags", id: "1" }]),
-      comments: watched([{ type: "comments", id: "5" }]),
-    };
-    const paths = ["author", "tags", "comments"];
+      const primary: Handlers.ResourceValue = {
+        type: "articles",
+        id: "1",
+        relationships: {
+          author: one("people", "9"),
+          tags: many("tags", "1"),
+          comments: many("comments", "5"),
+        },
+      };
+      const targets = {
+        people: watched([{ type: "people", id: "9" }]),
+        tags: watched([{ type: "tags", id: "1" }]),
+        comments: watched([{ type: "comments", id: "5" }]),
+      };
+      const paths = ["author", "tags", "comments"];
 
-    await run(Handlers.resolveIncluded(primary, paths, targets, { concurrency: 1 }));
-    expect(inFlight.peak).toBe(1);
+      yield* Handlers.resolveIncluded(primary, paths, targets, { concurrency: 1 });
+      expect(inFlight.peak).toBe(1);
 
-    inFlight.peak = 0;
-    await run(Handlers.resolveIncluded(primary, paths, targets));
-    // the default is unbounded: the level's three types load together
-    expect(inFlight.peak).toBe(3);
-  });
+      inFlight.peak = 0;
+      yield* Handlers.resolveIncluded(primary, paths, targets);
+      // the default is unbounded: the level's three types load together
+      expect(inFlight.peak).toBe(3);
+    }),
+  );
 });
 
 describe("Handlers.resolveIncluded — deduplication", () => {
-  it("emits a resource reached by two paths exactly once, at its first position", async () => {
-    // A diamond: people:9 is both the article's author and comments:5's author.
-    const db = store(graph);
-    const included = await run(
-      Handlers.resolveIncluded(
+  it.effect("emits a resource reached by two paths exactly once, at its first position", () =>
+    Effect.gen(function* () {
+      // A diamond: people:9 is both the article's author and comments:5's author.
+      const db = store(graph);
+      const included = yield* Handlers.resolveIncluded(
         article1,
         ["author", "comments.author"],
         db.targets("people", "comments"),
-      ),
-    );
-    expect(ids(included)).toEqual(["people:9", "comments:5", "comments:12", "people:2"]);
-    // people:9 came back at level 1; level 2 asks only for the author it lacks
-    expect(db.log()).toEqual(["people:9", "comments:5,12", "people:2"]);
-  });
+      );
+      expect(ids(included)).toEqual(["people:9", "comments:5", "comments:12", "people:2"]);
+      // people:9 came back at level 1; level 2 asks only for the author it lacks
+      expect(db.log()).toEqual(["people:9", "comments:5,12", "people:2"]);
+    }),
+  );
 
-  it("emits a resource reached from two rows exactly once", async () => {
-    const db = store(graph);
-    const other: Handlers.ResourceValue = {
-      type: "articles",
-      id: "2",
-      relationships: { author: one("people", "9") },
-    };
-    const included = await run(
-      Handlers.resolveIncluded([article1, other], ["author"], db.targets("people")),
-    );
-    expect(ids(included)).toEqual(["people:9"]);
-    expect(db.log()).toEqual(["people:9"]);
-  });
+  it.effect("emits a resource reached from two rows exactly once", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const other: Handlers.ResourceValue = {
+        type: "articles",
+        id: "2",
+        relationships: { author: one("people", "9") },
+      };
+      const included = yield* Handlers.resolveIncluded(
+        [article1, other],
+        ["author"],
+        db.targets("people"),
+      );
+      expect(ids(included)).toEqual(["people:9"]);
+      expect(db.log()).toEqual(["people:9"]);
+    }),
+  );
 
-  it("never duplicates a primary resource into `included`", async () => {
-    // The document already holds articles:1; reaching it again through a
-    // comment must not emit a second resource object for it (the spec's
-    // one-object-per-(type, id) rule spans the whole document).
-    const db = store(graph);
-    const included = await run(
-      Handlers.resolveIncluded(article1, ["comments.article"], db.targets("comments", "articles")),
-    );
-    expect(ids(included)).toEqual(["comments:5", "comments:12"]);
-    // …and it was not loaded a second time either: no articles call at all
-    expect(db.log()).toEqual(["comments:5,12"]);
-  });
+  it.effect("never duplicates a primary resource into `included`", () =>
+    Effect.gen(function* () {
+      // The document already holds articles:1; reaching it again through a
+      // comment must not emit a second resource object for it (the spec's
+      // one-object-per-(type, id) rule spans the whole document).
+      const db = store(graph);
+      const included = yield* Handlers.resolveIncluded(
+        article1,
+        ["comments.article"],
+        db.targets("comments", "articles"),
+      );
+      expect(ids(included)).toEqual(["comments:5", "comments:12"]);
+      // …and it was not loaded a second time either: no articles call at all
+      expect(db.log()).toEqual(["comments:5,12"]);
+    }),
+  );
 
-  it("deduplicates across a page of primary resources too", async () => {
-    const db = store(graph);
-    const other: Handlers.ResourceValue = {
-      type: "articles",
-      id: "2",
-      relationships: { comments: many("comments", "5") },
-    };
-    const included = await run(
-      Handlers.resolveIncluded(
+  it.effect("deduplicates across a page of primary resources too", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const other: Handlers.ResourceValue = {
+        type: "articles",
+        id: "2",
+        relationships: { comments: many("comments", "5") },
+      };
+      const included = yield* Handlers.resolveIncluded(
         [article1, other],
         ["comments.article"],
         db.targets("comments", "articles"),
-      ),
-    );
-    expect(ids(included)).toEqual(["comments:5", "comments:12"]);
-    expect(db.log()).toEqual(["comments:5,12"]);
-  });
+      );
+      expect(ids(included)).toEqual(["comments:5", "comments:12"]);
+      expect(db.log()).toEqual(["comments:5,12"]);
+    }),
+  );
 });
 
 describe("Handlers.resolveIncluded — cycles", () => {
@@ -398,211 +427,234 @@ describe("Handlers.resolveIncluded — cycles", () => {
   ];
   const primary = cyclic[0];
 
-  it("terminates on a genuinely cyclic graph without duplicating anything", async () => {
-    const db = store(cyclic);
-    const included = await run(
-      Handlers.resolveIncluded(
+  it.effect("terminates on a genuinely cyclic graph without duplicating anything", () =>
+    Effect.gen(function* () {
+      const db = store(cyclic);
+      const included = yield* Handlers.resolveIncluded(
         primary,
         ["comments.article.comments.article"],
         db.targets("comments", "articles"),
         {
           depth: 8,
         },
-      ),
-    );
-    // 100 → 200 → 101 → 201 → back to 100, which the document already holds
-    expect(ids(included)).toEqual(["comments:200", "articles:101", "comments:201"]);
-    // every hop loaded only what the document lacked; the last hop loaded nothing
-    expect(db.log()).toEqual(["comments:200", "articles:101", "comments:201"]);
-  });
+      );
+      // 100 → 200 → 101 → 201 → back to 100, which the document already holds
+      expect(ids(included)).toEqual(["comments:200", "articles:101", "comments:201"]);
+      // every hop loaded only what the document lacked; the last hop loaded nothing
+      expect(db.log()).toEqual(["comments:200", "articles:101", "comments:201"]);
+    }),
+  );
 
-  it("terminates when the cycle closes immediately", async () => {
-    const selfReferential: ReadonlyArray<Handlers.ResourceValue> = [
-      { type: "comments", id: "300", relationships: { article: one("articles", "300") } },
-      { type: "articles", id: "300", relationships: { comments: many("comments", "300") } },
-    ];
-    const db = store(selfReferential);
-    const included = await run(
-      Handlers.resolveIncluded(
+  it.effect("terminates when the cycle closes immediately", () =>
+    Effect.gen(function* () {
+      const selfReferential: ReadonlyArray<Handlers.ResourceValue> = [
+        { type: "comments", id: "300", relationships: { article: one("articles", "300") } },
+        { type: "articles", id: "300", relationships: { comments: many("comments", "300") } },
+      ];
+      const db = store(selfReferential);
+      const included = yield* Handlers.resolveIncluded(
         selfReferential[1],
         ["comments.article.comments.article.comments"],
         db.targets("comments", "articles"),
         { depth: 12 },
-      ),
-    );
-    expect(ids(included)).toEqual(["comments:300"]);
-    expect(db.log()).toEqual(["comments:300"]);
-  });
+      );
+      expect(ids(included)).toEqual(["comments:300"]);
+      expect(db.log()).toEqual(["comments:300"]);
+    }),
+  );
 
-  it("still emits each member of a cycle when none of them is the primary", async () => {
-    const db = store([
-      ...cyclic,
-      { type: "people", id: "9", relationships: { latest: one("articles", "100") } },
-    ]);
-    const person: Handlers.ResourceValue = {
-      type: "people",
-      id: "1",
-      relationships: { latest: one("articles", "100") },
-    };
-    const included = await run(
-      Handlers.resolveIncluded(
+  it.effect("still emits each member of a cycle when none of them is the primary", () =>
+    Effect.gen(function* () {
+      const db = store([
+        ...cyclic,
+        { type: "people", id: "9", relationships: { latest: one("articles", "100") } },
+      ]);
+      const person: Handlers.ResourceValue = {
+        type: "people",
+        id: "1",
+        relationships: { latest: one("articles", "100") },
+      };
+      const included = yield* Handlers.resolveIncluded(
         person,
         ["latest.comments.article.comments"],
         db.targets("articles", "comments"),
         {
           depth: 8,
         },
-      ),
-    );
-    expect(ids(included)).toEqual(["articles:100", "comments:200", "articles:101", "comments:201"]);
-    expect(db.log()).toEqual(["articles:100", "comments:200", "articles:101", "comments:201"]);
-  });
+      );
+      expect(ids(included)).toEqual([
+        "articles:100",
+        "comments:200",
+        "articles:101",
+        "comments:201",
+      ]);
+      expect(db.log()).toEqual(["articles:100", "comments:200", "articles:101", "comments:201"]);
+    }),
+  );
 });
 
 describe("Handlers.resolveIncluded — depth cap", () => {
-  it("walks no further than `depth` hops", async () => {
-    const db = store(graph);
-    const included = await run(
-      Handlers.resolveIncluded(
+  it.effect("walks no further than `depth` hops", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const included = yield* Handlers.resolveIncluded(
         article1,
         ["comments.author.employer"],
         db.targets("comments", "people", "companies"),
         {
           depth: 2,
         },
-      ),
-    );
-    expect(ids(included)).toEqual(["comments:5", "comments:12", "people:9", "people:2"]);
-    // the third hop was never walked, so `companies` was never asked
-    expect(db.log()).toEqual(["comments:5,12", "people:9,2"]);
-  });
+      );
+      expect(ids(included)).toEqual(["comments:5", "comments:12", "people:9", "people:2"]);
+      // the third hop was never walked, so `companies` was never asked
+      expect(db.log()).toEqual(["comments:5,12", "people:9,2"]);
+    }),
+  );
 
-  it("caps a cyclic walk however long the requested path is", async () => {
-    const db = store(graph);
-    const deep = ["comments.article.comments.article.comments.article.comments"];
-    await run(
-      Handlers.resolveIncluded(article1, deep, db.targets("comments", "articles"), { depth: 1 }),
-    );
-    expect(db.log()).toEqual(["comments:5,12"]);
-  });
+  it.effect("caps a cyclic walk however long the requested path is", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const deep = ["comments.article.comments.article.comments.article.comments"];
+      yield* Handlers.resolveIncluded(article1, deep, db.targets("comments", "articles"), {
+        depth: 1,
+      });
+      expect(db.log()).toEqual(["comments:5,12"]);
+    }),
+  );
 
-  it("defaults to three hops — the deepest path `Query.Include` legalises", async () => {
-    const db = store(graph);
-    // The fourth hop *would* resolve — holdings:h1 exists and has a loader —
-    // so reaching it is the failure this asserts against.
-    const included = await run(
-      Handlers.resolveIncluded(
+  it.effect("defaults to three hops — the deepest path `Query.Include` legalises", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      // The fourth hop *would* resolve — holdings:h1 exists and has a loader —
+      // so reaching it is the failure this asserts against.
+      const included = yield* Handlers.resolveIncluded(
         article1,
         ["comments.author.employer.holding"],
         db.targets("comments", "people", "companies", "holdings"),
-      ),
-    );
-    expect(ids(included)).toEqual([
-      "comments:5",
-      "comments:12",
-      "people:9",
-      "people:2",
-      "companies:acme",
-    ]);
-    expect(db.log()).toEqual(["comments:5,12", "people:9,2", "companies:acme"]);
+      );
+      expect(ids(included)).toEqual([
+        "comments:5",
+        "comments:12",
+        "people:9",
+        "people:2",
+        "companies:acme",
+      ]);
+      expect(db.log()).toEqual(["comments:5,12", "people:9,2", "companies:acme"]);
 
-    // …and four hops when the caller asks for four
-    const deeper = await run(
-      Handlers.resolveIncluded(
+      // …and four hops when the caller asks for four
+      const deeper = yield* Handlers.resolveIncluded(
         article1,
         ["comments.author.employer.holding"],
         db.targets("comments", "people", "companies", "holdings"),
         { depth: 4 },
-      ),
-    );
-    expect(ids(deeper)?.at(-1)).toBe("holdings:h1");
-  });
+      );
+      expect(ids(deeper)?.at(-1)).toBe("holdings:h1");
+    }),
+  );
 
-  it("resolves nothing at a depth below one", async () => {
-    const db = store(graph);
-    expect(
-      await run(Handlers.resolveIncluded(article1, ["author"], db.targets("people"), { depth: 0 })),
-    ).toEqual([]);
-    expect(db.calls).toEqual([]);
-  });
+  it.effect("resolves nothing at a depth below one", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      expect(
+        yield* Handlers.resolveIncluded(article1, ["author"], db.targets("people"), { depth: 0 }),
+      ).toEqual([]);
+      expect(db.calls).toEqual([]);
+    }),
+  );
 });
 
 describe("Handlers.resolveIncluded — unresolvable references", () => {
-  it("drops a reference whose type has no target", async () => {
-    const db = store(graph);
-    const included = await run(
-      Handlers.resolveIncluded(article1, ["author", "tags"], db.targets("people")),
-    );
-    expect(ids(included)).toEqual(["people:9"]);
-    expect(db.log()).toEqual(["people:9"]);
-  });
+  it.effect("drops a reference whose type has no target", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const included = yield* Handlers.resolveIncluded(
+        article1,
+        ["author", "tags"],
+        db.targets("people"),
+      );
+      expect(ids(included)).toEqual(["people:9"]);
+      expect(db.log()).toEqual(["people:9"]);
+    }),
+  );
 
-  it("drops an id the batch did not return, and keeps walking the rest", async () => {
-    // comments:12's author is people:2, which the store does not hold.
-    const db = store(graph.filter((row) => !(row.type === "people" && row.id === "2")));
-    const included = await run(
-      Handlers.resolveIncluded(article1, ["comments.author"], db.targets("comments", "people")),
-    );
-    expect(ids(included)).toEqual(["comments:5", "comments:12", "people:9"]);
-    expect(db.log()).toEqual(["comments:5,12", "people:9,2"]);
-  });
+  it.effect("drops an id the batch did not return, and keeps walking the rest", () =>
+    Effect.gen(function* () {
+      // comments:12's author is people:2, which the store does not hold.
+      const db = store(graph.filter((row) => !(row.type === "people" && row.id === "2")));
+      const included = yield* Handlers.resolveIncluded(
+        article1,
+        ["comments.author"],
+        db.targets("comments", "people"),
+      );
+      expect(ids(included)).toEqual(["comments:5", "comments:12", "people:9"]);
+      expect(db.log()).toEqual(["comments:5,12", "people:9,2"]);
+    }),
+  );
 
-  it("drops a reference to a relationship the resource does not carry", async () => {
-    const db = store(graph);
-    const included = await run(
-      Handlers.resolveIncluded(article1, ["editor"], db.targets("people")),
-    );
-    expect(included).toEqual([]);
-    expect(db.calls).toEqual([]);
-  });
+  it.effect("drops a reference to a relationship the resource does not carry", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const included = yield* Handlers.resolveIncluded(article1, ["editor"], db.targets("people"));
+      expect(included).toEqual([]);
+      expect(db.calls).toEqual([]);
+    }),
+  );
 
-  it("drops an empty to-one and an empty to-many", async () => {
-    const db = store(graph);
-    const bare: Handlers.ResourceValue = {
-      type: "articles",
-      id: "3",
-      relationships: { author: { data: null }, tags: { data: [] } },
-    };
-    expect(
-      await run(Handlers.resolveIncluded(bare, ["author", "tags"], db.targets("people", "tags"))),
-    ).toEqual([]);
-    expect(db.calls).toEqual([]);
-  });
+  it.effect("drops an empty to-one and an empty to-many", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const bare: Handlers.ResourceValue = {
+        type: "articles",
+        id: "3",
+        relationships: { author: { data: null }, tags: { data: [] } },
+      };
+      expect(
+        yield* Handlers.resolveIncluded(bare, ["author", "tags"], db.targets("people", "tags")),
+      ).toEqual([]);
+      expect(db.calls).toEqual([]);
+    }),
+  );
 
-  it("walks nothing through a paginated relationship, which carries no linkage", async () => {
-    const db = store(graph);
-    const paginated: Handlers.ResourceValue = {
-      type: "articles",
-      id: "4",
-      relationships: { comments: Handlers.paginatedRelationship("articles", "4", "comments") },
-    };
-    expect(
-      await run(Handlers.resolveIncluded(paginated, ["comments"], db.targets("comments"))),
-    ).toEqual([]);
-    expect(db.calls).toEqual([]);
-  });
+  it.effect("walks nothing through a paginated relationship, which carries no linkage", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const paginated: Handlers.ResourceValue = {
+        type: "articles",
+        id: "4",
+        relationships: { comments: Handlers.paginatedRelationship("articles", "4", "comments") },
+      };
+      expect(
+        yield* Handlers.resolveIncluded(paginated, ["comments"], db.targets("comments")),
+      ).toEqual([]);
+      expect(db.calls).toEqual([]);
+    }),
+  );
 
-  it("ignores a row nobody referenced, so full linkage still holds", async () => {
-    // A loader that over-fetches must not widen `included`: an unreferenced
-    // resource there is exactly what `buildIncluded` rejects.
-    const targets = {
-      people: (() =>
-        Effect.succeed([
-          { type: "people", id: "9" },
-          { type: "people", id: "404" },
-        ])) as Handlers.IncludeTarget,
-    };
-    const included = await run(Handlers.resolveIncluded(article1, ["author"], targets));
-    expect(ids(included)).toEqual(["people:9"]);
-    expect(() => Handlers.data(article1, { included })).not.toThrow();
-  });
+  it.effect("ignores a row nobody referenced, so full linkage still holds", () =>
+    Effect.gen(function* () {
+      // A loader that over-fetches must not widen `included`: an unreferenced
+      // resource there is exactly what `buildIncluded` rejects.
+      const targets = {
+        people: (() =>
+          Effect.succeed([
+            { type: "people", id: "9" },
+            { type: "people", id: "404" },
+          ])) as Handlers.IncludeTarget,
+      };
+      const included = yield* Handlers.resolveIncluded(article1, ["author"], targets);
+      expect(ids(included)).toEqual(["people:9"]);
+      expect(() => Handlers.data(article1, { included })).not.toThrow();
+    }),
+  );
 
-  it("ignores a row whose type is not the one asked for", async () => {
-    const targets = {
-      people: (() => Effect.succeed([{ type: "tags", id: "9" }])) as Handlers.IncludeTarget,
-    };
-    expect(await run(Handlers.resolveIncluded(article1, ["author"], targets))).toEqual([]);
-  });
+  it.effect("ignores a row whose type is not the one asked for", () =>
+    Effect.gen(function* () {
+      const targets = {
+        people: (() => Effect.succeed([{ type: "tags", id: "9" }])) as Handlers.IncludeTarget,
+      };
+      expect(yield* Handlers.resolveIncluded(article1, ["author"], targets)).toEqual([]);
+    }),
+  );
 });
 
 describe("Handlers.resolveIncluded — loader faults", () => {
@@ -643,95 +695,107 @@ describe("Handlers.resolveIncluded — loader faults", () => {
 });
 
 describe("Handlers.resolveIncluded — composing a document", () => {
-  it("feeds `Handlers.data`, whose linkage check passes by construction", async () => {
-    const db = store(graph);
-    const document = await run(
-      Handlers.resolveIncluded(
+  it.effect("feeds `Handlers.data`, whose linkage check passes by construction", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const document = yield* Handlers.resolveIncluded(
         article1,
         ["author", "comments.author"],
         db.targets("people", "comments"),
-      ).pipe(Effect.map((included) => Handlers.data(article1, { included, self: "/articles/1" }))),
-    );
-    expect(ids(document.included)).toEqual(["people:9", "comments:5", "comments:12", "people:2"]);
-    expect(document.links).toEqual({ self: "/articles/1" });
-  });
+      ).pipe(Effect.map((included) => Handlers.data(article1, { included, self: "/articles/1" })));
+      expect(ids(document.included)).toEqual(["people:9", "comments:5", "comments:12", "people:2"]);
+      expect(document.links).toEqual({ self: "/articles/1" });
+    }),
+  );
 
-  it("feeds `Handlers.collection` unchanged — the same call serves a page", async () => {
-    const db = store(graph);
-    const other: Handlers.ResourceValue = {
-      type: "articles",
-      id: "2",
-      relationships: { author: one("people", "2") },
-    };
-    const document = await run(
-      Handlers.resolveIncluded([article1, other], ["author"], db.targets("people")).pipe(
+  it.effect("feeds `Handlers.collection` unchanged — the same call serves a page", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const other: Handlers.ResourceValue = {
+        type: "articles",
+        id: "2",
+        relationships: { author: one("people", "2") },
+      };
+      const document = yield* Handlers.resolveIncluded(
+        [article1, other],
+        ["author"],
+        db.targets("people"),
+      ).pipe(
         Effect.map((included) =>
           Handlers.collection([article1, other], { included, self: "/articles" }),
         ),
-      ),
-    );
-    expect(ids(document.included)).toEqual(["people:9", "people:2"]);
-    expect(db.log()).toEqual(["people:9,2"]);
-  });
+      );
+      expect(ids(document.included)).toEqual(["people:9", "people:2"]);
+      expect(db.log()).toEqual(["people:9,2"]);
+    }),
+  );
 
   // The by-construction guarantee covers the resolver's output, not what a
   // transform makes of it: the check runs on the emitted resources (#152).
-  it("keeps the linkage check live: a transform that strips `relationships` is caught", async () => {
-    const db = store(graph);
-    const included = await run(
-      Handlers.resolveIncluded(article1, ["comments.author"], db.targets("people", "comments")),
-    );
-    expect(ids(included)).toEqual(["comments:5", "comments:12", "people:9", "people:2"]);
+  it.effect("keeps the linkage check live: a transform that strips `relationships` is caught", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const included = yield* Handlers.resolveIncluded(
+        article1,
+        ["comments.author"],
+        db.targets("people", "comments"),
+      );
+      expect(ids(included)).toEqual(["comments:5", "comments:12", "people:9", "people:2"]);
 
-    const stripFrom = (type: string) =>
-      Handlers.transform<Handlers.IdentityLambda>((resource) => {
-        if (resource.type !== type) return resource;
-        const { relationships: _relationships, ...rest } = resource;
-        return rest;
-      });
+      const stripFrom = (type: string) =>
+        Handlers.transform<Handlers.IdentityLambda>((resource) => {
+          if (resource.type !== type) return resource;
+          const { relationships: _relationships, ...rest } = resource;
+          return rest;
+        });
 
-    // On an included member: people:2 was reached only through comments:12.
-    expect(() => Handlers.data(article1, { included, onResource: stripFrom("comments") })).toThrow(
-      /full linkage violation: included resource "people:2"/,
-    );
-    // On the primary data: the first level is orphaned.
-    expect(() => Handlers.data(article1, { included, onResource: stripFrom("articles") })).toThrow(
-      /full linkage violation: included resource "comments:5"/,
-    );
-    // A transform that leaves `relationships` alone keeps the guarantee.
-    expect(
-      ids(
-        Handlers.data(article1, {
-          included,
-          onResource: Handlers.withMeta(() => ({ seen: true })),
-        }).included,
-      ),
-    ).toEqual(["comments:5", "comments:12", "people:9", "people:2"]);
-  });
+      // On an included member: people:2 was reached only through comments:12.
+      expect(() =>
+        Handlers.data(article1, { included, onResource: stripFrom("comments") }),
+      ).toThrow(/full linkage violation: included resource "people:2"/);
+      // On the primary data: the first level is orphaned.
+      expect(() =>
+        Handlers.data(article1, { included, onResource: stripFrom("articles") }),
+      ).toThrow(/full linkage violation: included resource "comments:5"/);
+      // A transform that leaves `relationships` alone keeps the guarantee.
+      expect(
+        ids(
+          Handlers.data(article1, {
+            included,
+            onResource: Handlers.withMeta(() => ({ seen: true })),
+          }).included,
+        ),
+      ).toEqual(["comments:5", "comments:12", "people:9", "people:2"]);
+    }),
+  );
 
-  it("omits the member entirely when the client asked for nothing", async () => {
-    const db = store(graph);
-    const document = await run(
-      Handlers.resolveIncluded(article1, undefined, db.targets("people")).pipe(
-        Effect.map((included) => Handlers.data(article1, { included })),
-      ),
-    );
-    expect(document).toEqual({ data: article1 });
-    expect("included" in document).toBe(false);
-  });
+  it.effect("omits the member entirely when the client asked for nothing", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      const document = yield* Handlers.resolveIncluded(
+        article1,
+        undefined,
+        db.targets("people"),
+      ).pipe(Effect.map((included) => Handlers.data(article1, { included })));
+      expect(document).toEqual({ data: article1 });
+      expect("included" in document).toBe(false);
+    }),
+  );
 
-  it("keeps an empty `included` when the walk resolved to nothing (#232)", async () => {
-    // §Fetching Includes: a request carrying `include` gets a compound
-    // document with an `included` key, even an empty one. `[]` from the walk
-    // reaches the wire as `included: []`, not as an omitted member.
-    const db = store(graph);
-    const document = await run(
-      Handlers.resolveIncluded(article1, ["editor"], db.targets("people")).pipe(
-        Effect.map((included) => Handlers.data(article1, { included })),
-      ),
-    );
-    expect(document).toEqual({ data: article1, included: [] });
-  });
+  it.effect("keeps an empty `included` when the walk resolved to nothing (#232)", () =>
+    Effect.gen(function* () {
+      // §Fetching Includes: a request carrying `include` gets a compound
+      // document with an `included` key, even an empty one. `[]` from the walk
+      // reaches the wire as `included: []`, not as an omitted member.
+      const db = store(graph);
+      const document = yield* Handlers.resolveIncluded(
+        article1,
+        ["editor"],
+        db.targets("people"),
+      ).pipe(Effect.map((included) => Handlers.data(article1, { included })));
+      expect(document).toEqual({ data: article1, included: [] });
+    }),
+  );
 });
 
 describe("Handlers.resolveIncluded — types", () => {
@@ -774,21 +838,23 @@ describe("Handlers.resolveIncluded — types", () => {
     readonly vault: "Vault";
   }
 
-  it("resolves to the union of the targets' resource types", async () => {
-    const resolved = Handlers.resolveIncluded(article, ["author", "comments.author"], {
-      people: () => Effect.succeed([person]),
-      comments: () => Effect.succeed([comment]),
-    });
+  it.effect("resolves to the union of the targets' resource types", () =>
+    Effect.gen(function* () {
+      const resolved = Handlers.resolveIncluded(article, ["author", "comments.author"], {
+        people: () => Effect.succeed([person]),
+        comments: () => Effect.succeed([comment]),
+      });
 
-    expectTypeOf(resolved).toEqualTypeOf<
-      Effect.Effect<ReadonlyArray<typeof Person.Type | typeof Comment.Type> | undefined>
-    >();
+      expectTypeOf(resolved).toEqualTypeOf<
+        Effect.Effect<ReadonlyArray<typeof Person.Type | typeof Comment.Type> | undefined>
+      >();
 
-    const included = await run(resolved);
-    expect(ids(included)).toEqual(["people:9", "comments:5"]);
-    // …and it is exactly what the document builder wants
-    expect(Handlers.data(article, { included }).included).toEqual(included);
-  });
+      const included = yield* resolved;
+      expect(ids(included)).toEqual(["people:9", "comments:5"]);
+      // …and it is exactly what the document builder wants
+      expect(Handlers.data(article, { included }).included).toEqual(included);
+    }),
+  );
 
   it("unions the targets' error and service channels", () => {
     const resolved = Handlers.resolveIncluded(article, ["author", "comments"], {

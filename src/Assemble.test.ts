@@ -5,7 +5,8 @@
  * with its whitelist / depth guards and its batching, and the §8.4
  * relationship document.
  */
-import { describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as P from "effect/Predicate";
@@ -119,8 +120,6 @@ const registry = (known: ReadonlyArray<Assemble.ResourceLike>) => {
   return { calls, targets };
 };
 
-const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
-
 // A free-form resource read from JSON text, as a handler gets one from a
 // database driver, and the JSON text a value serialises to.
 const OpenRecord = Schema.Record(Schema.String, Schema.Unknown);
@@ -140,257 +139,293 @@ const ids = (resources: ReadonlyArray<Assemble.ResourceLike> | undefined) =>
   resources?.map((r) => `${r.type}:${r.id}`);
 
 describe("Assemble.resource", () => {
-  it("wraps a resource in a JSON:API document with the jsonapi member and a self link", async () => {
-    const document = await run(Assemble.resource(person("p1")));
-    expect(document.jsonapi).toEqual({ version: "1.1" });
-    expect(document.data.type).toBe("people");
-    expect(document.data.id).toBe("p1");
-    expect(document.links?.self).toBe("https://example.test/people/p1");
-    expect(document.data.attributes["name"]).toBe("Person p1");
-  });
+  it.effect("wraps a resource in a JSON:API document with the jsonapi member and a self link", () =>
+    Effect.gen(function* () {
+      const document = yield* Assemble.resource(person("p1"));
+      expect(document.jsonapi).toEqual({ version: "1.1" });
+      expect(document.data.type).toBe("people");
+      expect(document.data.id).toBe("p1");
+      expect(document.links?.self).toBe("https://example.test/people/p1");
+      expect(document.data.attributes["name"]).toBe("Person p1");
+    }),
+  );
 
-  it("coerces URL `links.self` and relationship `links.related` to wire strings", async () => {
-    const document = await run(Assemble.resource(person("p1")));
-    expect(P.isString(document.data.links?.self)).toBe(true);
-    const rels = document.data.relationships as Record<string, { links: { related: unknown } }>;
-    expect(rels["birthPlace"]?.links.related).toBe("https://example.test/people/p1/birthPlace");
-    expect(rels["officeHoldings"]?.links.related).toBe(
-      "https://example.test/people/p1/officeHoldings",
-    );
-  });
+  it.effect("coerces URL `links.self` and relationship `links.related` to wire strings", () =>
+    Effect.gen(function* () {
+      const document = yield* Assemble.resource(person("p1"));
+      expect(P.isString(document.data.links?.self)).toBe(true);
+      const rels = document.data.relationships as Record<string, { links: { related: unknown } }>;
+      expect(rels["birthPlace"]?.links.related).toBe("https://example.test/people/p1/birthPlace");
+      expect(rels["officeHoldings"]?.links.related).toBe(
+        "https://example.test/people/p1/officeHoldings",
+      );
+    }),
+  );
 
-  it("stamps canEdit / canDelete per the hook: true for an admin, false for everyone else", async () => {
-    const stamped = (viewer: User | null) =>
-      run(Assemble.resource(person("p1"), { viewer, capabilities: familyCapabilities }));
-    expect((await stamped(ADMIN)).data.meta).toEqual({ canEdit: true, canDelete: true });
-    expect((await stamped(NON_ADMIN)).data.meta).toEqual({ canEdit: false, canDelete: false });
-    expect((await stamped(EDITOR)).data.meta).toEqual({ canEdit: false, canDelete: false });
-    expect((await stamped(null)).data.meta).toEqual({ canEdit: false, canDelete: false });
-  });
+  it.effect(
+    "stamps canEdit / canDelete per the hook: true for an admin, false for everyone else",
+    () =>
+      Effect.gen(function* () {
+        const stamped = (viewer: User | null) =>
+          Assemble.resource(person("p1"), { viewer, capabilities: familyCapabilities });
+        expect((yield* stamped(ADMIN)).data.meta).toEqual({ canEdit: true, canDelete: true });
+        expect((yield* stamped(NON_ADMIN)).data.meta).toEqual({ canEdit: false, canDelete: false });
+        expect((yield* stamped(EDITOR)).data.meta).toEqual({ canEdit: false, canDelete: false });
+        expect((yield* stamped(null)).data.meta).toEqual({ canEdit: false, canDelete: false });
+      }),
+  );
 
-  it("keys the rule off the resource type, so an ingested family is never editable", async () => {
-    const document = await run(
-      Assemble.resource(contest("x"), { viewer: ADMIN, capabilities: familyCapabilities }),
-    );
-    expect(document.data.meta).toEqual({ canEdit: false, canDelete: false });
-  });
+  it.effect("keys the rule off the resource type, so an ingested family is never editable", () =>
+    Effect.gen(function* () {
+      const document = yield* Assemble.resource(contest("x"), {
+        viewer: ADMIN,
+        capabilities: familyCapabilities,
+      });
+      expect(document.data.meta).toEqual({ canEdit: false, canDelete: false });
+    }),
+  );
 
-  it("stamps no meta without a hook, and drops an empty meta for `noCapabilities`", async () => {
-    expect((await run(Assemble.resource(person("p1")))).data).not.toHaveProperty("meta");
-    const none = await run(
-      Assemble.resource(person("p1"), { viewer: ADMIN, capabilities: Assemble.noCapabilities }),
-    );
-    expect(none.data).not.toHaveProperty("meta");
-    // …but a resource's own meta survives, merged under the hook's members.
-    const own = await run(
-      Assemble.resource(
+  it.effect("stamps no meta without a hook, and drops an empty meta for `noCapabilities`", () =>
+    Effect.gen(function* () {
+      expect((yield* Assemble.resource(person("p1"))).data).not.toHaveProperty("meta");
+      const none = yield* Assemble.resource(person("p1"), {
+        viewer: ADMIN,
+        capabilities: Assemble.noCapabilities,
+      });
+      expect(none.data).not.toHaveProperty("meta");
+      // …but a resource's own meta survives, merged under the hook's members.
+      const own = yield* Assemble.resource(
         { ...person("p1"), meta: { score: 1 } },
         { capabilities: adminCapabilities },
-      ),
-    );
-    expect(own.data.meta).toEqual({ score: 1, canEdit: false, canDelete: false });
-  });
+      );
+      expect(own.data.meta).toEqual({ score: 1, canEdit: false, canDelete: false });
+    }),
+  );
 
-  it("applies sparse fieldset projection to attributes, by type", async () => {
-    const projected = await run(Assemble.resource(person("p1"), { fields: { people: ["name"] } }));
-    expect(Object.keys(projected.data.attributes)).toEqual(["name"]);
-    const untouched = await run(Assemble.resource(person("p1"), { fields: { places: ["name"] } }));
-    expect(Object.keys(untouched.data.attributes).length).toBeGreaterThan(1);
-  });
+  it.effect("applies sparse fieldset projection to attributes, by type", () =>
+    Effect.gen(function* () {
+      const projected = yield* Assemble.resource(person("p1"), { fields: { people: ["name"] } });
+      expect(Object.keys(projected.data.attributes)).toEqual(["name"]);
+      const untouched = yield* Assemble.resource(person("p1"), { fields: { places: ["name"] } });
+      expect(Object.keys(untouched.data.attributes).length).toBeGreaterThan(1);
+    }),
+  );
 
-  it("omits top-level links when the resource has no self URL", async () => {
-    expect((await run(Assemble.resource(place))).links).toBeUndefined();
-  });
+  it.effect("omits top-level links when the resource has no self URL", () =>
+    Effect.gen(function* () {
+      expect((yield* Assemble.resource(place)).links).toBeUndefined();
+    }),
+  );
 
-  it("resolves a to-one include into `included`, capability-stamped per type", async () => {
-    const { calls, targets } = registry([place]);
-    const document = await run(
-      Assemble.resource(person("p1"), {
+  it.effect("resolves a to-one include into `included`, capability-stamped per type", () =>
+    Effect.gen(function* () {
+      const { calls, targets } = registry([place]);
+      const document = yield* Assemble.resource(person("p1"), {
         viewer: ADMIN,
         capabilities: familyCapabilities,
         include: ["birthPlace"],
         includable: ["birthPlace"],
         targets,
-      }),
-    );
-    expect(calls).toEqual([{ type: "places", ids: ["place-1"] }]);
-    expect(document.included).toHaveLength(1);
-    expect(document.included?.[0]).toMatchObject({ type: "places", id: "place-1" });
-    expect(document.included?.[0]?.meta).toEqual({ canEdit: true, canDelete: true });
-  });
+      });
+      expect(calls).toEqual([{ type: "places", ids: ["place-1"] }]);
+      expect(document.included).toHaveLength(1);
+      expect(document.included?.[0]).toMatchObject({ type: "places", id: "place-1" });
+      expect(document.included?.[0]?.meta).toEqual({ canEdit: true, canDelete: true });
+    }),
+  );
 
-  it("resolves a to-many include in one loader call per level", async () => {
-    const { calls, targets } = registry([candidate("c-1"), candidate("c-2")]);
-    const document = await run(
-      Assemble.resource(contest("x"), {
+  it.effect("resolves a to-many include in one loader call per level", () =>
+    Effect.gen(function* () {
+      const { calls, targets } = registry([candidate("c-1"), candidate("c-2")]);
+      const document = yield* Assemble.resource(contest("x"), {
         include: ["candidates"],
         includable: ["candidates"],
         targets,
-      }),
-    );
-    expect(calls).toEqual([{ type: "candidates", ids: ["c-1", "c-2"] }]);
-    expect(document.included?.map((r) => r.id)).toEqual(["c-1", "c-2"]);
-  });
+      });
+      expect(calls).toEqual([{ type: "candidates", ids: ["c-1", "c-2"] }]);
+      expect(document.included?.map((r) => r.id)).toEqual(["c-1", "c-2"]);
+    }),
+  );
 
-  it("walks a nested path level by level and drops a ref that does not resolve", async () => {
-    const { targets } = registry([election, event]);
-    const document = await run(
-      Assemble.resource(contest("x"), {
+  it.effect("walks a nested path level by level and drops a ref that does not resolve", () =>
+    Effect.gen(function* () {
+      const { targets } = registry([election, event]);
+      const document = yield* Assemble.resource(contest("x"), {
         include: ["election.electionEvent", "candidates"],
         includable: ["election", "election.electionEvent", "candidates"],
         targets,
-      }),
-    );
-    expect(ids(document.included)).toEqual(["elections:election-1", "election-events:event-1"]);
-  });
+      });
+      expect(ids(document.included)).toEqual(["elections:election-1", "election-events:event-1"]);
+    }),
+  );
 
-  it("walks a second hop off a to-many head, hoisting the whole level, deduplicated", async () => {
-    const { calls, targets } = registry([
-      candidate("c-1", "party-1"),
-      candidate("c-2", "party-1"),
-      party("party-1"),
-    ]);
-    const document = await run(
-      Assemble.resource(contest("x"), {
+  it.effect("walks a second hop off a to-many head, hoisting the whole level, deduplicated", () =>
+    Effect.gen(function* () {
+      const { calls, targets } = registry([
+        candidate("c-1", "party-1"),
+        candidate("c-2", "party-1"),
+        party("party-1"),
+      ]);
+      const document = yield* Assemble.resource(contest("x"), {
         include: ["candidates.party"],
         includable: ["candidates", "candidates.party"],
         targets,
+      });
+      expect(ids(document.included)).toEqual([
+        "candidates:c-1",
+        "candidates:c-2",
+        "parties:party-1",
+      ]);
+      // Two candidates sharing one party is one read of that party, not two.
+      expect(calls.filter((call) => call.type === "parties")).toEqual([
+        { type: "parties", ids: ["party-1"] },
+      ]);
+    }),
+  );
+
+  it.effect("emits no `included` when no include is requested", () =>
+    Effect.gen(function* () {
+      expect(
+        yield* Assemble.resource(person("p1"), { includable: ["birthPlace"] }),
+      ).not.toHaveProperty("included");
+    }),
+  );
+
+  it.effect(
+    "emits `included: []` for `?include=` with no paths: the request carried `include` (#232)",
+    () =>
+      Effect.gen(function* () {
+        // Presence is the signal: `?include=` decodes to `[]`, and a client that
+        // supplied `include`, even empty, gets the compound document's key.
+        expect(
+          (yield* Assemble.resource(person("p1"), { include: [], includable: ["birthPlace"] }))
+            .included,
+        ).toEqual([]);
       }),
-    );
-    expect(ids(document.included)).toEqual(["candidates:c-1", "candidates:c-2", "parties:party-1"]);
-    // Two candidates sharing one party is one read of that party, not two.
-    expect(calls.filter((call) => call.type === "parties")).toEqual([
-      { type: "parties", ids: ["party-1"] },
-    ]);
-  });
+  );
 
-  it("emits no `included` when no include is requested", async () => {
-    expect(
-      await run(Assemble.resource(person("p1"), { includable: ["birthPlace"] })),
-    ).not.toHaveProperty("included");
-  });
-
-  it("emits `included: []` for `?include=` with no paths: the request carried `include` (#232)", async () => {
-    // Presence is the signal: `?include=` decodes to `[]`, and a client that
-    // supplied `include`, even empty, gets the compound document's key.
-    expect(
-      (await run(Assemble.resource(person("p1"), { include: [], includable: ["birthPlace"] })))
-        .included,
-    ).toEqual([]);
-  });
-
-  it("emits `included: []` when include was requested and nothing resolved (#232)", async () => {
-    // §Fetching Includes: a response to a request carrying `include` MUST be a
-    // compound document with an `included` key, even an empty one.
-    const validatedOnly = await run(
-      Assemble.resource(person("p1"), { include: ["birthPlace"], includable: ["birthPlace"] }),
-    );
-    expect(validatedOnly.included).toEqual([]);
-    // A registry that cannot resolve the ref: the walk answers `[]`.
-    const { calls, targets } = registry([party("party-1")]);
-    const unresolved = await run(
-      Assemble.resource(person("p1"), {
+  it.effect("emits `included: []` when include was requested and nothing resolved (#232)", () =>
+    Effect.gen(function* () {
+      // §Fetching Includes: a response to a request carrying `include` MUST be a
+      // compound document with an `included` key, even an empty one.
+      const validatedOnly = yield* Assemble.resource(person("p1"), {
+        include: ["birthPlace"],
+        includable: ["birthPlace"],
+      });
+      expect(validatedOnly.included).toEqual([]);
+      // A registry that cannot resolve the ref: the walk answers `[]`.
+      const { calls, targets } = registry([party("party-1")]);
+      const unresolved = yield* Assemble.resource(person("p1"), {
         include: ["birthPlace"],
         includable: ["birthPlace"],
         targets,
-      }),
-    );
-    expect(calls).toEqual([]);
-    expect(unresolved.included).toEqual([]);
-  });
+      });
+      expect(calls).toEqual([]);
+      expect(unresolved.included).toEqual([]);
+    }),
+  );
 
-  it("rejects an include path outside the whitelist, naming the allowed paths", async () => {
-    const exit = await Effect.runPromiseExit(
-      Assemble.resource(person("p1"), { include: ["candidacies"], includable: ["birthPlace"] }),
-    );
-    expect(Exit.isFailure(exit)).toBe(true);
-    const error = Effect.runSync(
-      Effect.flip(
+  it.effect("rejects an include path outside the whitelist, naming the allowed paths", () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.exit(
         Assemble.resource(person("p1"), { include: ["candidacies"], includable: ["birthPlace"] }),
-      ),
-    );
-    expect(error).toBeInstanceOf(ApiError.UnsupportedIncludePath);
-    expect((error as ApiError.UnsupportedIncludePath).includablePaths).toEqual(["birthPlace"]);
-  });
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+      const error = yield* Effect.flip(
+        Assemble.resource(person("p1"), { include: ["candidacies"], includable: ["birthPlace"] }),
+      );
+      expect(error).toBeInstanceOf(ApiError.UnsupportedIncludePath);
+      expect((error as ApiError.UnsupportedIncludePath).includablePaths).toEqual(["birthPlace"]);
+    }),
+  );
 
-  it("rejects a path deeper than the cap as a depth error, before the whitelist", () => {
-    const deep = Effect.runSync(
-      Effect.flip(Assemble.resource(person("p1"), { include: ["a.b.c.d"], includable: ["a"] })),
-    );
-    expect(deep).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
-    // The 400 names the legal paths, as the membership error does (#512).
-    expect(ApiError.toDocument(deep).errors[0]?.meta).toEqual({
-      path: "a.b.c.d",
-      maxDepth: 3,
-      includablePaths: ["a"],
-    });
-    const shallow = Effect.runSync(
-      Effect.flip(
+  it.effect("rejects a path deeper than the cap as a depth error, before the whitelist", () =>
+    Effect.gen(function* () {
+      const deep = yield* Effect.flip(
+        Assemble.resource(person("p1"), { include: ["a.b.c.d"], includable: ["a"] }),
+      );
+      expect(deep).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
+      // The 400 names the legal paths, as the membership error does (#512).
+      expect(ApiError.toDocument(deep).errors[0]?.meta).toEqual({
+        path: "a.b.c.d",
+        maxDepth: 3,
+        includablePaths: ["a"],
+      });
+      const shallow = yield* Effect.flip(
         Assemble.resource(person("p1"), { include: ["a.b"], includable: ["a"], depth: 1 }),
-      ),
-    );
-    expect(shallow).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
-  });
+      );
+      expect(shallow).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
+    }),
+  );
 
-  it("matches the whole dotted path, not just its head", async () => {
-    const head = Effect.runSync(
-      Effect.flip(
+  it.effect("matches the whole dotted path, not just its head", () =>
+    Effect.gen(function* () {
+      const head = yield* Effect.flip(
         Assemble.resource(contest("x"), {
           include: ["election.electionEvent"],
           includable: ["election"],
         }),
-      ),
-    );
-    expect(head).toBeInstanceOf(ApiError.UnsupportedIncludePath);
-    const { targets } = registry([election, event]);
-    const whole = await run(
-      Assemble.resource(contest("x"), {
+      );
+      expect(head).toBeInstanceOf(ApiError.UnsupportedIncludePath);
+      const { targets } = registry([election, event]);
+      const whole = yield* Assemble.resource(contest("x"), {
         include: ["election.electionEvent"],
         includable: ["election", "election.electionEvent"],
         targets,
-      }),
-    );
-    expect(ids(whole.included)).toEqual(["elections:election-1", "election-events:event-1"]);
-  });
+      });
+      expect(ids(whole.included)).toEqual(["elections:election-1", "election-events:event-1"]);
+    }),
+  );
 });
 
 describe("Assemble.collection", () => {
   const page = [person("a"), person("b"), person("c")];
   const baseUrl = "https://example.test/people";
   const at = (offset: number, limit: number, totalCount: number) =>
-    run(Assemble.collection(page, { totalCount, offset, limit, baseUrl }));
+    Assemble.collection(page, { totalCount, offset, limit, baseUrl });
 
-  it("populates meta.totalCount and the jsonapi member", async () => {
-    const document = await at(0, 10, 42);
-    expect(document.meta.totalCount).toBe(42);
-    expect(document.jsonapi).toEqual({ version: "1.1" });
-  });
+  it.effect("populates meta.totalCount and the jsonapi member", () =>
+    Effect.gen(function* () {
+      const document = yield* at(0, 10, 42);
+      expect(document.meta.totalCount).toBe(42);
+      expect(document.jsonapi).toEqual({ version: "1.1" });
+    }),
+  );
 
-  it("builds first-page links without prev, with next", async () => {
-    const document = await at(0, 10, 100);
-    expect(document.links.first).toContain("page[offset]=0");
-    expect(document.links.next).toContain("page[offset]=10");
-    expect(document.links.prev).toBeNull();
-  });
+  it.effect("builds first-page links without prev, with next", () =>
+    Effect.gen(function* () {
+      const document = yield* at(0, 10, 100);
+      expect(document.links.first).toContain("page[offset]=0");
+      expect(document.links.next).toContain("page[offset]=10");
+      expect(document.links.prev).toBeNull();
+    }),
+  );
 
-  it("builds last-page links with prev, without next", async () => {
-    const document = await at(20, 10, 25);
-    expect(document.links.prev).toContain("page[offset]=10");
-    expect(document.links.next).toBeNull();
-    expect(document.links.last).toContain("page[offset]=20");
-  });
+  it.effect("builds last-page links with prev, without next", () =>
+    Effect.gen(function* () {
+      const document = yield* at(20, 10, 25);
+      expect(document.links.prev).toContain("page[offset]=10");
+      expect(document.links.next).toBeNull();
+      expect(document.links.last).toContain("page[offset]=20");
+    }),
+  );
 
-  it("handles an empty collection by pointing last at offset 0", async () => {
-    const document = await run(
-      Assemble.collection([], { totalCount: 0, offset: 0, limit: 10, baseUrl }),
-    );
-    expect(document.links.last).toContain("page[offset]=0");
-    expect(document.data).toEqual([]);
-  });
+  it.effect("handles an empty collection by pointing last at offset 0", () =>
+    Effect.gen(function* () {
+      const document = yield* Assemble.collection([], {
+        totalCount: 0,
+        offset: 0,
+        limit: 10,
+        baseUrl,
+      });
+      expect(document.links.last).toContain("page[offset]=0");
+      expect(document.data).toEqual([]);
+    }),
+  );
 
-  it("carries the request's other query pairs into every link, cursor last", async () => {
-    const document = await run(
-      Assemble.collection(page, {
+  it.effect("carries the request's other query pairs into every link, cursor last", () =>
+    Effect.gen(function* () {
+      const document = yield* Assemble.collection(page, {
         totalCount: 3,
         offset: 1,
         limit: 1,
@@ -399,136 +434,128 @@ describe("Assemble.collection", () => {
           ["include", "birthPlace"],
           ["filter[q]", "alpha"],
         ],
-      }),
-    );
-    expect(document.links).toEqual({
-      self: "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=1&page[limit]=1",
-      first:
-        "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=0&page[limit]=1",
-      prev: "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=0&page[limit]=1",
-      next: "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=2&page[limit]=1",
-      last: "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=2&page[limit]=1",
-    });
-  });
+      });
+      expect(document.links).toEqual({
+        self: "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=1&page[limit]=1",
+        first:
+          "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=0&page[limit]=1",
+        prev: "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=0&page[limit]=1",
+        next: "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=2&page[limit]=1",
+        last: "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=2&page[limit]=1",
+      });
+    }),
+  );
 
-  it("stamps per-viewer meta on every resource in data", async () => {
-    const document = await run(
-      Assemble.collection(
+  it.effect("stamps per-viewer meta on every resource in data", () =>
+    Effect.gen(function* () {
+      const document = yield* Assemble.collection(
         page,
         { totalCount: 3, offset: 0, limit: 10, baseUrl },
         { viewer: ADMIN, capabilities: familyCapabilities },
-      ),
-    );
-    for (const resource of document.data) {
-      expect(resource.meta).toEqual({ canEdit: true, canDelete: true });
-    }
-  });
+      );
+      for (const resource of document.data) {
+        expect(resource.meta).toEqual({ canEdit: true, canDelete: true });
+      }
+    }),
+  );
 
-  it("emits pre-resolved included members, link-coerced, and omits the member when empty and unrequested", async () => {
-    const withIncluded = await run(
-      Assemble.collection(
-        page,
-        { totalCount: 3, offset: 0, limit: 10, baseUrl },
-        {
-          included: [{ ...place, links: { self: new URL("https://example.test/places/place-1") } }],
-        },
-      ),
-    );
-    expect(withIncluded.included).toHaveLength(1);
-    expect(withIncluded.included?.[0]?.links?.self).toBe("https://example.test/places/place-1");
-    expect((await at(0, 10, 3)).included).toBeUndefined();
-    expect(
-      (
-        await run(
-          Assemble.collection(
+  it.effect(
+    "emits pre-resolved included members, link-coerced, and omits the member when empty and unrequested",
+    () =>
+      Effect.gen(function* () {
+        const withIncluded = yield* Assemble.collection(
+          page,
+          { totalCount: 3, offset: 0, limit: 10, baseUrl },
+          {
+            included: [
+              { ...place, links: { self: new URL("https://example.test/places/place-1") } },
+            ],
+          },
+        );
+        expect(withIncluded.included).toHaveLength(1);
+        expect(withIncluded.included?.[0]?.links?.self).toBe("https://example.test/places/place-1");
+        expect((yield* at(0, 10, 3)).included).toBeUndefined();
+        expect(
+          (yield* Assemble.collection(
             page,
             { totalCount: 3, offset: 0, limit: 10, baseUrl },
             { included: [] },
+          )).included,
+        ).toBeUndefined();
+        // Members that are all primary data, with no `include` on the request:
+        // the dedupe leaves nothing, and there is no request to answer with `[]`.
+        expect(
+          yield* Assemble.collection(
+            [person("a"), place],
+            { totalCount: 2, offset: 0, limit: 10, baseUrl },
+            { included: [place] },
           ),
-        )
-      ).included,
-    ).toBeUndefined();
-    // Members that are all primary data, with no `include` on the request:
-    // the dedupe leaves nothing, and there is no request to answer with `[]`.
-    expect(
-      await run(
-        Assemble.collection(
-          [person("a"), place],
-          { totalCount: 2, offset: 0, limit: 10, baseUrl },
-          { included: [place] },
-        ),
-      ),
-    ).not.toHaveProperty("included");
-  });
+        ).not.toHaveProperty("included");
+      }),
+  );
 
-  it("does not repeat a page member in `included` (#147)", async () => {
-    // A heterogeneous page: `place-1` is a hit in its own right and the
-    // birthplace of the person beside it. The include walk already skips
-    // resources the document holds, so it never loads `place-1`; the repeat
-    // comes only from the caller's own pre-resolved `included`, which is what
-    // the dedupe against primary data has to drop.
-    const { calls, targets } = registry([place]);
-    const document = await run(
-      Assemble.collection(
+  it.effect("does not repeat a page member in `included` (#147)", () =>
+    Effect.gen(function* () {
+      // A heterogeneous page: `place-1` is a hit in its own right and the
+      // birthplace of the person beside it. The include walk already skips
+      // resources the document holds, so it never loads `place-1`; the repeat
+      // comes only from the caller's own pre-resolved `included`, which is what
+      // the dedupe against primary data has to drop.
+      const { calls, targets } = registry([place]);
+      const document = yield* Assemble.collection(
         [person("a"), place],
         { totalCount: 2, offset: 0, limit: 10, baseUrl },
         { included: [place], include: ["birthPlace"], includable: ["birthPlace"], targets },
-      ),
-    );
-    expect(calls).toEqual([]);
-    expect(ids(document.data)).toEqual(["people:a", "places:place-1"]);
-    // Every candidate was a hit, but the request carried `include`, so the
-    // compound document keeps its `included` key, empty (#232).
-    expect(document.included).toEqual([]);
-  });
+      );
+      expect(calls).toEqual([]);
+      expect(ids(document.data)).toEqual(["people:a", "places:place-1"]);
+      // Every candidate was a hit, but the request carried `include`, so the
+      // compound document keeps its `included` key, empty (#232).
+      expect(document.included).toEqual([]);
+    }),
+  );
 
-  it("emits `included: []` when include was requested and nothing resolved (#232)", async () => {
-    const { calls, targets } = registry([]);
-    const document = await run(
-      Assemble.collection(
+  it.effect("emits `included: []` when include was requested and nothing resolved (#232)", () =>
+    Effect.gen(function* () {
+      const { calls, targets } = registry([]);
+      const document = yield* Assemble.collection(
         page,
         { totalCount: 3, offset: 0, limit: 10, baseUrl },
         { include: ["birthPlace"], includable: ["birthPlace"], targets },
-      ),
-    );
-    expect(calls).toEqual([]);
-    expect(document.included).toEqual([]);
-    // An empty page answers the same way.
-    expect(
-      (
-        await run(
-          Assemble.collection(
-            [],
-            { totalCount: 0, offset: 0, limit: 10, baseUrl },
-            { include: ["birthPlace"], includable: ["birthPlace"], targets },
-          ),
-        )
-      ).included,
-    ).toEqual([]);
-  });
+      );
+      expect(calls).toEqual([]);
+      expect(document.included).toEqual([]);
+      // An empty page answers the same way.
+      expect(
+        (yield* Assemble.collection(
+          [],
+          { totalCount: 0, offset: 0, limit: 10, baseUrl },
+          { include: ["birthPlace"], includable: ["birthPlace"], targets },
+        )).included,
+      ).toEqual([]);
+    }),
+  );
 
-  it("emits `included: []` in validate-only mode: include, no registry (#232)", async () => {
-    const pagination = { totalCount: 3, offset: 0, limit: 10, baseUrl };
-    expect(
-      (
-        await run(
-          Assemble.collection(page, pagination, {
-            include: ["birthPlace"],
-            includable: ["birthPlace"],
-          }),
-        )
-      ).included,
-    ).toEqual([]);
-    // `?include=` with no paths is still a request that carried `include`.
-    expect(
-      (await run(Assemble.collection(page, pagination, { include: [], includable: [] }))).included,
-    ).toEqual([]);
-  });
+  it.effect("emits `included: []` in validate-only mode: include, no registry (#232)", () =>
+    Effect.gen(function* () {
+      const pagination = { totalCount: 3, offset: 0, limit: 10, baseUrl };
+      expect(
+        (yield* Assemble.collection(page, pagination, {
+          include: ["birthPlace"],
+          includable: ["birthPlace"],
+        })).included,
+      ).toEqual([]);
+      // `?include=` with no paths is still a request that carried `include`.
+      expect(
+        (yield* Assemble.collection(page, pagination, { include: [], includable: [] })).included,
+      ).toEqual([]);
+    }),
+  );
 
-  it("resolves the page's include walk in one batch per target type, deduplicated", async () => {
-    const { calls, targets } = registry([place]);
-    const document = await run(
-      Assemble.collection(
+  it.effect("resolves the page's include walk in one batch per target type, deduplicated", () =>
+    Effect.gen(function* () {
+      const { calls, targets } = registry([place]);
+      const document = yield* Assemble.collection(
         page,
         { totalCount: 3, offset: 0, limit: 10, baseUrl },
         {
@@ -538,178 +565,174 @@ describe("Assemble.collection", () => {
           includable: ["birthPlace"],
           targets,
         },
-      ),
-    );
-    // Three people share one birthplace: one loader call, one id, one member.
-    expect(calls).toEqual([{ type: "places", ids: ["place-1"] }]);
-    expect(document.included?.map((r) => r.id)).toEqual(["place-1"]);
-    expect(document.included?.[0]?.meta).toEqual({ canEdit: false, canDelete: false });
-  });
+      );
+      // Three people share one birthplace: one loader call, one id, one member.
+      expect(calls).toEqual([{ type: "places", ids: ["place-1"] }]);
+      expect(document.included?.map((r) => r.id)).toEqual(["place-1"]);
+      expect(document.included?.[0]?.meta).toEqual({ canEdit: false, canDelete: false });
+    }),
+  );
 });
 
 describe("Assemble.unpaginatedCollection", () => {
   const whole = [person("a"), person("b"), person("c")];
 
-  it("emits the whole collection with the jsonapi member and no page math", async () => {
-    const document = await run(Assemble.unpaginatedCollection(whole));
-    expect(ids(document.data)).toEqual(["people:a", "people:b", "people:c"]);
-    expect(document.jsonapi).toEqual({ version: "1.1" });
-    expect(document).not.toHaveProperty("links");
-    expect(document).not.toHaveProperty("meta");
-    expect(document).not.toHaveProperty("included");
-    expect((await run(Assemble.unpaginatedCollection([]))).data).toEqual([]);
-  });
+  it.effect("emits the whole collection with the jsonapi member and no page math", () =>
+    Effect.gen(function* () {
+      const document = yield* Assemble.unpaginatedCollection(whole);
+      expect(ids(document.data)).toEqual(["people:a", "people:b", "people:c"]);
+      expect(document.jsonapi).toEqual({ version: "1.1" });
+      expect(document).not.toHaveProperty("links");
+      expect(document).not.toHaveProperty("meta");
+      expect(document).not.toHaveProperty("included");
+      expect((yield* Assemble.unpaginatedCollection([])).data).toEqual([]);
+    }),
+  );
 
-  it("coerces links, stamps per-viewer meta and projects fieldsets on every resource", async () => {
-    const document = await run(
-      Assemble.unpaginatedCollection(whole, {
+  it.effect("coerces links, stamps per-viewer meta and projects fieldsets on every resource", () =>
+    Effect.gen(function* () {
+      const document = yield* Assemble.unpaginatedCollection(whole, {
         viewer: ADMIN,
         capabilities: familyCapabilities,
         fields: { people: ["name"] },
-      }),
-    );
-    expect(document.data.map((resource) => resource.meta)).toEqual(
-      whole.map(() => ({ canEdit: true, canDelete: true })),
-    );
-    expect(document.data.map((resource) => resource.attributes)).toEqual(
-      whole.map((resource) => ({ name: resource.attributes["name"] })),
-    );
-    expect(document.data.map((resource) => resource.links?.self)).toEqual(
-      whole.map((resource) => `https://example.test/people/${resource.id}`),
-    );
-  });
+      });
+      expect(document.data.map((resource) => resource.meta)).toEqual(
+        whole.map(() => ({ canEdit: true, canDelete: true })),
+      );
+      expect(document.data.map((resource) => resource.attributes)).toEqual(
+        whole.map((resource) => ({ name: resource.attributes["name"] })),
+      );
+      expect(document.data.map((resource) => resource.links?.self)).toEqual(
+        whole.map((resource) => `https://example.test/people/${resource.id}`),
+      );
+    }),
+  );
 
-  it("resolves the include walk in one batch per target type, deduplicated", async () => {
-    const { calls, targets } = registry([place]);
-    const document = await run(
-      Assemble.unpaginatedCollection(whole, {
+  it.effect("resolves the include walk in one batch per target type, deduplicated", () =>
+    Effect.gen(function* () {
+      const { calls, targets } = registry([place]);
+      const document = yield* Assemble.unpaginatedCollection(whole, {
         viewer: NON_ADMIN,
         capabilities: familyCapabilities,
         include: ["birthPlace"],
         includable: ["birthPlace"],
         targets,
-      }),
-    );
-    expect(calls).toEqual([{ type: "places", ids: ["place-1"] }]);
-    expect(ids(document.included)).toEqual(["places:place-1"]);
-    expect(document.included?.[0]?.meta).toEqual({ canEdit: false, canDelete: false });
-  });
+      });
+      expect(calls).toEqual([{ type: "places", ids: ["place-1"] }]);
+      expect(ids(document.included)).toEqual(["places:place-1"]);
+      expect(document.included?.[0]?.meta).toEqual({ canEdit: false, canDelete: false });
+    }),
+  );
 
-  it("walks a nested path level by level", async () => {
-    const { targets } = registry([election, event]);
-    const document = await run(
-      Assemble.unpaginatedCollection([contest("x"), contest("y")], {
+  it.effect("walks a nested path level by level", () =>
+    Effect.gen(function* () {
+      const { targets } = registry([election, event]);
+      const document = yield* Assemble.unpaginatedCollection([contest("x"), contest("y")], {
         include: ["election.electionEvent"],
         includable: ["election", "election.electionEvent"],
         targets,
-      }),
-    );
-    expect(ids(document.included)).toEqual(["elections:election-1", "election-events:event-1"]);
-  });
+      });
+      expect(ids(document.included)).toEqual(["elections:election-1", "election-events:event-1"]);
+    }),
+  );
 
-  it("rejects an include path outside the whitelist before any loader runs", async () => {
-    const { calls, targets } = registry([place]);
-    const error = await run(
-      Effect.flip(
+  it.effect("rejects an include path outside the whitelist before any loader runs", () =>
+    Effect.gen(function* () {
+      const { calls, targets } = registry([place]);
+      const error = yield* Effect.flip(
         Assemble.unpaginatedCollection(whole, {
           include: ["candidacies"],
           includable: ["birthPlace"],
           targets,
         }),
-      ),
-    );
-    expect(error).toBeInstanceOf(ApiError.UnsupportedIncludePath);
-    expect(calls).toEqual([]);
-  });
+      );
+      expect(error).toBeInstanceOf(ApiError.UnsupportedIncludePath);
+      expect(calls).toEqual([]);
+    }),
+  );
 
-  it("emits pre-resolved included members, deduplicated against the primary data", async () => {
-    const withIncluded = await run(
-      Assemble.unpaginatedCollection(whole, {
+  it.effect("emits pre-resolved included members, deduplicated against the primary data", () =>
+    Effect.gen(function* () {
+      const withIncluded = yield* Assemble.unpaginatedCollection(whole, {
         included: [{ ...place, links: { self: new URL("https://example.test/places/place-1") } }],
-      }),
-    );
-    expect(withIncluded.included?.[0]?.links?.self).toBe("https://example.test/places/place-1");
-    // `election-1` is primary data and also in the caller's `included`, beside
-    // a candidate the contest links to but the collection doesn't hold. Only
-    // the repeat is dropped: the candidate survives, so the assertion fails
-    // both when the dedupe is lost and when `included` is dropped wholesale.
-    const { calls, targets } = registry([election]);
-    const deduped = await run(
-      Assemble.unpaginatedCollection([contest("x"), election], {
+      });
+      expect(withIncluded.included?.[0]?.links?.self).toBe("https://example.test/places/place-1");
+      // `election-1` is primary data and also in the caller's `included`, beside
+      // a candidate the contest links to but the collection doesn't hold. Only
+      // the repeat is dropped: the candidate survives, so the assertion fails
+      // both when the dedupe is lost and when `included` is dropped wholesale.
+      const { calls, targets } = registry([election]);
+      const deduped = yield* Assemble.unpaginatedCollection([contest("x"), election], {
         included: [election, candidate("c-1")],
         include: ["election"],
         includable: ["election"],
         targets,
-      }),
-    );
-    expect(calls).toEqual([]);
-    expect(ids(deduped.data)).toEqual(["contests:x", "elections:election-1"]);
-    expect(ids(deduped.included)).toEqual(["candidates:c-1"]);
-    expect(await run(Assemble.unpaginatedCollection(whole, { included: [] }))).not.toHaveProperty(
-      "included",
-    );
-  });
+      });
+      expect(calls).toEqual([]);
+      expect(ids(deduped.data)).toEqual(["contests:x", "elections:election-1"]);
+      expect(ids(deduped.included)).toEqual(["candidates:c-1"]);
+      expect(yield* Assemble.unpaginatedCollection(whole, { included: [] })).not.toHaveProperty(
+        "included",
+      );
+    }),
+  );
 
-  it("emits `included: []` when include was requested and nothing remains (#232)", async () => {
-    const { calls, targets } = registry([]);
-    const unresolved = await run(
-      Assemble.unpaginatedCollection(whole, {
+  it.effect("emits `included: []` when include was requested and nothing remains (#232)", () =>
+    Effect.gen(function* () {
+      const { calls, targets } = registry([]);
+      const unresolved = yield* Assemble.unpaginatedCollection(whole, {
         include: ["birthPlace"],
         includable: ["birthPlace"],
         targets,
-      }),
-    );
-    expect(calls).toEqual([]);
-    expect(unresolved.included).toEqual([]);
-    // Every candidate is already primary data: the dedupe leaves nothing, and
-    // the key stays.
-    const deduped = await run(
-      Assemble.unpaginatedCollection([contest("x"), election], {
+      });
+      expect(calls).toEqual([]);
+      expect(unresolved.included).toEqual([]);
+      // Every candidate is already primary data: the dedupe leaves nothing, and
+      // the key stays.
+      const deduped = yield* Assemble.unpaginatedCollection([contest("x"), election], {
         included: [election],
         include: ["election"],
         includable: ["election"],
         targets,
-      }),
-    );
-    expect(ids(deduped.data)).toEqual(["contests:x", "elections:election-1"]);
-    expect(deduped.included).toEqual([]);
-  });
+      });
+      expect(ids(deduped.data)).toEqual(["contests:x", "elections:election-1"]);
+      expect(deduped.included).toEqual([]);
+    }),
+  );
 
-  it("emits `included: []` in validate-only mode: include, no registry (#232)", async () => {
-    expect(
-      (
-        await run(
-          Assemble.unpaginatedCollection(whole, {
-            include: ["birthPlace"],
-            includable: ["birthPlace"],
-          }),
-        )
-      ).included,
-    ).toEqual([]);
-    expect(
-      (await run(Assemble.unpaginatedCollection(whole, { include: [], includable: [] }))).included,
-    ).toEqual([]);
-  });
+  it.effect("emits `included: []` in validate-only mode: include, no registry (#232)", () =>
+    Effect.gen(function* () {
+      expect(
+        (yield* Assemble.unpaginatedCollection(whole, {
+          include: ["birthPlace"],
+          includable: ["birthPlace"],
+        })).included,
+      ).toEqual([]);
+      expect(
+        (yield* Assemble.unpaginatedCollection(whole, { include: [], includable: [] })).included,
+      ).toEqual([]);
+    }),
+  );
 
-  it("assembles what `collection` does, less its links and meta", async () => {
-    const options = {
-      viewer: NON_ADMIN,
-      capabilities: familyCapabilities,
-      include: ["birthPlace"],
-      includable: ["birthPlace"],
-      targets: registry([place]).targets,
-    };
-    const { links, meta, ...paged } = await run(
-      Assemble.collection(
+  it.effect("assembles what `collection` does, less its links and meta", () =>
+    Effect.gen(function* () {
+      const options = {
+        viewer: NON_ADMIN,
+        capabilities: familyCapabilities,
+        include: ["birthPlace"],
+        includable: ["birthPlace"],
+        targets: registry([place]).targets,
+      };
+      const { links, meta, ...paged } = yield* Assemble.collection(
         whole,
         { totalCount: 3, offset: 0, limit: 10, baseUrl: "https://example.test/people" },
         options,
-      ),
-    );
-    expect(links.self).toBeDefined();
-    expect(meta.totalCount).toBe(3);
-    expect(await run(Assemble.unpaginatedCollection(whole, options))).toEqual(paged);
-  });
+      );
+      expect(links.self).toBeDefined();
+      expect(meta.totalCount).toBe(3);
+      expect(yield* Assemble.unpaginatedCollection(whole, options)).toEqual(paged);
+    }),
+  );
 
   describe("with a `self` link (#242)", () => {
     const self = "https://example.test/people";
@@ -719,68 +742,78 @@ describe("Assemble.unpaginatedCollection", () => {
       ["sort", "-name"],
     ];
 
-    it("emits `links.self` and nothing else at the top level", async () => {
-      const document = await run(Assemble.unpaginatedCollection(whole, { self }));
-      expect(document.links).toEqual({ self });
-      expect(document).not.toHaveProperty("meta");
-      expect(ids(document.data)).toEqual(["people:a", "people:b", "people:c"]);
-      expect(document.jsonapi).toEqual({ version: "1.1" });
-    });
+    it.effect("emits `links.self` and nothing else at the top level", () =>
+      Effect.gen(function* () {
+        const document = yield* Assemble.unpaginatedCollection(whole, { self });
+        expect(document.links).toEqual({ self });
+        expect(document).not.toHaveProperty("meta");
+        expect(ids(document.data)).toEqual(["people:a", "people:b", "people:c"]);
+        expect(document.jsonapi).toEqual({ version: "1.1" });
+      }),
+    );
 
-    it("carries the query on `self`, canonicalised as `collection`'s links are", async () => {
-      const document = await run(Assemble.unpaginatedCollection(whole, { self, query }));
-      expect(document.links.self).toBe(
-        `${self}?include=birthPlace&filter[q]=Ada%20Lovelace%2C%20%26%20co&sort=-name`,
-      );
-      expect(document.links.self).toBe(`${self}?${Query.serialise(query)}`);
-      // The paginated form serialises the same pairs the same way, its page
-      // cursor appended after them.
-      const paged = await run(
-        Assemble.collection(whole, { totalCount: 3, offset: 0, limit: 10, baseUrl: self, query }),
-      );
-      expect(paged.links.first).toBe(`${document.links.self}&page[offset]=0&page[limit]=10`);
-      // An empty query leaves `self` as given; a `self` that has a query
-      // string of its own is extended rather than given a second `?`.
-      expect((await run(Assemble.unpaginatedCollection(whole, { self, query: [] }))).links).toEqual(
-        { self },
-      );
-      expect(
-        (
-          await run(
-            Assemble.unpaginatedCollection(whole, {
-              self: `${self}?locale=en`,
-              query: [["sort", "name"]],
-            }),
-          )
-        ).links.self,
-      ).toBe(`${self}?locale=en&sort=name`);
-    });
+    it.effect("carries the query on `self`, canonicalised as `collection`'s links are", () =>
+      Effect.gen(function* () {
+        const document = yield* Assemble.unpaginatedCollection(whole, { self, query });
+        expect(document.links.self).toBe(
+          `${self}?include=birthPlace&filter[q]=Ada%20Lovelace%2C%20%26%20co&sort=-name`,
+        );
+        expect(document.links.self).toBe(`${self}?${Query.serialise(query)}`);
+        // The paginated form serialises the same pairs the same way, its page
+        // cursor appended after them.
+        const paged = yield* Assemble.collection(whole, {
+          totalCount: 3,
+          offset: 0,
+          limit: 10,
+          baseUrl: self,
+          query,
+        });
+        expect(paged.links.first).toBe(`${document.links.self}&page[offset]=0&page[limit]=10`);
+        // An empty query leaves `self` as given; a `self` that has a query
+        // string of its own is extended rather than given a second `?`.
+        expect((yield* Assemble.unpaginatedCollection(whole, { self, query: [] })).links).toEqual({
+          self,
+        });
+        expect(
+          (yield* Assemble.unpaginatedCollection(whole, {
+            self: `${self}?locale=en`,
+            query: [["sort", "name"]],
+          })).links.self,
+        ).toBe(`${self}?locale=en&sort=name`);
+      }),
+    );
 
-    it("emits exactly the linkless document when `self` is absent", async () => {
-      const options = {
-        viewer: NON_ADMIN,
-        capabilities: familyCapabilities,
-        include: ["birthPlace"],
-        includable: ["birthPlace"],
-        targets: registry([place]).targets,
-      };
-      const linkless = await run(Assemble.unpaginatedCollection(whole, options));
-      // A `self` the handler turns out not to have (typed `string | undefined`,
-      // as an optional threaded through would be) drops the query with the link.
-      const absentSelf = [self].find((url) => url.startsWith("ftp:"));
-      const dropped = await run(
-        Assemble.unpaginatedCollection(whole, { ...options, self: absentSelf, query }),
-      );
-      expect(dropped).not.toHaveProperty("links");
-      expect(dropped).toStrictEqual(linkless);
-      // With `self`, the document is the linkless one plus `links` — the
-      // rest is untouched.
-      const { links, ...rest } = await run(
-        Assemble.unpaginatedCollection(whole, { ...options, self, query }),
-      );
-      expect(links.self).toBe(`${self}?${Query.serialise(query)}`);
-      expect(rest).toStrictEqual(linkless);
-    });
+    it.effect("emits exactly the linkless document when `self` is absent", () =>
+      Effect.gen(function* () {
+        const options = {
+          viewer: NON_ADMIN,
+          capabilities: familyCapabilities,
+          include: ["birthPlace"],
+          includable: ["birthPlace"],
+          targets: registry([place]).targets,
+        };
+        const linkless = yield* Assemble.unpaginatedCollection(whole, options);
+        // A `self` the handler turns out not to have (typed `string | undefined`,
+        // as an optional threaded through would be) drops the query with the link.
+        const absentSelf = [self].find((url) => url.startsWith("ftp:"));
+        const dropped = yield* Assemble.unpaginatedCollection(whole, {
+          ...options,
+          self: absentSelf,
+          query,
+        });
+        expect(dropped).not.toHaveProperty("links");
+        expect(dropped).toStrictEqual(linkless);
+        // With `self`, the document is the linkless one plus `links` — the
+        // rest is untouched.
+        const { links, ...rest } = yield* Assemble.unpaginatedCollection(whole, {
+          ...options,
+          self,
+          query,
+        });
+        expect(links.self).toBe(`${self}?${Query.serialise(query)}`);
+        expect(rest).toStrictEqual(linkless);
+      }),
+    );
   });
 
   describe("with a top-level `meta` (#253)", () => {
@@ -794,47 +827,58 @@ describe("Assemble.unpaginatedCollection", () => {
       targets: registry([place]).targets,
     };
 
-    it("emits `meta` as given, beside the per-resource meta it doesn't touch", async () => {
-      const document = await run(Assemble.unpaginatedCollection(whole, { ...options, meta }));
-      expect(document.meta).toStrictEqual(meta);
-      expect(document).not.toHaveProperty("links");
-      expect(document.data.map((resource) => resource.meta)).toEqual(
-        whole.map(() => ({ canEdit: false, canDelete: false })),
-      );
-      // No page math is added to it: a total is `Assemble.collection`'s.
-      expect(document.meta).not.toHaveProperty("totalCount");
-    });
+    it.effect("emits `meta` as given, beside the per-resource meta it doesn't touch", () =>
+      Effect.gen(function* () {
+        const document = yield* Assemble.unpaginatedCollection(whole, { ...options, meta });
+        expect(document.meta).toStrictEqual(meta);
+        expect(document).not.toHaveProperty("links");
+        expect(document.data.map((resource) => resource.meta)).toEqual(
+          whole.map(() => ({ canEdit: false, canDelete: false })),
+        );
+        // No page math is added to it: a total is `Assemble.collection`'s.
+        expect(document.meta).not.toHaveProperty("totalCount");
+      }),
+    );
 
-    it("is the meta-less document plus `meta`, with or without `self`", async () => {
-      const bare = await run(Assemble.unpaginatedCollection(whole, options));
-      const { meta: emitted, ...rest } = await run(
-        Assemble.unpaginatedCollection(whole, { ...options, meta }),
-      );
-      expect(emitted).toStrictEqual(meta);
-      expect(rest).toStrictEqual(bare);
+    it.effect("is the meta-less document plus `meta`, with or without `self`", () =>
+      Effect.gen(function* () {
+        const bare = yield* Assemble.unpaginatedCollection(whole, options);
+        const { meta: emitted, ...rest } = yield* Assemble.unpaginatedCollection(whole, {
+          ...options,
+          meta,
+        });
+        expect(emitted).toStrictEqual(meta);
+        expect(rest).toStrictEqual(bare);
 
-      const query: ReadonlyArray<Query.Pair> = [["sort", "-name"]];
-      const linked = await run(Assemble.unpaginatedCollection(whole, { ...options, self, query }));
-      const { meta: linkedMeta, ...linkedRest } = await run(
-        Assemble.unpaginatedCollection(whole, { ...options, self, query, meta }),
-      );
-      expect(linkedMeta).toStrictEqual(meta);
-      expect(linkedRest).toStrictEqual(linked);
-      expect(linkedRest.links.self).toBe(`${self}?sort=-name`);
-    });
+        const query: ReadonlyArray<Query.Pair> = [["sort", "-name"]];
+        const linked = yield* Assemble.unpaginatedCollection(whole, { ...options, self, query });
+        const { meta: linkedMeta, ...linkedRest } = yield* Assemble.unpaginatedCollection(whole, {
+          ...options,
+          self,
+          query,
+          meta,
+        });
+        expect(linkedMeta).toStrictEqual(meta);
+        expect(linkedRest).toStrictEqual(linked);
+        expect(linkedRest.links.self).toBe(`${self}?sort=-name`);
+      }),
+    );
 
-    it("emits exactly the meta-less document when `meta` is absent", async () => {
-      const bare = await run(Assemble.unpaginatedCollection(whole, options));
-      expect(bare).not.toHaveProperty("meta");
-      // A `meta` the handler turns out not to have (typed `… | undefined`,
-      // as an optional threaded through would be) adds no member.
-      const absentMeta = [meta].find((value) => value.generatedAt === "");
-      const dropped = await run(
-        Assemble.unpaginatedCollection(whole, { ...options, meta: absentMeta }),
-      );
-      expect(dropped).not.toHaveProperty("meta");
-      expect(dropped).toStrictEqual(bare);
-    });
+    it.effect("emits exactly the meta-less document when `meta` is absent", () =>
+      Effect.gen(function* () {
+        const bare = yield* Assemble.unpaginatedCollection(whole, options);
+        expect(bare).not.toHaveProperty("meta");
+        // A `meta` the handler turns out not to have (typed `… | undefined`,
+        // as an optional threaded through would be) adds no member.
+        const absentMeta = [meta].find((value) => value.generatedAt === "");
+        const dropped = yield* Assemble.unpaginatedCollection(whole, {
+          ...options,
+          meta: absentMeta,
+        });
+        expect(dropped).not.toHaveProperty("meta");
+        expect(dropped).toStrictEqual(bare);
+      }),
+    );
   });
 });
 
@@ -943,91 +987,107 @@ describe("Assemble.collection linkTotal / lastUnknown (#569)", () => {
   const page = [person("a"), person("b"), person("c")];
   const baseUrl = "https://example.test/people";
   const at = (offset: number, extra: { linkTotal?: number; lastUnknown?: boolean }, total = 42) =>
-    run(Assemble.collection(page, { totalCount: total, offset, limit: 3, baseUrl, ...extra }));
+    Assemble.collection(page, { totalCount: total, offset, limit: 3, baseUrl, ...extra });
 
-  it("leaves the default unchanged", async () => {
-    const document = await at(0, {});
-    expect(document.links.last).toBe(`${baseUrl}?page[offset]=39&page[limit]=3`);
-    expect(document.links.next).toBe(`${baseUrl}?page[offset]=3&page[limit]=3`);
-  });
+  it.effect("leaves the default unchanged", () =>
+    Effect.gen(function* () {
+      const document = yield* at(0, {});
+      expect(document.links.last).toBe(`${baseUrl}?page[offset]=39&page[limit]=3`);
+      expect(document.links.next).toBe(`${baseUrl}?page[offset]=3&page[limit]=3`);
+    }),
+  );
 
-  it("computes next / last from linkTotal while meta.totalCount keeps totalCount", async () => {
-    const document = await at(3, { linkTotal: 6 });
-    expect(document.meta.totalCount).toBe(42);
-    expect(document.links.next).toBeNull();
-    expect(document.links.last).toBe(`${baseUrl}?page[offset]=3&page[limit]=3`);
-  });
+  it.effect("computes next / last from linkTotal while meta.totalCount keeps totalCount", () =>
+    Effect.gen(function* () {
+      const document = yield* at(3, { linkTotal: 6 });
+      expect(document.meta.totalCount).toBe(42);
+      expect(document.links.next).toBeNull();
+      expect(document.links.last).toBe(`${baseUrl}?page[offset]=3&page[limit]=3`);
+    }),
+  );
 
-  it("omits last when lastUnknown, keeping the other links exact", async () => {
-    const document = await at(3, { lastUnknown: true });
-    expect("last" in document.links).toBe(false);
-    expect(document.links.self).toBe(`${baseUrl}?page[offset]=3&page[limit]=3`);
-    expect(document.links.first).toBe(`${baseUrl}?page[offset]=0&page[limit]=3`);
-    expect(document.links.prev).toBe(`${baseUrl}?page[offset]=0&page[limit]=3`);
-    expect(document.links.next).toBe(`${baseUrl}?page[offset]=6&page[limit]=3`);
-  });
+  it.effect("omits last when lastUnknown, keeping the other links exact", () =>
+    Effect.gen(function* () {
+      const document = yield* at(3, { lastUnknown: true });
+      expect("last" in document.links).toBe(false);
+      expect(document.links.self).toBe(`${baseUrl}?page[offset]=3&page[limit]=3`);
+      expect(document.links.first).toBe(`${baseUrl}?page[offset]=0&page[limit]=3`);
+      expect(document.links.prev).toBe(`${baseUrl}?page[offset]=0&page[limit]=3`);
+      expect(document.links.next).toBe(`${baseUrl}?page[offset]=6&page[limit]=3`);
+    }),
+  );
 
-  it("keeps last when lastUnknown is false", async () => {
-    expect("last" in (await at(0, { lastUnknown: false })).links).toBe(true);
-  });
+  it.effect("keeps last when lastUnknown is false", () =>
+    Effect.gen(function* () {
+      expect("last" in (yield* at(0, { lastUnknown: false })).links).toBe(true);
+    }),
+  );
 
-  it("omits last on an unpageable window too", async () => {
-    const document = await run(
-      Assemble.collection(page, { totalCount: 5, offset: 0, limit: 0, baseUrl, lastUnknown: true }),
-    );
-    expect("last" in document.links).toBe(false);
-  });
+  it.effect("omits last on an unpageable window too", () =>
+    Effect.gen(function* () {
+      const document = yield* Assemble.collection(page, {
+        totalCount: 5,
+        offset: 0,
+        limit: 0,
+        baseUrl,
+        lastUnknown: true,
+      });
+      expect("last" in document.links).toBe(false);
+    }),
+  );
 
-  it.each([
+  it.effect.each([
     { hasMore: true, next: true },
     { hasMore: false, next: false },
-  ])("serves the search formula (hasMore $hasMore)", async ({ hasMore, next }) => {
-    const offset = 3;
-    const document = await at(
-      offset,
-      { linkTotal: offset + page.length + (hasMore ? 1 : 0), lastUnknown: true },
-      page.length,
-    );
-    expect(document.links.next).toBe(next ? `${baseUrl}?page[offset]=6&page[limit]=3` : null);
-    expect("last" in document.links).toBe(false);
-    expect(document.meta.totalCount).toBe(3);
-  });
+  ])("serves the search formula (hasMore $hasMore)", ({ hasMore, next }) =>
+    Effect.gen(function* () {
+      const offset = 3;
+      const document = yield* at(
+        offset,
+        { linkTotal: offset + page.length + (hasMore ? 1 : 0), lastUnknown: true },
+        page.length,
+      );
+      expect(document.links.next).toBe(next ? `${baseUrl}?page[offset]=6&page[limit]=3` : null);
+      expect("last" in document.links).toBe(false);
+      expect(document.meta.totalCount).toBe(3);
+    }),
+  );
 
-  it("carries both through edgePage", async () => {
-    const document = await run(
-      Assemble.edgePage(
+  it.effect("carries both through edgePage", () =>
+    Effect.gen(function* () {
+      const document = yield* Assemble.edgePage(
         "contributions",
         { items: [person("a")], totalCount: 100 },
         { limit: 1, offset: 0, linkTotal: 1, lastUnknown: true },
         "https://example.test",
-      ),
-    );
-    expect(document.meta.totalCount).toBe(100);
-    expect(document.links.next).toBeNull();
-    expect("last" in document.links).toBe(false);
-  });
+      );
+      expect(document.meta.totalCount).toBe(100);
+      expect(document.links.next).toBeNull();
+      expect("last" in document.links).toBe(false);
+    }),
+  );
 });
 
 describe("Assemble.edgePage", () => {
-  it("assembles a capability-free page under <base>/<segment>", async () => {
-    const document = await run(
-      Assemble.edgePage(
+  it.effect("assembles a capability-free page under <base>/<segment>", () =>
+    Effect.gen(function* () {
+      const document = yield* Assemble.edgePage(
         "contributions",
         { items: [person("a")], totalCount: 7 },
         { limit: 1, offset: 0 },
         "https://example.test",
         ADMIN,
-      ),
-    );
-    expect(document.links.self).toBe(
-      "https://example.test/contributions?page[offset]=0&page[limit]=1",
-    );
-    expect(document.data[0]).not.toHaveProperty("meta");
-    expect(document.meta.totalCount).toBe(7);
-  });
-  it("carries the request's other query pairs on every link (#569)", async () => {
-    const document = await run(
-      Assemble.edgePage(
+      );
+      expect(document.links.self).toBe(
+        "https://example.test/contributions?page[offset]=0&page[limit]=1",
+      );
+      expect(document.data[0]).not.toHaveProperty("meta");
+      expect(document.meta.totalCount).toBe(7);
+    }),
+  );
+  it.effect("carries the request's other query pairs on every link (#569)", () =>
+    Effect.gen(function* () {
+      const document = yield* Assemble.edgePage(
         "contributions",
         { items: [person("a")], totalCount: 3 },
         {
@@ -1039,19 +1099,19 @@ describe("Assemble.edgePage", () => {
           ],
         },
         "https://example.test",
-      ),
-    );
-    const tail = "filter[role]=author&sort=-createdAt";
-    expect(document.links.self).toBe(
-      `https://example.test/contributions?${tail}&page[offset]=1&page[limit]=1`,
-    );
-    expect(document.links.next).toBe(
-      `https://example.test/contributions?${tail}&page[offset]=2&page[limit]=1`,
-    );
-    expect(document.links.prev).toBe(
-      `https://example.test/contributions?${tail}&page[offset]=0&page[limit]=1`,
-    );
-  });
+      );
+      const tail = "filter[role]=author&sort=-createdAt";
+      expect(document.links.self).toBe(
+        `https://example.test/contributions?${tail}&page[offset]=1&page[limit]=1`,
+      );
+      expect(document.links.next).toBe(
+        `https://example.test/contributions?${tail}&page[offset]=2&page[limit]=1`,
+      );
+      expect(document.links.prev).toBe(
+        `https://example.test/contributions?${tail}&page[offset]=0&page[limit]=1`,
+      );
+    }),
+  );
 });
 
 describe("helpers", () => {
@@ -1115,9 +1175,9 @@ describe("helpers", () => {
     expect(toJson(linked.attributes)).toBe('{"__proto__":{"at":"https://example.test/a"}}');
   });
 
-  it("carries a __proto__ member through an assembled document's attributes and meta", async () => {
-    const document = await run(
-      Assemble.resource(
+  it.effect("carries a __proto__ member through an assembled document's attributes and meta", () =>
+    Effect.gen(function* () {
+      const document = yield* Assemble.resource(
         Assemble.toWireSafeResource(
           parseResource(
             '{"type":"things","id":"1","attributes":{"__proto__":{"inner":2},"title":"T","hidden":0},' +
@@ -1125,18 +1185,18 @@ describe("helpers", () => {
           ),
         ),
         { fields: { things: ["__proto__", "title"] } },
-      ),
-    );
-    const { attributes, meta } = document.data;
-    expect(Object.getPrototypeOf(attributes)).toBe(Object.prototype);
-    expect(Object.getOwnPropertyNames(attributes)).toEqual(["__proto__", "title"]);
-    expect(Object.getPrototypeOf(meta)).toBe(Object.prototype);
-    expect(toJson(document.data)).toBe(
-      '{"type":"things","id":"1","attributes":{"__proto__":{"inner":2},"title":"T"},' +
-        '"meta":{"__proto__":{"source":"driver"}}}',
-    );
-    expect(Object.hasOwn(Object.prototype, "inner")).toBe(false);
-  });
+      );
+      const { attributes, meta } = document.data;
+      expect(Object.getPrototypeOf(attributes)).toBe(Object.prototype);
+      expect(Object.getOwnPropertyNames(attributes)).toEqual(["__proto__", "title"]);
+      expect(Object.getPrototypeOf(meta)).toBe(Object.prototype);
+      expect(toJson(document.data)).toBe(
+        '{"type":"things","id":"1","attributes":{"__proto__":{"inner":2},"title":"T"},' +
+          '"meta":{"__proto__":{"source":"driver"}}}',
+      );
+      expect(Object.hasOwn(Object.prototype, "inner")).toBe(false);
+    }),
+  );
 
   // The copy defines `__proto__` and assigns every other key; a name that
   // `Object.prototype` carries (or that a function does) is still an own

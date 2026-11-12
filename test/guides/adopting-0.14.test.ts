@@ -11,7 +11,8 @@
  * cannot describe a call shape that does not compile or a property that does
  * not hold.
  */
-import { describe, expect, it, onTestFinished } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { describe, expect, onTestFinished } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -139,61 +140,68 @@ const entries = [
 ];
 
 describe("2. Handlers.resolveIncluded replaces planIncludes / include-targets", () => {
-  it("is one loader call per type per level, deduplicated against the document", async () => {
-    const calls: Array<{ readonly type: string; readonly ids: ReadonlyArray<string> }> = [];
-    // ONE registry, keyed by JSON:API `type` — website's INCLUDE_TARGETS,
-    // each entry the family's own batched `getMany`.
-    const targets = {
-      bibliographies: (ids: ReadonlyArray<string>) => {
-        calls.push({ type: "bibliographies", ids });
-        return Effect.succeed([bibliography].filter((b) => ids.includes(b.id)));
-      },
-      "bibliography-entries": (ids: ReadonlyArray<string>) => {
-        calls.push({ type: "bibliography-entries", ids });
-        return Effect.succeed(entries.filter((e) => ids.includes(e.id)));
-      },
-    } satisfies Handlers.IncludeTargets;
+  it.effect("is one loader call per type per level, deduplicated against the document", () =>
+    Effect.gen(function* () {
+      const calls: Array<{ readonly type: string; readonly ids: ReadonlyArray<string> }> = [];
+      // ONE registry, keyed by JSON:API `type` — website's INCLUDE_TARGETS,
+      // each entry the family's own batched `getMany`.
+      const targets = {
+        bibliographies: (ids: ReadonlyArray<string>) => {
+          calls.push({ type: "bibliographies", ids });
+          return Effect.succeed([bibliography].filter((b) => ids.includes(b.id)));
+        },
+        "bibliography-entries": (ids: ReadonlyArray<string>) => {
+          calls.push({ type: "bibliography-entries", ids });
+          return Effect.succeed(entries.filter((e) => ids.includes(e.id)));
+        },
+      } satisfies Handlers.IncludeTargets;
 
-    const included = await Effect.runPromise(
-      Handlers.resolveIncluded(bibliography, ["entries", "entries.bibliography"], targets, {
-        concurrency: 4,
-        depth: 3, // website's MAX_INCLUDE_DEPTH — the package default, spelled out
-      }),
-    );
-    // walk order, one entry per (type, id); the bibliography is the primary
-    // resource, so the second hop resolves back into the document and adds
-    // nothing to `included`
-    expect(included?.map((r) => `${r.type}:${r.id}`)).toEqual([
-      "bibliography-entries:e1",
-      "bibliography-entries:e2",
-    ]);
-    // one batched call for the two entries; the second level asks for
-    // nothing, because `b1` is already in the document
-    expect(calls).toEqual([{ type: "bibliography-entries", ids: ["e1", "e2"] }]);
-  });
+      const included = yield* Handlers.resolveIncluded(
+        bibliography,
+        ["entries", "entries.bibliography"],
+        targets,
+        {
+          concurrency: 4,
+          depth: 3, // website's MAX_INCLUDE_DEPTH — the package default, spelled out
+        },
+      );
+      // walk order, one entry per (type, id); the bibliography is the primary
+      // resource, so the second hop resolves back into the document and adds
+      // nothing to `included`
+      expect(included?.map((r) => `${r.type}:${r.id}`)).toEqual([
+        "bibliography-entries:e1",
+        "bibliography-entries:e2",
+      ]);
+      // one batched call for the two entries; the second level asks for
+      // nothing, because `b1` is already in the document
+      expect(calls).toEqual([{ type: "bibliography-entries", ids: ["e1", "e2"] }]);
+    }),
+  );
 
-  it("returns `undefined` when nothing was asked for, so the member is omitted", async () => {
-    const included = await Effect.runPromise(Handlers.resolveIncluded(bibliography, undefined, {}));
-    expect(included).toBeUndefined();
-    expect("included" in Handlers.data(bibliography, { included })).toBe(false);
-  });
+  it.effect("returns `undefined` when nothing was asked for, so the member is omitted", () =>
+    Effect.gen(function* () {
+      const included = yield* Handlers.resolveIncluded(bibliography, undefined, {});
+      expect(included).toBeUndefined();
+      expect("included" in Handlers.data(bibliography, { included })).toBe(false);
+    }),
+  );
 
-  it("validates runtime paths against the surface with Query.validateIncludePaths", async () => {
-    const rejected = await Effect.runPromise(
-      Query.validateIncludePaths(["entries.nope"], {
+  it.effect("validates runtime paths against the surface with Query.validateIncludePaths", () =>
+    Effect.gen(function* () {
+      const rejected = yield* Query.validateIncludePaths(["entries.nope"], {
         includable: BIBLIOGRAPHY_INCLUDE.paths,
         maxDepth: 3,
-      }).pipe(Effect.flip),
-    );
-    expect(rejected).toBeInstanceOf(ApiError.UnsupportedIncludePath);
-    // the 400 carries the whole legal set — website #1623's `allowed`
-    expect(ApiError.toDocument(rejected).errors[0]?.meta).toEqual({
-      path: "entries.nope",
-      includablePaths: ["entries", "entries.bibliography"],
-    });
-    // and names the rejected parameter, as the decode-time 400 does
-    expect(ApiError.toDocument(rejected).errors[0]?.source).toEqual({ parameter: "include" });
-  });
+      }).pipe(Effect.flip);
+      expect(rejected).toBeInstanceOf(ApiError.UnsupportedIncludePath);
+      // the 400 carries the whole legal set — website #1623's `allowed`
+      expect(ApiError.toDocument(rejected).errors[0]?.meta).toEqual({
+        path: "entries.nope",
+        includablePaths: ["entries", "entries.bibliography"],
+      });
+      // and names the rejected parameter, as the decode-time 400 does
+      expect(ApiError.toDocument(rejected).errors[0]?.source).toEqual({ parameter: "include" });
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -252,18 +260,18 @@ describe("4. Client.errorDocument / errorMessage replace decodeErrorBody / error
     );
   });
 
-  it("reads the document off a failed call, or none for a transport fault", async () => {
-    const message = (cause: unknown) =>
-      Effect.map(Client.errorDocument(cause), (document) =>
-        Option.match(document, {
-          onNone: () => "Request could not be completed",
-          onSome: Client.errorMessage,
-        }),
-      );
-    expect(await Effect.runPromise(message(new Error("offline")))).toBe(
-      "Request could not be completed",
-    );
-  });
+  it.effect("reads the document off a failed call, or none for a transport fault", () =>
+    Effect.gen(function* () {
+      const message = (cause: unknown) =>
+        Effect.map(Client.errorDocument(cause), (document) =>
+          Option.match(document, {
+            onNone: () => "Request could not be completed",
+            onSome: Client.errorMessage,
+          }),
+        );
+      expect(yield* message(new Error("offline"))).toBe("Request could not be completed");
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------

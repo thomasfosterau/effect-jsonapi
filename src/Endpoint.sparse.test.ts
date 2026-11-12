@@ -13,7 +13,8 @@
  * An endpoint without `fields` keeps exactly the document it had. The
  * type-level half is `test/sparse-default.types.ts`.
  */
-import { describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -823,9 +824,9 @@ describe("a projected answer over HTTP (#322)", () => {
     }).pipe(Effect.orDie),
   );
 
-  it("decodes the projected documents through `HttpApiClient`", async () => {
-    const [single, many, related] = await Effect.runPromise(
-      Effect.gen(function* () {
+  it.effect("decodes the projected documents through `HttpApiClient`", () =>
+    Effect.gen(function* () {
+      const [single, many, related] = yield* Effect.gen(function* () {
         const client = yield* HttpApiClient.make(Api, { baseUrl: "http://localhost" });
         return [
           yield* client.articles.get({
@@ -838,11 +839,11 @@ describe("a projected answer over HTTP (#322)", () => {
             query: { fields: { people: ["email"] } },
           }),
         ] as const;
-      }).pipe(Effect.provideService(HttpClient.HttpClient, inMemory)),
-    );
-    expect(single.data.attributes).toEqual({ title: "Hello" });
-    expect(single.included?.[0]?.attributes).toEqual({ name: "Ada" });
-    expect(many.data[0]?.attributes).toEqual({ body: "World" });
-    expect(related.data?.attributes).toEqual({ email: "ada@example.com" });
-  });
+      }).pipe(Effect.provideService(HttpClient.HttpClient, inMemory));
+      expect(single.data.attributes).toEqual({ title: "Hello" });
+      expect(single.included?.[0]?.attributes).toEqual({ name: "Ada" });
+      expect(many.data[0]?.attributes).toEqual({ body: "World" });
+      expect(related.data?.attributes).toEqual({ email: "ada@example.com" });
+    }),
+  );
 });
