@@ -75,7 +75,7 @@ const report = await Effect.runPromise(
   Conformance.verify(Api, { ids: IDS, mutating: true, writes: WRITES }).pipe(
     Effect.provide(BlogLive),
     Effect.scoped,
-  ) as Effect.Effect<Conformance.Report, never, never>,
+  ) as Effect.Effect<Conformance.Report>,
 );
 
 describe("blog: JSON:API conformance", () => {
@@ -262,7 +262,7 @@ describe("blog: JSON:API conformance", () => {
       Conformance.verify(Api, { ids: { articles: "1" }, tiers: ["spec"] }).pipe(
         Effect.provide(BlogLive),
         Effect.scoped,
-      ) as Effect.Effect<Conformance.Report, never, never>,
+      ) as Effect.Effect<Conformance.Report>,
     );
     expect(specOnly.outcomes.every((outcome) => outcome.rule.tier === "spec")).toBe(true);
     expect(

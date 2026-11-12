@@ -235,7 +235,7 @@ const handlersFor = (ops: ReturnType<typeof makeOps>["ops"]) => {
   return { handlers, cacheStore, state, opened };
 };
 
-const failure = async <A, E>(effect: Effect.Effect<A, E, never>) => {
+const failure = async <A, E>(effect: Effect.Effect<A, E>) => {
   const exit = await Effect.runPromiseExit(effect);
   if (Exit.isSuccess(exit)) return expect.fail("expected a failure");
   const error = Cause.findErrorOption(exit.cause);
@@ -244,7 +244,7 @@ const failure = async <A, E>(effect: Effect.Effect<A, E, never>) => {
 };
 
 /** Runs `effect` to its success, failing the test on any other exit. */
-const success = async <A, E>(effect: Effect.Effect<A, E, never>): Promise<A> => {
+const success = async <A, E>(effect: Effect.Effect<A, E>): Promise<A> => {
   const exit = await Effect.runPromiseExit(effect);
   if (Exit.isFailure(exit)) return expect.fail(`expected a success: ${Cause.pretty(exit.cause)}`);
   return exit.value;

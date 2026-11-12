@@ -38,7 +38,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
       Effect.provide(ArticlesLive),
       Effect.provide(SearchLive),
       Effect.provide(Middleware.layer),
-    ) as Effect.Effect<A, E, never>,
+    ) as Effect.Effect<A, E>,
   );
 
 const runExit = <A, E>(effect: Effect.Effect<A, E, any>): Promise<Exit.Exit<A, E>> =>
@@ -48,7 +48,7 @@ const runExit = <A, E>(effect: Effect.Effect<A, E, any>): Promise<Exit.Exit<A, E
       Effect.provide(ArticlesLive),
       Effect.provide(SearchLive),
       Effect.provide(Middleware.layer),
-    ) as Effect.Effect<A, E, never>,
+    ) as Effect.Effect<A, E>,
   );
 
 const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {

@@ -71,12 +71,12 @@ const buildClient = HttpApiTest.groups(Api, [
 
 const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
   Effect.runPromise(
-    effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E, never>,
+    effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E>,
   );
 
 const runExit = <A, E>(effect: Effect.Effect<A, E, any>): Promise<Exit.Exit<A, E>> =>
   Effect.runPromiseExit(
-    effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E, never>,
+    effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E>,
   );
 
 const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {

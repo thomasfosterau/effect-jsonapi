@@ -1156,7 +1156,7 @@ const overFieldsetEndpoints = (
   probe: (
     target: ReturnType<typeof readable>["resolved"][number],
     tally: Tally,
-  ) => Effect.Effect<void, never, never>,
+  ) => Effect.Effect<void>,
 ) =>
   Effect.gen(function* () {
     const candidates = readable(ctx).resolved.filter(({ endpoint }) =>

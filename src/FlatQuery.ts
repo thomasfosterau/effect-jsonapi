@@ -245,9 +245,7 @@ const formatSortFields = (fields: ReadonlyArray<SortField>): string =>
  */
 export const SortParam: Schema.Codec<
   ReadonlyArray<SortField>,
-  string | ReadonlyArray<string>,
-  never,
-  never
+  string | ReadonlyArray<string>
 > = Schema.Union([Schema.String, Schema.Array(Schema.String)]).pipe(
   Schema.decodeTo(
     Schema.String.check(Schema.isPattern(SORT_PATTERN)),
@@ -338,7 +336,7 @@ export const DEFAULT_MAX_ID_LIST: 100 = Bounded.DEFAULT_MAX_ID_LIST;
  */
 export const idList = (options?: {
   readonly maxLength?: number | undefined;
-}): Schema.Codec<ReadonlyArray<string>, string | ReadonlyArray<string>, never, never> =>
+}): Schema.Codec<ReadonlyArray<string>, string | ReadonlyArray<string>> =>
   Bounded.idList({ maxLength: Option.fromUndefinedOr(options?.maxLength) });
 
 /**
@@ -349,9 +347,7 @@ export const idList = (options?: {
  */
 export const IdList: Schema.Codec<
   ReadonlyArray<string>,
-  string | ReadonlyArray<string>,
-  never,
-  never
+  string | ReadonlyArray<string>
 > = Bounded.IdList;
 
 /**

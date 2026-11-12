@@ -605,7 +605,7 @@ assertType<
 assertType<
   Equals<
     Query.FieldsetResources<typeof Article, boolean>["type"],
-    Query.FieldsetResources<typeof Article, false>["type"]
+    Query.FieldsetResources<typeof Article>["type"]
   >
 >(false);
 // Negative control: not only the direct targets, which `include: false` gives.

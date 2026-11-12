@@ -120,9 +120,7 @@ export interface Wire<
   Fields extends Schema.Struct.Fields,
 > extends Schema.decodeTo<
   Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Any>,
-  typeof WireDocument,
-  never,
-  never
+  typeof WireDocument
 > {}
 
 /**

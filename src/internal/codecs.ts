@@ -23,9 +23,7 @@ import { vocabularyAnnotations } from "./vocabulary.js";
  */
 export interface CommaSeparated<S extends Schema.Top> extends Schema.decodeTo<
   Schema.$Array<S>,
-  Schema.String,
-  never,
-  never
+  Schema.String
 > {}
 
 export const CommaSeparated = <S extends Schema.Top>(item: S): CommaSeparated<S> =>
@@ -52,9 +50,7 @@ export const CommaSeparated = <S extends Schema.Top>(item: S): CommaSeparated<S>
  */
 export interface Repeatable extends Schema.decodeTo<
   Schema.String,
-  Schema.Union<readonly [Schema.String, Schema.$Array<Schema.String>]>,
-  never,
-  never
+  Schema.Union<readonly [Schema.String, Schema.$Array<Schema.String>]>
 > {}
 
 export const Repeatable: Repeatable = Schema.Union([
@@ -84,10 +80,8 @@ export const Repeatable: Repeatable = Schema.Union([
  * have no such split — they are one schema, decoded directly from the wire
  * value — so they compose `Repeatable` under their item codec here instead.
  */
-export const repeatable = <S extends Schema.Top>(
-  item: S,
-): Schema.decodeTo<S, Repeatable, never, never> =>
-  Repeatable.pipe(Schema.decodeTo(item)) as Schema.decodeTo<S, Repeatable, never, never>;
+export const repeatable = <S extends Schema.Top>(item: S): Schema.decodeTo<S, Repeatable> =>
+  Repeatable.pipe(Schema.decodeTo(item)) as Schema.decodeTo<S, Repeatable>;
 
 /**
  * The schema of a decoded sort list.
@@ -99,9 +93,7 @@ export interface Sort<Field extends string> extends Schema.decodeTo<
       readonly direction: Schema.Literals<["asc", "desc"]>;
     }>
   >,
-  Schema.String,
-  never,
-  never
+  Schema.String
 > {}
 
 /**

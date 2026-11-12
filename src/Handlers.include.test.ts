@@ -779,11 +779,7 @@ describe("Handlers.resolveIncluded — types", () => {
     });
 
     expectTypeOf(resolved).toEqualTypeOf<
-      Effect.Effect<
-        ReadonlyArray<typeof Person.Type | typeof Comment.Type> | undefined,
-        never,
-        never
-      >
+      Effect.Effect<ReadonlyArray<typeof Person.Type | typeof Comment.Type> | undefined>
     >();
 
     const included = await run(resolved);

@@ -415,7 +415,7 @@ describe("JsonapiError.toDocument", () => {
   });
 });
 
-const responseOf = async (effect: Effect.Effect<unknown, never, never>) => {
+const responseOf = async (effect: Effect.Effect<unknown>) => {
   const value = await Effect.runPromise(effect);
   if (!HttpServerResponse.isHttpServerResponse(value)) throw new Error("expected a response");
   const web = HttpServerResponse.toWeb(value);
