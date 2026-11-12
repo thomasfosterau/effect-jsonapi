@@ -3,6 +3,7 @@
  * (request encoding → routing → middleware → handler → response decoding)
  * through the in-memory `HttpApiTest` client.
  */
+import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
@@ -39,6 +40,9 @@ import {
   spoonKnife,
 } from "../handlers.js";
 import { Issue, Label, PullRequest, Repository, User } from "../resources.js";
+
+const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
+const now = (): Date => DateTime.toDateUtc(DateTime.nowUnsafe());
 
 const buildClient = HttpApiTest.groups(Api, ["users", "repositories", "issues", "pulls", "search"]);
 
@@ -425,7 +429,7 @@ describe("github example: writing", () => {
                 private: false,
                 language: "TypeScript",
                 stargazerCount: 0,
-                createdAt: new Date("2024-06-01T00:00:00.000Z"),
+                createdAt: at("2024-06-01T00:00:00.000Z"),
               },
               relationships: {
                 owner: { data: User.ref(octocat.id) },
@@ -456,7 +460,7 @@ describe("github example: writing", () => {
                 name: helloWorld.attributes.name,
                 private: false,
                 stargazerCount: 0,
-                createdAt: new Date(),
+                createdAt: now(),
               },
               relationships: {
                 owner: { data: User.ref(octocat.id) },
@@ -485,7 +489,7 @@ describe("github example: writing", () => {
                 body: "The README still references the old API.",
                 state: "open",
                 locked: false,
-                createdAt: new Date("2024-06-01T00:00:00.000Z"),
+                createdAt: at("2024-06-01T00:00:00.000Z"),
               },
               relationships: {
                 repository: { data: Repository.ref(helloWorld.id) },
@@ -517,7 +521,7 @@ describe("github example: writing", () => {
                 body: "",
                 state: "open",
                 locked: false,
-                createdAt: new Date(),
+                createdAt: now(),
               },
               relationships: {
                 repository: { data: Repository.ref("does-not-exist") },

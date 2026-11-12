@@ -17,8 +17,11 @@
  * is exported so an unused-local error can never stand in for the assertion an
  * `@ts-expect-error` expects.
  */
+import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import { Relationship, Resource, Sort } from "@thomasfosterau/effect-jsonapi";
+
+const now = (): Date => DateTime.toDateUtc(DateTime.nowUnsafe());
 
 // Asserts that a value is assignable to `Expected`.
 const assertType = <Expected>(_value: Expected): void => {};
@@ -46,7 +49,7 @@ export const type: "people" = Annotated.type;
 export const id: string = Annotated.Id.make("1");
 export const ref: { readonly type: "people"; readonly id: string } = Annotated.ref("1");
 export const createPayload: typeof Annotated.createPayload.Type = {
-  data: { type: "people", attributes: { name: "Ada", joinedAt: new Date() } },
+  data: { type: "people", attributes: { name: "Ada", joinedAt: now() } },
 };
 export const declaredKeys: keyof Resource.DeclaredAttributesOf<typeof Annotated> = "name";
 

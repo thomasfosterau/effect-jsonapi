@@ -1,3 +1,4 @@
+import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf, it, onTestFinished } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -22,6 +23,8 @@ import * as Relationship from "./Relationship.js";
 import { attribute, filterable, make as Resource, readOnlyAttribute } from "./Resource.js";
 import type { FilterableKeys } from "./Resource.js";
 import { definedMember } from "./internal/members.js";
+
+const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
 
 // ---------------------------------------------------------------------------
 // Fixture: every literal kind the grammar types, plus a filterable relationship
@@ -246,10 +249,10 @@ describe("Query.Filter: shorthand and literals", () => {
     expect(decode({ "filter[age][gt]": "1.5" })).toEqual(gt("age", 1.5));
     expect(decode({ "filter[flag]": "true" })).toEqual(eq("flag", true));
     const when = decode({ "filter[createdAt][gte]": "2026-01-01T00:00:00.000Z" });
-    expect(when).toEqual(Filter.gte("createdAt", new Date("2026-01-01T00:00:00.000Z")));
+    expect(when).toEqual(Filter.gte("createdAt", at("2026-01-01T00:00:00.000Z")));
     // NullOr is stripped: the literal is the Date, never null
     expect(decode({ "filter[deletedAt][gte]": "2026-01-01T00:00:00.000Z" })).toEqual(
-      Filter.gte("deletedAt", new Date("2026-01-01T00:00:00.000Z")),
+      Filter.gte("deletedAt", at("2026-01-01T00:00:00.000Z")),
     );
     expect(decode({ "filter[status]": "done" })).toEqual(eq("status", "done"));
   });
@@ -507,7 +510,7 @@ describe("Query.Filter: §6 semantics — the literal rules the codec enforces",
     expect(Schema.encodeUnknownSync(fields.flag.literal)(true)).toBe("true");
     // F-ORD-3: a Date's JSON form is fixed-width ISO-8601 UTC, so text order is instant order
     const encoded = Schema.encodeUnknownSync(fields.createdAt.literal)(
-      new Date("2026-01-01T00:00:00.000Z"),
+      at("2026-01-01T00:00:00.000Z"),
     );
     expect(encoded).toBe("2026-01-01T00:00:00.000Z");
     expect(encoded).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
@@ -942,8 +945,8 @@ const filterGenerator = (seed: number) => {
       Array.from({ length: int(4) }, () =>
         pick(["a", "b", ",", "\\", " ", "é", "\u{1F600}", "！", "x,y", "\\,"]),
       ).join(""),
-    deletedAt: () => new Date(int(2_000_000_000) * 1000),
-    createdAt: () => new Date(int(2_000_000_000) * 1000),
+    deletedAt: () => at(int(2_000_000_000) * 1000),
+    createdAt: () => at(int(2_000_000_000) * 1000),
     flag: () => random() < 0.5,
     limit: () => int(100),
     author: () => Person.Id.make(String(int(50))),

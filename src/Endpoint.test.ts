@@ -1,4 +1,5 @@
 import { it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf, onTestFinished } from "vite-plus/test";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -25,6 +26,8 @@ import * as Relationship from "./Relationship.js";
 import { make as Resource } from "./Resource.js";
 import { MEDIA_TYPE } from "./internal/media.js";
 import { definedMember } from "./internal/members.js";
+
+const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
 
 /**
  * Drops every `undefined` member of a payload's `attributes`. In-process — and
@@ -167,7 +170,7 @@ const sampleArticle = Article.make({
   attributes: {
     title: "Hello",
     body: "World",
-    createdAt: new Date("2024-01-01T00:00:00.000Z"),
+    createdAt: at("2024-01-01T00:00:00.000Z"),
   },
   relationships: {
     author: { data: { type: "people", id: Person.Id.make("9") } },
@@ -757,7 +760,7 @@ describe("HTTP round-trip via HttpApiTest", () => {
                 attributes: {
                   title: "New article",
                   body: "Contents",
-                  createdAt: new Date("2024-06-01T00:00:00.000Z"),
+                  createdAt: at("2024-06-01T00:00:00.000Z"),
                 },
               },
             },
@@ -1418,7 +1421,7 @@ describe("HTTP round-trip with a flat write payload", () => {
             payload: {
               title: "New article",
               body: "Contents",
-              createdAt: new Date("2024-06-01T00:00:00.000Z"),
+              createdAt: at("2024-06-01T00:00:00.000Z"),
             },
           });
         }),
@@ -2118,7 +2121,7 @@ describe("HTTP round-trip with a wire success document", () => {
                 attributes: {
                   title: "Hello",
                   body: "World",
-                  createdAt: new Date("2024-01-01T00:00:00.000Z"),
+                  createdAt: at("2024-01-01T00:00:00.000Z"),
                 },
               },
             },

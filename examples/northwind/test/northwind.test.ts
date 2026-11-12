@@ -3,6 +3,7 @@
  * (request encoding → routing → middleware → handler → response decoding)
  * through the in-memory `HttpApiTest` client.
  */
+import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
@@ -54,6 +55,9 @@ import {
   Supplier,
   Territory,
 } from "../resources.js";
+
+const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
+const now = (): Date => DateTime.toDateUtc(DateTime.nowUnsafe());
 
 const buildClient = HttpApiTest.groups(Api, [
   "categories",
@@ -557,8 +561,8 @@ describe("northwind example: writing", () => {
             data: {
               type: "orders",
               attributes: {
-                orderDate: new Date("1996-07-09T00:00:00.000Z"),
-                requiredDate: new Date("1996-08-06T00:00:00.000Z"),
+                orderDate: at("1996-07-09T00:00:00.000Z"),
+                requiredDate: at("1996-08-06T00:00:00.000Z"),
                 freight: 12.34,
                 shipCity: "Berlin",
                 shipCountry: "Germany",
@@ -592,8 +596,8 @@ describe("northwind example: writing", () => {
             data: {
               type: "orders",
               attributes: {
-                orderDate: new Date(),
-                requiredDate: new Date(),
+                orderDate: now(),
+                requiredDate: now(),
                 freight: 0,
                 shipCountry: "Germany",
               },
@@ -621,7 +625,7 @@ describe("northwind example: writing", () => {
             data: {
               type: "orders",
               id: order10249.id,
-              attributes: { shippedDate: new Date("1996-07-10T00:00:00.000Z") },
+              attributes: { shippedDate: at("1996-07-10T00:00:00.000Z") },
             },
           },
         });

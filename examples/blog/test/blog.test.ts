@@ -3,6 +3,7 @@
  * encoding → routing → middleware → handler → response decoding) through the
  * in-memory `HttpApiTest` client.
  */
+import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
@@ -27,6 +28,9 @@ import {
   SearchLive,
 } from "../handlers.js";
 import { Article, Comment, Person } from "../resources.js";
+
+const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
+const now = (): Date => DateTime.toDateUtc(DateTime.nowUnsafe());
 
 const buildClient = HttpApiTest.groups(Api, ["articles", "search"]);
 
@@ -246,7 +250,7 @@ describe("blog example: writing", () => {
               attributes: {
                 title: "A fresh take",
                 body: "...",
-                createdAt: new Date("2024-06-01T00:00:00.000Z"),
+                createdAt: at("2024-06-01T00:00:00.000Z"),
               },
               relationships: {
                 // `author` is a required (`one`) relationship — the payload
@@ -282,7 +286,7 @@ describe("blog example: writing", () => {
               attributes: {
                 title: sampleArticle.attributes.title,
                 body: "duplicate",
-                createdAt: new Date(),
+                createdAt: now(),
               },
               relationships: {
                 author: { data: Person.ref(sampleAuthor.id) },

@@ -1,3 +1,4 @@
+import * as DateTime from "effect/DateTime";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Rec from "effect/Record";
 import * as Schema from "effect/Schema";
@@ -18,6 +19,8 @@ import {
 } from "./Resource.js";
 import type { Filterable, FilterableKeys, FilterOperators, SortableKeys } from "./Resource.js";
 import * as Sort from "./Sort.js";
+
+const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
 
 // ---------------------------------------------------------------------------
 // Filterable and sortable declarations (#84)
@@ -448,7 +451,7 @@ describe("Resource.filterable / Resource.sortable", () => {
       expect(decoded).toBeInstanceOf(Date);
       expect(decoded.toISOString()).toBe("2026-01-01T00:00:00.000Z");
       expect(() => decode("publishedAt")("not a date")).toThrow();
-      expect(encode("publishedAt")(new Date("2026-01-01T00:00:00.000Z"))).toBe(
+      expect(encode("publishedAt")(at("2026-01-01T00:00:00.000Z"))).toBe(
         "2026-01-01T00:00:00.000Z",
       );
       expectTypeOf(declared.publishedAt.literal.Type).toEqualTypeOf<Date>();
@@ -485,7 +488,7 @@ describe("Resource.filterable / Resource.sortable", () => {
       expect(decode("count")(encode("count")(1e21))).toBe(1e21);
       expect(decode("count")(encode("count")(0.1))).toBe(0.1);
       expect(decode("flag")(encode("flag")(false))).toBe(false);
-      const when = new Date("2025-12-31T23:59:59.999Z");
+      const when = at("2025-12-31T23:59:59.999Z");
       expect(decode("publishedAt")(encode("publishedAt")(when)).getTime()).toBe(when.getTime());
     });
 

@@ -6,6 +6,7 @@
  * relationship document.
  */
 import { it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import { describe, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -18,6 +19,8 @@ import type * as Handlers from "./Handlers.js";
 import { unlinkedIncluded } from "./internal/linkage.js";
 import * as Query from "./Query.js";
 import { definedMember } from "./internal/members.js";
+
+const isoDate = (input: string): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
 
 // The walk reads a document as JSON, so a typed one is checked as JSON first.
 const onWire = Schema.decodeUnknownSync(Schema.JsonObject);
@@ -48,7 +51,7 @@ const person = (id: string): Assemble.ResourceLike => ({
   attributes: {
     name: `Person ${id}`,
     slug: `person-${id}`,
-    createdAt: new Date("2026-01-01T00:00:00Z"),
+    createdAt: isoDate("2026-01-01T00:00:00Z"),
   },
   relationships: {
     birthPlace: {
@@ -1139,7 +1142,7 @@ describe("helpers", () => {
     const coerced = Assemble.toWireSafeResource({
       type: "t",
       id: "1",
-      attributes: { at: new Date("2026-01-01T00:00:00Z"), gone: undefined, list: [undefined, 1] },
+      attributes: { at: isoDate("2026-01-01T00:00:00Z"), gone: undefined, list: [undefined, 1] },
       links: { self: new URL("https://example.test/t/1") },
     });
     expect(coerced.attributes).toEqual({ at: "2026-01-01T00:00:00.000Z", list: [null, 1] });

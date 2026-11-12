@@ -2,12 +2,15 @@
  * `Document.wire`: the link fields become strings, everything else — ids,
  * `Date` codecs, optionality, unions — is untouched.
  */
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Document from "./Document.js";
 import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
+
+const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
 
 const decode = <S extends Schema.Top>(schema: S) =>
   Schema.decodeUnknownSync(schema as unknown as Schema.Codec<S["Type"]>);
@@ -23,7 +26,7 @@ describe("Document.wire", () => {
     const wired = decode(Document.wire(Person))({
       type: "people",
       id: "1",
-      attributes: { name: "Ada", bornAt: new Date("1815-12-10T00:00:00.000Z") },
+      attributes: { name: "Ada", bornAt: at("1815-12-10T00:00:00.000Z") },
       relationships: {
         birthPlace: {
           data: { type: "places", id: "p1" },
@@ -46,14 +49,14 @@ describe("Document.wire", () => {
       decode(Wire)({
         type: "people",
         id: "1",
-        attributes: { name: "Ada", bornAt: new Date("2020-01-01T00:00:00.000Z") },
+        attributes: { name: "Ada", bornAt: at("2020-01-01T00:00:00.000Z") },
       }),
     ).not.toThrow();
     expect(() =>
       decode(Wire)({
         type: "people",
         id: "1",
-        attributes: { name: "Ada", bornAt: new Date("2020-01-01T00:00:00.000Z") },
+        attributes: { name: "Ada", bornAt: at("2020-01-01T00:00:00.000Z") },
         relationships: { birthPlace: { data: { type: "places", id: "p1" } } },
       }),
     ).not.toThrow();
@@ -64,7 +67,7 @@ describe("Document.wire", () => {
       decode(Document.wire(Person))({
         type: "people",
         id: "1",
-        attributes: { name: "Ada", bornAt: new Date("2020-01-01T00:00:00.000Z") },
+        attributes: { name: "Ada", bornAt: at("2020-01-01T00:00:00.000Z") },
         links: { self: new URL("https://example.test/people/1") },
       }),
     ).toThrow();

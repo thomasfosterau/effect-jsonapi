@@ -22,6 +22,7 @@
  * other reads declare no `fields`, so their clients read every attribute as
  * required.
  */
+import * as DateTime from "effect/DateTime";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -54,6 +55,8 @@ import {
   UserNotFound,
 } from "./errors.js";
 import { Issue, IssueComment, Label, PullRequest, Repository, User } from "./resources.js";
+
+const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
 
 /**
  * Drops every `undefined` member of a payload's `attributes`. In-process — and
@@ -88,7 +91,7 @@ export const octocat: User = User.make({
     login: "octocat",
     name: "The Octocat",
     bio: "GitHub's mascot",
-    createdAt: new Date("2011-01-25T18:44:36.000Z"),
+    createdAt: at("2011-01-25T18:44:36.000Z"),
   },
 });
 
@@ -97,7 +100,7 @@ export const defunkt: User = User.make({
   attributes: {
     login: "defunkt",
     name: "Chris Wanstrath",
-    createdAt: new Date("2007-10-20T05:24:19.000Z"),
+    createdAt: at("2007-10-20T05:24:19.000Z"),
   },
 });
 
@@ -107,7 +110,7 @@ export const hubot: User = User.make({
     login: "hubot",
     name: "Hubot",
     bio: "A friendly robot",
-    createdAt: new Date("2011-10-25T18:00:00.000Z"),
+    createdAt: at("2011-10-25T18:00:00.000Z"),
   },
 });
 
@@ -129,7 +132,7 @@ export const helloWorld: Repository = Repository.make({
     private: false,
     language: "C",
     stargazerCount: 2127,
-    createdAt: new Date("2011-01-26T19:01:12.000Z"),
+    createdAt: at("2011-01-26T19:01:12.000Z"),
   },
   relationships: {
     // `ref` builds a typed `{ type: "users", id }` resource identifier
@@ -145,7 +148,7 @@ export const spoonKnife: Repository = Repository.make({
     private: false,
     language: "HTML",
     stargazerCount: 12000,
-    createdAt: new Date("2011-01-27T19:30:43.000Z"),
+    createdAt: at("2011-01-27T19:30:43.000Z"),
   },
   relationships: {
     owner: { data: User.ref(octocat.id) },
@@ -159,7 +162,7 @@ export const secretProject: Repository = Repository.make({
     private: true,
     language: "TypeScript",
     stargazerCount: 0,
-    createdAt: new Date("2024-03-01T00:00:00.000Z"),
+    createdAt: at("2024-03-01T00:00:00.000Z"),
   },
   relationships: {
     owner: { data: User.ref(defunkt.id) },
@@ -179,7 +182,7 @@ export const bugIssue: Issue = Issue.make({
     body: "I'm having a problem with this.",
     state: "open",
     locked: false,
-    createdAt: new Date("2011-04-22T13:33:48.000Z"),
+    createdAt: at("2011-04-22T13:33:48.000Z"),
   },
   relationships: {
     repository: { data: Repository.ref(helloWorld.id) },
@@ -198,7 +201,7 @@ export const featureIssue: Issue = Issue.make({
     body: "New contributors need guidance.",
     state: "closed",
     locked: false,
-    createdAt: new Date("2011-05-01T10:00:00.000Z"),
+    createdAt: at("2011-05-01T10:00:00.000Z"),
   },
   relationships: {
     repository: { data: Repository.ref(helloWorld.id) },
@@ -217,7 +220,7 @@ export const lockedIssue: Issue = Issue.make({
     body: "This discussion got out of hand.",
     state: "open",
     locked: true,
-    createdAt: new Date("2024-04-01T00:00:00.000Z"),
+    createdAt: at("2024-04-01T00:00:00.000Z"),
   },
   relationships: {
     repository: { data: Repository.ref(secretProject.id) },
@@ -233,7 +236,7 @@ export const bugComments: ReadonlyArray<IssueComment> = [
     id: IssueComment.Id.make("1"),
     attributes: {
       body: "Can you share a reproduction?",
-      createdAt: new Date("2011-04-22T14:00:00.000Z"),
+      createdAt: at("2011-04-22T14:00:00.000Z"),
     },
     relationships: { author: { data: User.ref(octocat.id) } },
   }),
@@ -241,7 +244,7 @@ export const bugComments: ReadonlyArray<IssueComment> = [
     id: IssueComment.Id.make("2"),
     attributes: {
       body: "Sure — pushed to the repro branch.",
-      createdAt: new Date("2011-04-22T15:30:00.000Z"),
+      createdAt: at("2011-04-22T15:30:00.000Z"),
     },
     relationships: { author: { data: User.ref(defunkt.id) } },
   }),
@@ -249,7 +252,7 @@ export const bugComments: ReadonlyArray<IssueComment> = [
     id: IssueComment.Id.make("3"),
     attributes: {
       body: "Thanks, I can reproduce it now.",
-      createdAt: new Date("2011-04-23T09:00:00.000Z"),
+      createdAt: at("2011-04-23T09:00:00.000Z"),
     },
     relationships: { author: { data: User.ref(octocat.id) } },
   }),
@@ -265,7 +268,7 @@ export const readmePull: PullRequest = PullRequest.make({
     draft: false,
     headRef: "octocat:patch-1",
     baseRef: "master",
-    createdAt: new Date("2011-04-30T20:00:00.000Z"),
+    createdAt: at("2011-04-30T20:00:00.000Z"),
   },
   relationships: {
     repository: { data: Repository.ref(helloWorld.id) },
