@@ -48,8 +48,7 @@ export const reachable = (
 };
 
 /** @internal */
-export const isRecord = (u: unknown): u is Readonly<Record<string, unknown>> =>
-  P.isObject(u);
+export const isRecord = (u: unknown): u is Readonly<Record<string, unknown>> => P.isObject(u);
 
 /**
  * Whether a JSON value is an array.
