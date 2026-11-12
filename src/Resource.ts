@@ -216,8 +216,8 @@ export const LocalIdentifier = <const Type extends string>(type: Type): LocalIde
  * @since 0.1.0
  * @category models
  */
-export interface Ref<R extends Any> extends Schema.Union<
-  readonly [Schema.suspend<R["identifier"]>, Schema.suspend<LocalIdentifier<R["type"]>>]
+export interface Ref<Res extends Any> extends Schema.Union<
+  readonly [Schema.suspend<Res["identifier"]>, Schema.suspend<LocalIdentifier<Res["type"]>>]
 > {}
 
 /**
@@ -229,16 +229,16 @@ export interface Ref<R extends Any> extends Schema.Union<
  * @since 0.1.0
  * @category constructors
  */
-export const Ref = <R extends Any>(resource: R | (() => R)): Ref<R> => {
+export const Ref = <Res extends Any>(resource: Res | (() => Res)): Ref<Res> => {
   // Resource definitions are themselves callable (schemas are functions), so
   // `typeof resource === "function"` no longer distinguishes a resource from a
   // lazy thunk. `type` is a resource-only own property (never present on a
-  // plain `() => R` thunk), so check for that instead.
-  const thunk: () => R =
+  // plain `() => Res` thunk), so check for that instead.
+  const thunk: () => Res =
     P.isFunction(resource) && !("type" in resource) ? resource : () => resource;
   return Schema.Union([
-    Schema.suspend(() => thunk().identifier as R["identifier"]),
-    Schema.suspend(() => LocalIdentifier(thunk().type) as LocalIdentifier<R["type"]>),
+    Schema.suspend(() => thunk().identifier as Res["identifier"]),
+    Schema.suspend(() => LocalIdentifier(thunk().type) as LocalIdentifier<Res["type"]>),
   ]);
 };
 
@@ -426,7 +426,7 @@ type NotAlready<S, Key extends string, Given> = [Given] extends [false]
 // plain `boolean` would leave the attribute on the resource-object *type* while
 // the runtime dropped it (`ResourceAttributes` reads the literal off the
 // config), so the option must be `true`, `false` or `"optional"` statically.
-type LiteralResource<R> = boolean extends R ? never : unknown;
+type LiteralResource<Res> = boolean extends Res ? never : unknown;
 
 // The `filter` / `sort` sugar at runtime: `Filter.able` then `Sort.able` on the
 // inner schema — the annotation is the only record of the declaration. A schema
@@ -976,7 +976,7 @@ export type ResourceFields<
  * @category type-level
  */
 export type RelationshipTargets<Rels extends Relationships> = {
-  [K in keyof Rels]: Rels[K] extends { readonly ref: () => infer R extends Any } ? R : never;
+  [K in keyof Rels]: Rels[K] extends { readonly ref: () => infer Res extends Any } ? Res : never;
 }[keyof Rels];
 
 /**
@@ -990,8 +990,8 @@ export type RelationshipTargets<Rels extends Relationships> = {
 export type IncludableTargets<Rels extends Relationships> = {
   [K in keyof Rels]: Rels[K] extends Relationship.Paginated<Any>
     ? never
-    : Rels[K] extends { readonly ref: () => infer R extends Any }
-      ? R
+    : Rels[K] extends { readonly ref: () => infer Res extends Any }
+      ? Res
       : never;
 }[keyof Rels];
 
@@ -1324,7 +1324,7 @@ export interface Resource<
    * Single-resource document schema with this resource as primary `data`
    * (non-null) — the canonical document for an existing resource. When the data
    * can be absent, build `Document.DataDocument(Schema.NullOr(R))` (for
-   * `R | null`) or `Document.DataDocument(R.nullable())` (for `Option<R>`)
+   * `Res | null`) or `Document.DataDocument(R.nullable())` (for `Option<Res>`)
    * instead. The compound `included` union defaults to the resources referenced
    * by this resource's non-`paginated` relationships; override it (or the
    * document `meta`) per call.
@@ -1353,14 +1353,14 @@ export interface Resource<
    * wire — the spec-clean way to model JSON:API's `null` primary data.
    *
    * Pass it to `Document.DataDocument` for a single-resource document whose
-   * `data` is `Option<R>`:
+   * `data` is `Option<Res>`:
    *
    * ```ts
    * Document.DataDocument(Article.nullable()) // data: Option<Article>, ⇆ null
    * ```
    *
    * Prefer this to effect's *structural* `Schema.Option` (`{ _tag, value }`),
-   * which would serialise a non-conformant body. For a plain `data: R | null`
+   * which would serialise a non-conformant body. For a plain `data: Res | null`
    * (no `Option`), wrap with `Schema.NullOr(R)` instead.
    */
   nullable(): Schema.OptionFromNullOr<Resource<Type, Attributes, Rels, Meta, IdSchema>>;
@@ -1438,8 +1438,8 @@ export interface Any extends Schema.Top {
  * @since 0.1.0
  * @category type-level
  */
-export type AttributeKeys<R extends Any> = R extends Any
-  ? keyof R["fields"]["attributes"]["fields"] & string
+export type AttributeKeys<Res extends Any> = Res extends Any
+  ? keyof Res["fields"]["attributes"]["fields"] & string
   : never;
 
 /**
@@ -1450,8 +1450,8 @@ export type AttributeKeys<R extends Any> = R extends Any
  * @since 0.18.0
  * @category type-level
  */
-export type RelationshipKeys<R extends Any> = R extends Any
-  ? keyof R["relationships"] & string
+export type RelationshipKeys<Res extends Any> = Res extends Any
+  ? keyof Res["relationships"] & string
   : never;
 
 /**
@@ -1465,7 +1465,7 @@ export type RelationshipKeys<R extends Any> = R extends Any
  * @since 0.18.0
  * @category type-level
  */
-export type FieldKeys<R extends Any> = AttributeKeys<R> | RelationshipKeys<R>;
+export type FieldKeys<Res extends Any> = AttributeKeys<Res> | RelationshipKeys<Res>;
 
 /**
  * The attribute field map of a resource definition's **resource object** — the
@@ -1480,7 +1480,7 @@ export type FieldKeys<R extends Any> = AttributeKeys<R> | RelationshipKeys<R>;
  * @since 0.2.0
  * @category type-level
  */
-export type AttributesOf<R extends Any> = R["fields"]["attributes"]["fields"];
+export type AttributesOf<Res extends Any> = Res["fields"]["attributes"]["fields"];
 
 /**
  * The attribute field map of a resource definition **as declared** — the record
@@ -1494,11 +1494,11 @@ export type AttributesOf<R extends Any> = R["fields"]["attributes"]["fields"];
  * @since 0.14.0
  * @category type-level
  */
-export type DeclaredAttributesOf<R extends Any> = R extends {
+export type DeclaredAttributesOf<Res extends Any> = Res extends {
   readonly declaredAttributes: infer Declared extends Schema.Struct.Fields;
 }
   ? Declared
-  : AttributesOf<R>;
+  : AttributesOf<Res>;
 
 /**
  * The per-attribute annotation bags of a resource definition: for each
@@ -1513,8 +1513,8 @@ export type DeclaredAttributesOf<R extends Any> = R extends {
  * @since 0.3.0
  * @category type-level
  */
-export type AttributeAnnotationsOf<R extends Any> = {
-  readonly [K in AttributeKeys<R>]?: Schema.Annotations.Annotations;
+export type AttributeAnnotationsOf<Res extends Any> = {
+  readonly [K in AttributeKeys<Res>]?: Schema.Annotations.Annotations;
 };
 
 // ---------------------------------------------------------------------------
@@ -1528,7 +1528,7 @@ export type AttributeAnnotationsOf<R extends Any> = {
  * @since 0.1.0
  * @category type-level
  */
-export type RelationshipName<R extends Any> = keyof R["relationships"] & string;
+export type RelationshipName<Res extends Any> = keyof Res["relationships"] & string;
 
 /**
  * What a resource declares about one attribute, as plain data: its declared
@@ -1679,9 +1679,9 @@ const describeAttribute = (key: string, field: Schema.Top): AttributeDescriptor 
  * @since 0.15.0
  * @category accessors
  */
-export const attributeDescriptors = <R extends Any>(
-  resource: R,
-): ReadonlyArray<AttributeDescriptor<keyof DeclaredAttributesOf<R> & string>> =>
+export const attributeDescriptors = <Res extends Any>(
+  resource: Res,
+): ReadonlyArray<AttributeDescriptor<keyof DeclaredAttributesOf<Res> & string>> =>
   R.toEntries(declaredAttributes(resource) as Schema.Struct.Fields).map(([key, field]) =>
     describeAttribute(key, field as Schema.Top),
   );
@@ -1696,7 +1696,7 @@ export const attributeDescriptors = <R extends Any>(
  * @since 0.2.0
  * @category type-level
  */
-export type RelationshipsOf<R extends Any> = R["relationships"];
+export type RelationshipsOf<Res extends Any> = Res["relationships"];
 
 /**
  * The to-one (`one` / `optional`) relationship keys of a resource definition.
@@ -1704,11 +1704,11 @@ export type RelationshipsOf<R extends Any> = R["relationships"];
  * @since 0.1.0
  * @category type-level
  */
-export type ToOneName<R extends Any> = {
-  [K in keyof R["relationships"]]: R["relationships"][K] extends Relationship.ToOne<Any>
+export type ToOneName<Res extends Any> = {
+  [K in keyof Res["relationships"]]: Res["relationships"][K] extends Relationship.ToOne<Any>
     ? K
     : never;
-}[keyof R["relationships"]] &
+}[keyof Res["relationships"]] &
   string;
 
 /**
@@ -1718,11 +1718,11 @@ export type ToOneName<R extends Any> = {
  * @since 0.1.0
  * @category type-level
  */
-export type ToManyName<R extends Any> = {
-  [K in keyof R["relationships"]]: R["relationships"][K] extends Relationship.ToMany<Any>
+export type ToManyName<Res extends Any> = {
+  [K in keyof Res["relationships"]]: Res["relationships"][K] extends Relationship.ToMany<Any>
     ? K
     : never;
-}[keyof R["relationships"]] &
+}[keyof Res["relationships"]] &
   string;
 
 /**
@@ -1731,7 +1731,8 @@ export type ToManyName<R extends Any> = {
  * @since 0.1.0
  * @category type-level
  */
-export type Target<R extends Any, K> = R["relationships"][K & keyof R["relationships"]] extends {
+export type Target<Res extends Any, K> = Res["relationships"][K &
+  keyof Res["relationships"]] extends {
   readonly ref: () => infer T;
 }
   ? T extends Any
@@ -1747,8 +1748,8 @@ export type Target<R extends Any, K> = R["relationships"][K & keyof R["relations
  * @since 0.1.0
  * @category type-level
  */
-export type TargetsOf<R extends Any> = R extends Any
-  ? RelationshipTargets<R["relationships"]>
+export type TargetsOf<Res extends Any> = Res extends Any
+  ? RelationshipTargets<Res["relationships"]>
   : never;
 
 // ---------------------------------------------------------------------------
@@ -1762,11 +1763,11 @@ export type TargetsOf<R extends Any> = R extends Any
  * @since 0.1.0
  * @category type-level
  */
-export type IncludableKeys<R extends Any> = {
-  [K in keyof R["relationships"]]: R["relationships"][K] extends Relationship.Paginated<Any>
+export type IncludableKeys<Res extends Any> = {
+  [K in keyof Res["relationships"]]: Res["relationships"][K] extends Relationship.Paginated<Any>
     ? never
     : K;
-}[keyof R["relationships"]] &
+}[keyof Res["relationships"]] &
   string;
 
 /**
@@ -1780,10 +1781,10 @@ export type IncludableKeys<R extends Any> = {
  * @since 0.1.0
  * @category type-level
  */
-export type IncludePath<R extends Any> = R extends Any
+export type IncludePath<Res extends Any> = Res extends Any
   ? {
-      [K in IncludableKeys<R>]: K | `${K}.${IncludableKeys<Target<R, K>>}`;
-    }[IncludableKeys<R>]
+      [K in IncludableKeys<Res>]: K | `${K}.${IncludableKeys<Target<Res, K>>}`;
+    }[IncludableKeys<Res>]
   : never;
 
 /**
@@ -1796,10 +1797,10 @@ export type IncludePath<R extends Any> = R extends Any
 export type IncludeDepth = 1 | 2 | 3;
 
 // The depth-3 walk: a relationship key, plus every depth-2 path of its target.
-type IncludePathDepth3<R extends Any> = R extends Any
+type IncludePathDepth3<Res extends Any> = Res extends Any
   ? {
-      [K in IncludableKeys<R>]: K | `${K}.${IncludePath<Target<R, K>>}`;
-    }[IncludableKeys<R>]
+      [K in IncludableKeys<Res>]: K | `${K}.${IncludePath<Target<Res, K>>}`;
+    }[IncludableKeys<Res>]
   : never;
 
 /**
@@ -1807,30 +1808,34 @@ type IncludePathDepth3<R extends Any> = R extends Any
  * hops into the relationship graph — the type-level mirror of
  * {@link includePaths}' `maxDepth`.
  *
- * `IncludePathsTo<R, 2>` is {@link IncludePath}, the default derivation.
+ * `IncludePathsTo<Res, 2>` is {@link IncludePath}, the default derivation.
  *
  * @since 0.9.0
  * @category type-level
  */
-export type IncludePathsTo<R extends Any, Depth extends IncludeDepth> = R extends Any
+export type IncludePathsTo<Res extends Any, Depth extends IncludeDepth> = Res extends Any
   ? [Depth] extends [1]
-    ? IncludableKeys<R>
+    ? IncludableKeys<Res>
     : [Depth] extends [3]
-      ? IncludePathDepth3<R>
-      : IncludePath<R>
+      ? IncludePathDepth3<Res>
+      : IncludePath<Res>
   : never;
 
-// The target of `R`'s relationship `Key` when an include path may cross it:
+// The target of `Res`'s relationship `Key` when an include path may cross it:
 // `never` for a `paginated` relationship (whose data is never inlined) and for
-// a key `R` does not declare.
-type IncludableTarget<R extends Any, Key> = Key extends IncludableKeys<R> ? Target<R, Key> : never;
+// a key `Res` does not declare.
+type IncludableTarget<Res extends Any, Key> =
+  Key extends IncludableKeys<Res> ? Target<Res, Key> : never;
 
 // One hop of an include path: the targets of every includable relationship of
-// `R` whose key the segment admits. A literal segment admits its own key; a
+// `Res` whose key the segment admits. A literal segment admits its own key; a
 // wide `string` segment (from a `string` or `${string}.${string}` path) admits
 // every key; a pattern segment such as `auth${string}` admits the keys it
 // matches.
-type IncludeHop<R extends Any, Segment> = IncludableTarget<R, Extract<IncludableKeys<R>, Segment>>;
+type IncludeHop<Res extends Any, Segment> = IncludableTarget<
+  Res,
+  Extract<IncludableKeys<Res>, Segment>
+>;
 
 /**
  * The resource definitions brought into a compound document by one include
@@ -1853,10 +1858,10 @@ type IncludeHop<R extends Any, Segment> = IncludableTarget<R, Extract<Includable
  * @since 0.1.0
  * @category type-level
  */
-export type ResolveIncludePath<R extends Any, Path> = R extends Any
+export type ResolveIncludePath<Res extends Any, Path> = Res extends Any
   ? Path extends `${infer Head}.${infer Rest}`
-    ? IncludeHop<R, Head> | ResolveIncludePath<IncludeHop<R, Head>, Rest>
-    : IncludeHop<R, Path>
+    ? IncludeHop<Res, Head> | ResolveIncludePath<IncludeHop<Res, Head>, Rest>
+    : IncludeHop<Res, Path>
   : never;
 
 /**
@@ -1871,8 +1876,8 @@ export type ResolveIncludePath<R extends Any, Path> = R extends Any
  * @since 0.1.0
  * @category type-level
  */
-export type IncludedFor<R extends Any, Paths extends ReadonlyArray<string>> = ResolveIncludePath<
-  R,
+export type IncludedFor<Res extends Any, Paths extends ReadonlyArray<string>> = ResolveIncludePath<
+  Res,
   Paths[number]
 >;
 
@@ -1940,7 +1945,7 @@ export function relationshipKeys(resource: Any): ReadonlyArray<string> {
  * @since 0.18.0
  * @category accessors
  */
-export const fieldKeys = <R extends Any>(resource: R): ReadonlyArray<FieldKeys<R>> =>
+export const fieldKeys = <Res extends Any>(resource: Res): ReadonlyArray<FieldKeys<Res>> =>
   Arr.dedupe([...attributeKeys(resource), ...relationshipKeys(resource)]);
 
 /**
@@ -1973,7 +1978,7 @@ export const fieldKeys = <R extends Any>(resource: R): ReadonlyArray<FieldKeys<R
  * @since 0.2.0
  * @category accessors
  */
-export const attributes = <R extends Any>(resource: R): AttributesOf<R> =>
+export const attributes = <Res extends Any>(resource: Res): AttributesOf<Res> =>
   resource.fields.attributes.fields;
 
 /**
@@ -2006,8 +2011,8 @@ export const attributes = <R extends Any>(resource: R): AttributesOf<R> =>
  * @since 0.14.0
  * @category accessors
  */
-export const declaredAttributes = <R extends Any>(resource: R): DeclaredAttributesOf<R> =>
-  (resource.declaredAttributes ?? resource.fields.attributes.fields) as DeclaredAttributesOf<R>;
+export const declaredAttributes = <Res extends Any>(resource: Res): DeclaredAttributesOf<Res> =>
+  (resource.declaredAttributes ?? resource.fields.attributes.fields) as DeclaredAttributesOf<Res>;
 
 /**
  * The per-attribute annotation bags of a resource definition: a record from
@@ -2034,11 +2039,13 @@ export const declaredAttributes = <R extends Any>(resource: R): DeclaredAttribut
  * @since 0.3.0
  * @category accessors
  */
-export const attributeAnnotations = <R extends Any>(resource: R): AttributeAnnotationsOf<R> => {
+export const attributeAnnotations = <Res extends Any>(
+  resource: Res,
+): AttributeAnnotationsOf<Res> => {
   const fields = resource.fields.attributes.fields as Record<string, Schema.Top>;
   return R.getSomes(
     R.map(fields, (field) => Option.fromUndefinedOr(Schema.resolveAnnotations(field))),
-  ) as AttributeAnnotationsOf<R>;
+  ) as AttributeAnnotationsOf<Res>;
 };
 
 /**
@@ -2068,7 +2075,7 @@ export const attributeAnnotations = <R extends Any>(resource: R): AttributeAnnot
  * @since 0.2.0
  * @category accessors
  */
-export const relationships = <R extends Any>(resource: R): RelationshipsOf<R> =>
+export const relationships = <Res extends Any>(resource: Res): RelationshipsOf<Res> =>
   resource.relationships;
 
 // Resource definitions are deduplicated by identity: `Arr.dedupe` compares
@@ -2190,21 +2197,21 @@ type RelationshipFilterDeclarationOf<D> = D extends {
 // names are not statically known (`Relationships` itself) declares none; a
 // name-only family's synthesised to-one relationships are typed `filter: false`
 // (`FamilyRelationships`).
-type FilterableRelationshipKeys<R extends Any> =
-  string extends RelationshipName<R>
+type FilterableRelationshipKeys<Res extends Any> =
+  string extends RelationshipName<Res>
     ? never
     : {
-        [K in RelationshipName<R>]: RelationshipFilterDeclarationOf<
-          R["relationships"][K]
+        [K in RelationshipName<Res>]: RelationshipFilterDeclarationOf<
+          Res["relationships"][K]
         > extends false
           ? never
           : K;
-      }[RelationshipName<R>];
+      }[RelationshipName<Res>];
 
 // `"id"` when the resource's id schema is `Filter.able` (#556), else `never`.
 // The id is not an attribute — JSON:API reserves the name — so it can never
 // collide with an attribute or relationship key.
-type FilterableIdKey<R extends Any> = [FilterMarkerOf<R["Id"]>] extends [never] ? never : "id";
+type FilterableIdKey<Res extends Any> = [FilterMarkerOf<Res["Id"]>] extends [never] ? never : "id";
 
 // The operators a declaration admits: the whole set for `true`, the subset
 // otherwise.
@@ -2232,13 +2239,15 @@ type DeclaredOperators<D, All extends string> = D extends true
  * @since 0.13.0
  * @category type-level
  */
-export type FilterableKeys<R extends Any> = R extends Any
+export type FilterableKeys<Res extends Any> = Res extends Any
   ?
-      | FilterableIdKey<R>
+      | FilterableIdKey<Res>
       | {
-          [K in AttributeKeys<R>]: [FilterMarkerOf<AttributesOf<R>[K]>] extends [never] ? never : K;
-        }[AttributeKeys<R>]
-      | FilterableRelationshipKeys<R>
+          [K in AttributeKeys<Res>]: [FilterMarkerOf<AttributesOf<Res>[K]>] extends [never]
+            ? never
+            : K;
+        }[AttributeKeys<Res>]
+      | FilterableRelationshipKeys<Res>
   : never;
 
 /**
@@ -2250,14 +2259,14 @@ export type FilterableKeys<R extends Any> = R extends Any
  * @since 0.13.0
  * @category type-level
  */
-export type FilterOperators<R extends Any, K extends FilterableKeys<R>> =
-  K extends FilterableIdKey<R>
-    ? FilterMarkerOf<R["Id"]>["operators"]
-    : K extends AttributeKeys<R>
-      ? FilterMarkerOf<AttributesOf<R>[K]>["operators"]
-      : K extends RelationshipName<R>
+export type FilterOperators<Res extends Any, K extends FilterableKeys<Res>> =
+  K extends FilterableIdKey<Res>
+    ? FilterMarkerOf<Res["Id"]>["operators"]
+    : K extends AttributeKeys<Res>
+      ? FilterMarkerOf<AttributesOf<Res>[K]>["operators"]
+      : K extends RelationshipName<Res>
         ? DeclaredOperators<
-            RelationshipFilterDeclarationOf<R["relationships"][K]>,
+            RelationshipFilterDeclarationOf<Res["relationships"][K]>,
             Relationship.FilterOperator
           >
         : never;
@@ -2272,10 +2281,10 @@ export type FilterOperators<R extends Any, K extends FilterableKeys<R>> =
  * @since 0.13.0
  * @category type-level
  */
-export type SortableKeys<R extends Any> = R extends Any
+export type SortableKeys<Res extends Any> = Res extends Any
   ? {
-      [K in AttributeKeys<R>]: SortDeclarationOf<AttributesOf<R>[K]> extends true ? K : never;
-    }[AttributeKeys<R>]
+      [K in AttributeKeys<Res>]: SortDeclarationOf<AttributesOf<Res>[K]> extends true ? K : never;
+    }[AttributeKeys<Res>]
   : never;
 
 /**
@@ -2318,22 +2327,22 @@ export interface FilterableField<Op extends Filter.Operator, Literal, RD = never
  * @since 0.13.0
  * @category type-level
  */
-export type Filterable<R extends Any> = {
-  readonly [K in FilterableKeys<R>]: K extends FilterableIdKey<R>
+export type Filterable<Res extends Any> = {
+  readonly [K in FilterableKeys<Res>]: K extends FilterableIdKey<Res>
     ? FilterableField<
-        FilterOperators<R, K>,
-        FilterMarkerOf<R["Id"]>["literal"],
-        R["Id"]["DecodingServices"],
-        R["Id"]["EncodingServices"]
+        FilterOperators<Res, K>,
+        FilterMarkerOf<Res["Id"]>["literal"],
+        Res["Id"]["DecodingServices"],
+        Res["Id"]["EncodingServices"]
       >
-    : K extends AttributeKeys<R>
+    : K extends AttributeKeys<Res>
       ? FilterableField<
-          FilterOperators<R, K>,
-          FilterMarkerOf<AttributesOf<R>[K]>["literal"],
-          AttributesOf<R>[K]["DecodingServices"],
-          AttributesOf<R>[K]["EncodingServices"]
+          FilterOperators<Res, K>,
+          FilterMarkerOf<AttributesOf<Res>[K]>["literal"],
+          AttributesOf<Res>[K]["DecodingServices"],
+          AttributesOf<Res>[K]["EncodingServices"]
         >
-      : FilterableField<FilterOperators<R, K>, Target<R, K>["Id"]["Type"]>;
+      : FilterableField<FilterOperators<Res, K>, Target<Res, K>["Id"]["Type"]>;
 };
 
 // The JSON scalar kinds a filter literal can take on the wire.
@@ -2738,9 +2747,9 @@ const nameOnlyFamilyAttributes = new WeakSet<object>();
  * @since 0.13.0
  * @category accessors
  */
-export const filterable = <R extends Any>(resource: R): Filterable<R> => {
+export const filterable = <Res extends Any>(resource: Res): Filterable<Res> => {
   const attributes = resource.fields.attributes;
-  if (nameOnlyFamilyAttributes.has(attributes)) return {} as Filterable<R>;
+  if (nameOnlyFamilyAttributes.has(attributes)) return {} as Filterable<Res>;
   let result = filterableCache.get(attributes);
   if (result === undefined) {
     result = filterableFields(
@@ -2751,7 +2760,7 @@ export const filterable = <R extends Any>(resource: R): Filterable<R> => {
     );
     filterableCache.set(attributes, result);
   }
-  return { ...result } as Filterable<R>;
+  return { ...result } as Filterable<Res>;
 };
 
 /**
@@ -2798,7 +2807,7 @@ export const filterable = <R extends Any>(resource: R): Filterable<R> => {
  * @since 0.13.0
  * @category accessors
  */
-export function sortable<R extends Any>(resource: R): ReadonlyArray<SortableKeys<R>>;
+export function sortable<Res extends Any>(resource: Res): ReadonlyArray<SortableKeys<Res>>;
 export function sortable(resource: Any): ReadonlyArray<string> {
   const attributes = resource.fields.attributes;
   if (nameOnlyFamilyAttributes.has(attributes)) return [];
@@ -3345,7 +3354,7 @@ export const make = <
  * @since 0.15.0
  * @category accessors
  */
-export const annotations = <R extends Any>(resource: R): Schema.Annotations.Annotations => ({
+export const annotations = <Res extends Any>(resource: Res): Schema.Annotations.Annotations => ({
   ...Schema.resolveAnnotations(resource),
 });
 
@@ -3411,12 +3420,12 @@ export const annotations = <R extends Any>(resource: R): Schema.Annotations.Anno
  * @since 0.15.0
  * @category combinators
  */
-export function annotate<R extends Any>(
-  resource: R,
+export function annotate<Res extends Any>(
+  resource: Res,
   annotationsToAdd: Schema.Annotations.Annotations,
-): R;
+): Res;
 // The rebuilt definition has the same declared members as `resource`, so it is
-// an `R` by construction.
+// a `Res` by construction.
 export function annotate(resource: Any, annotationsToAdd: Schema.Annotations.Annotations): Any {
   const definition = definitions.get(resource);
   if (definition === undefined) {
@@ -3698,9 +3707,9 @@ export interface FamilyIdentifier<Members extends ReadonlyArray<Any>> extends Sc
 
 // Distributes `IncludableTargets` over the member union (the non-`paginated`
 // targets of any member — what a family's compound `included` admits).
-type FamilyIncludableTargets<Members extends ReadonlyArray<Any>> = Members[number] extends infer R
-  ? R extends Any
-    ? IncludableTargets<R["relationships"]>
+type FamilyIncludableTargets<Members extends ReadonlyArray<Any>> = Members[number] extends infer Res
+  ? Res extends Any
+    ? IncludableTargets<Res["relationships"]>
     : never
   : never;
 

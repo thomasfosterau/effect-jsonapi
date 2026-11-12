@@ -202,18 +202,18 @@ const queryConfig = (options?: {
 // `include` option turns the parameter on, every resource its legal paths
 // reach beside the direct targets (#320), so each advertised path can be
 // answered; else the relationship graph's own default.
-type IncludedOf<R extends Any, Include> = Include extends {
+type IncludedOf<Res extends Any, Include> = Include extends {
   readonly included: infer U;
 }
   ? U extends Schema.Top
     ? U
-    : DefaultIncluded<R["relationships"]>
+    : DefaultIncluded<Res["relationships"]>
   : IncludeEnabled<Include> extends true
-    ? ReachableIncluded<R, Include>
-    : DefaultIncluded<R["relationships"]>;
+    ? ReachableIncluded<Res, Include>
+    : DefaultIncluded<Res["relationships"]>;
 
 /**
- * The `included` union of a read endpoint over `R` whose `include` option is
+ * The `included` union of a read endpoint over `Res` whose `include` option is
  * `true` or a `Query.IncludeOptions`: the direct targets and every resource a
  * legal include path reaches (#320). The default success document of `get`,
  * `list` and `related` carries it, so it is part of their inferred types —
@@ -222,8 +222,8 @@ type IncludedOf<R extends Any, Include> = Include extends {
  * @since 0.17.0
  * @category schemas
  */
-export interface ReachableIncluded<R extends Any, Include> extends Schema.Union<
-  ReadonlyArray<IncludedResources<R, Include>>
+export interface ReachableIncluded<Res extends Any, Include> extends Schema.Union<
+  ReadonlyArray<IncludedResources<Res, Include>>
 > {}
 
 // What a read endpoint's `include` option is at runtime: a boolean, a
@@ -249,24 +249,24 @@ const reachableIncluded = (
       )
     : Option.none();
 
-// The wire types `?fields[TYPE]=` can name on an endpoint over `R` with the
+// The wire types `?fields[TYPE]=` can name on an endpoint over `Res` with the
 // `include` option `Include`: the types its default document makes partial
 // when it declares `fields` (#322).
-type FieldsetTypes<R extends Any, Include> = Query.FieldsetResources<R, Include>["type"];
+type FieldsetTypes<Res extends Any, Include> = Query.FieldsetResources<Res, Include>["type"];
 
 // The members of a read endpoint's default `included` union (`IncludedOf`): a
 // declared surface's own, else `IncludedResources` — the direct targets and,
 // when `include` is on, every resource a legal path reaches.
-type IncludedMembers<R extends Any, Include> = Include extends {
+type IncludedMembers<Res extends Any, Include> = Include extends {
   readonly included: { readonly members: ReadonlyArray<infer M> };
 }
   ? M
-  : IncludedResources<R, Include>;
+  : IncludedResources<Res, Include>;
 
 // `IncludedOf` with every member whose type a fieldset names made partial.
-type SparseIncluded<R extends Any, Include> = SparseUnion<
-  IncludedMembers<R, Include>,
-  FieldsetTypes<R, Include>
+type SparseIncluded<Res extends Any, Include> = SparseUnion<
+  IncludedMembers<Res, Include>,
+  FieldsetTypes<Res, Include>
 >;
 
 // The success document the single-resource endpoints (`get`, `create`,
@@ -1318,7 +1318,7 @@ const deleteEndpoint = <
 
 export type {
   /**
-   * The resource definitions a response of an endpoint over `R` with the
+   * The resource definitions a response of an endpoint over `Res` with the
    * `include` option `I` can carry in `included`: the non-`paginated` direct
    * targets and, when `I` turns `include` on, every resource a legal include
    * path reaches. The `included` union of a read endpoint that declares
@@ -1330,7 +1330,7 @@ export type {
    */
   IncludedResources,
   /**
-   * The resource object of `R` with every attribute and relationship optional
+   * The resource object of `Res` with every attribute and relationship optional
    * (#494): what the default
    * success document of a read endpoint that declares `fields` admits for each
    * resource type a fieldset can name (#322). Part of those endpoints'
@@ -1810,8 +1810,8 @@ type AsSchema<T> = T extends Schema.Top ? T : never;
 /**
  * The descriptor of a named relationship.
  */
-type DescriptorOf<R extends Any, Name extends string> = R["relationships"][Name &
-  keyof R["relationships"]];
+type DescriptorOf<Res extends Any, Name extends string> = Res["relationships"][Name &
+  keyof Res["relationships"]];
 
 /**
  * The linkage (`data`) schema of a relationship, by kind:
@@ -1823,12 +1823,12 @@ type DescriptorOf<R extends Any, Name extends string> = R["relationships"][Name 
  * @since 0.1.0
  * @category type-level
  */
-export type LinkageData<R extends Any, Name extends string> =
-  DescriptorOf<R, Name> extends Relationship.One<infer T extends Any>
+export type LinkageData<Res extends Any, Name extends string> =
+  DescriptorOf<Res, Name> extends Relationship.One<infer T extends Any>
     ? T["identifier"]
-    : DescriptorOf<R, Name> extends Relationship.Optional<infer T extends Any>
+    : DescriptorOf<Res, Name> extends Relationship.Optional<infer T extends Any>
       ? Schema.NullOr<AsSchema<T["identifier"]>>
-      : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
+      : DescriptorOf<Res, Name> extends Relationship.ToMany<infer T extends Any>
         ? Schema.$Array<AsSchema<T["identifier"]>>
         : never;
 
@@ -1847,23 +1847,23 @@ export type LinkageData<R extends Any, Name extends string> =
  * @category type-level
  */
 export type RelationshipSuccess<
-  R extends Any,
+  Res extends Any,
   Name extends string,
   DocMeta extends Schema.Top,
   Include = false,
   Fields = false,
 > = LinkageDocument<
-  AsSchema<LinkageData<R, Name>>,
+  AsSchema<LinkageData<Res, Name>>,
   DocMeta,
   AsSchema<
     [Fields] extends [true]
       ? IncludeEnabled<Include> extends true
         ? SparseUnion<
-            RelationshipIncludedMembers<R, Name, Include>,
-            RelationshipFieldsetTypes<R, Name, Include>
+            RelationshipIncludedMembers<Res, Name, Include>,
+            RelationshipFieldsetTypes<Res, Name, Include>
           >
         : typeof Schema.Never
-      : RelationshipIncludedOf<R, Name, Include>
+      : RelationshipIncludedOf<Res, Name, Include>
   >
 >;
 
@@ -1872,7 +1872,7 @@ export type RelationshipSuccess<
 type RootedAt<Paths, Name extends string> = Extract<Paths, Name | `${Name}.${string}`>;
 
 // Resolves to `T` for every concrete resource definition; needed because the
-// `Omit`-built view below can't be proven to satisfy `Any` while `R` is
+// `Omit`-built view below can't be proven to satisfy `Any` while `Res` is
 // still generic.
 type AsAny<T> = T extends Any ? T : never;
 
@@ -1882,7 +1882,7 @@ type ConstructSignature<R> = R extends new (_: never) => infer I ? new (_: never
 
 /**
  * The resource definition {@link getRelationship} derives its `?include=`
- * paths over: the parent `R` itself, except that a `paginated` relationship
+ * paths over: the parent `Res` itself, except that a `paginated` relationship
  * `Name` reads as a `many` (#483). A `paginated` relationship is never an
  * include path of its parent, because its linkage is never inlined; but on
  * its own relationship endpoint the linkage *is* the primary data, so the
@@ -1897,17 +1897,17 @@ type ConstructSignature<R> = R extends new (_: never) => infer I ? new (_: never
  * @since 0.18.0
  * @category type-level
  */
-export type RelationshipIncludeBase<R extends Any, Name extends string> =
-  DescriptorOf<R, Name> extends Relationship.Paginated<infer T extends Any>
+export type RelationshipIncludeBase<Res extends Any, Name extends string> =
+  DescriptorOf<Res, Name> extends Relationship.Paginated<infer T extends Any>
     ? AsAny<
-        Omit<R, "relationships"> &
-          ConstructSignature<R> & {
-            readonly relationships: Omit<R["relationships"], Name> & {
+        Omit<Res, "relationships"> &
+          ConstructSignature<Res> & {
+            readonly relationships: Omit<Res["relationships"], Name> & {
               readonly [K in Name]: Relationship.Many<T>;
             };
           }
       >
-    : R;
+    : Res;
 
 /**
  * Constrains the `?include=` paths {@link getRelationship} advertises, as
@@ -1923,10 +1923,10 @@ export type RelationshipIncludeBase<R extends Any, Name extends string> =
  * @since 0.18.0
  * @category models
  */
-export interface RelationshipIncludeOptions<R extends Any, Name extends string> {
+export interface RelationshipIncludeOptions<Res extends Any, Name extends string> {
   /** The exact set of legal paths, each rooted at the relationship. Anything else fails decoding (→ 400). */
   readonly paths?: ReadonlyArray<
-    RootedAt<IncludePathsTo<RelationshipIncludeBase<R, Name>, 3>, Name>
+    RootedAt<IncludePathsTo<RelationshipIncludeBase<Res, Name>, 3>, Name>
   >;
   /** How many hops from the parent resource to derive. Defaults to 2. */
   readonly depth?: IncludeDepth;
@@ -1951,13 +1951,13 @@ export interface RelationshipIncludeOptions<R extends Any, Name extends string> 
  * @since 0.18.0
  * @category models
  */
-export type RelationshipIncludeOption<R extends Any, Name extends string> =
+export type RelationshipIncludeOption<Res extends Any, Name extends string> =
   | boolean
-  | RelationshipIncludeOptions<R, Name>
-  | (SurfaceFor<R> & { readonly paths: ReadonlyArray<Name | `${Name}.${string}`> });
+  | RelationshipIncludeOptions<Res, Name>
+  | (SurfaceFor<Res> & { readonly paths: ReadonlyArray<Name | `${Name}.${string}`> });
 
 /**
- * The `?include=` paths a {@link getRelationship} over `R`'s relationship
+ * The `?include=` paths a {@link getRelationship} over `Res`'s relationship
  * `Name` with the `include` option `Include` legalises: the parent resource's
  * legal include paths (`Query.IncludePathsOf`) rooted at the relationship —
  * `never` while `include` is off. Under `include: true` on a `comments`
@@ -1970,9 +1970,9 @@ export type RelationshipIncludeOption<R extends Any, Name extends string> =
  * @since 0.18.0
  * @category type-level
  */
-export type RelationshipIncludePaths<R extends Any, Name extends string, Include> =
+export type RelationshipIncludePaths<Res extends Any, Name extends string, Include> =
   IncludeEnabled<Include> extends true
-    ? RootedAt<Query.IncludePathsOf<RelationshipIncludeBase<R, Name>, Include>, Name>
+    ? RootedAt<Query.IncludePathsOf<RelationshipIncludeBase<Res, Name>, Include>, Name>
     : never;
 
 /**
@@ -1985,12 +1985,15 @@ export type RelationshipIncludePaths<R extends Any, Name extends string, Include
  * @category schemas
  */
 export interface RelationshipIncluded<
-  R extends Any,
+  Res extends Any,
   Name extends string,
   Include,
 > extends Schema.Union<
   ReadonlyArray<
-    ResolveIncludePath<RelationshipIncludeBase<R, Name>, RelationshipIncludePaths<R, Name, Include>>
+    ResolveIncludePath<
+      RelationshipIncludeBase<Res, Name>,
+      RelationshipIncludePaths<Res, Name, Include>
+    >
   >
 > {}
 
@@ -2003,28 +2006,28 @@ export interface RelationshipIncluded<
  * @since 0.18.0
  * @category type-level
  */
-export type RelationshipIncludedOf<R extends Any, Name extends string, Include> =
+export type RelationshipIncludedOf<Res extends Any, Name extends string, Include> =
   IncludeEnabled<Include> extends true
     ? Include extends { readonly included: infer U extends Schema.Top }
       ? U
-      : RelationshipIncluded<R, Name, Include>
+      : RelationshipIncluded<Res, Name, Include>
     : typeof Schema.Never;
 
 // The members of a compound relationship document's `included` union
 // (`RelationshipIncludedOf`): a declared surface's own, else every resource a
 // legal path reaches from the parent.
-type RelationshipIncludedMembers<R extends Any, Name extends string, Include> = Include extends {
+type RelationshipIncludedMembers<Res extends Any, Name extends string, Include> = Include extends {
   readonly included: { readonly members: ReadonlyArray<infer M> };
 }
   ? M
   : ResolveIncludePath<
-      RelationshipIncludeBase<R, Name>,
-      RelationshipIncludePaths<R, Name, Include>
+      RelationshipIncludeBase<Res, Name>,
+      RelationshipIncludePaths<Res, Name, Include>
     >;
 
 /**
  * The wire types `?fields[TYPE]=` can name on a {@link getRelationship} over
- * `R`'s relationship `Name` that declares `fields`: every type a legal
+ * `Res`'s relationship `Name` that declares `fields`: every type a legal
  * {@link RelationshipIncludePaths} path reaches — the relationship's target
  * and every resource further along each path, a `Resource.family` replaced
  * by its members — and no other. The primary data is resource identifiers,
@@ -2036,15 +2039,22 @@ type RelationshipIncludedMembers<R extends Any, Name extends string, Include> = 
  * @since 0.18.0
  * @category type-level
  */
-export type RelationshipFieldsetTypes<R extends Any, Name extends string, Include> = ExpandFamilies<
-  ResolveIncludePath<RelationshipIncludeBase<R, Name>, RelationshipIncludePaths<R, Name, Include>>
+export type RelationshipFieldsetTypes<
+  Res extends Any,
+  Name extends string,
+  Include,
+> = ExpandFamilies<
+  ResolveIncludePath<
+    RelationshipIncludeBase<Res, Name>,
+    RelationshipIncludePaths<Res, Name, Include>
+  >
 >["type"];
 
 // The query options `getRelationship` builds over the parent: its include
 // and fieldset vocabulary, no sort, the caller's pagination and no filter.
-type RelationshipQueryOptions<R extends Any, Name extends string, Include, Fields, PageFields> = {
-  readonly include: RelationshipQueryInclude<R, Name, Include>;
-  readonly fields: RelationshipQueryFields<R, Name, Include, Fields>;
+type RelationshipQueryOptions<Res extends Any, Name extends string, Include, Fields, PageFields> = {
+  readonly include: RelationshipQueryInclude<Res, Name, Include>;
+  readonly fields: RelationshipQueryFields<Res, Name, Include, Fields>;
   readonly sort: false;
   readonly page: PageFields;
   readonly filter: never;
@@ -2052,10 +2062,10 @@ type RelationshipQueryOptions<R extends Any, Name extends string, Include, Field
 
 // The `fields` option `getRelationship` hands `Query.schema` over the parent
 // resource: the types the rooted paths reach as an allow-list, else off.
-type RelationshipQueryFields<R extends Any, Name extends string, Include, Fields> = [
+type RelationshipQueryFields<Res extends Any, Name extends string, Include, Fields> = [
   Fields,
 ] extends [true]
-  ? ReadonlyArray<RelationshipFieldsetTypes<R, Name, Include>>
+  ? ReadonlyArray<RelationshipFieldsetTypes<Res, Name, Include>>
   : false;
 
 // The `include` option `getRelationship` hands `Query.schema` over the
@@ -2064,16 +2074,16 @@ type RelationshipQueryFields<R extends Any, Name extends string, Include, Fields
 // it is a surface over the base, which is the parent itself wherever a
 // surface can name the relationship), else the rooted paths as an explicit
 // allow-list, else off.
-type RelationshipQueryInclude<R extends Any, Name extends string, Include> = [Include] extends [
+type RelationshipQueryInclude<Res extends Any, Name extends string, Include> = [Include] extends [
   AnySurface,
 ]
-  ? Include & { readonly resource: RelationshipIncludeBase<R, Name> }
+  ? Include & { readonly resource: RelationshipIncludeBase<Res, Name> }
   : IncludeEnabled<Include> extends true
     ? {
         readonly paths: ReadonlyArray<
           Extract<
-            RelationshipIncludePaths<R, Name, Include>,
-            IncludePathsTo<RelationshipIncludeBase<R, Name>, 3>
+            RelationshipIncludePaths<Res, Name, Include>,
+            IncludePathsTo<RelationshipIncludeBase<Res, Name>, 3>
           >
         >;
       }
@@ -2136,8 +2146,8 @@ const relationshipIncludePaths = (
  * @since 0.1.0
  * @category models
  */
-export interface LinkagePayload<R extends Any, Name extends string> extends Schema.Struct<{
-  readonly data: AsSchema<LinkageData<R, Name>>;
+export interface LinkagePayload<Res extends Any, Name extends string> extends Schema.Struct<{
+  readonly data: AsSchema<LinkageData<Res, Name>>;
 }> {}
 
 /**
@@ -2156,13 +2166,13 @@ export interface LinkagePayload<R extends Any, Name extends string> extends Sche
  * @category type-level
  */
 export type RelatedSuccess<
-  R extends Any,
+  Res extends Any,
   Name extends string,
   DocMeta extends Schema.Top,
   Include = false,
   Fields = false,
 > =
-  DescriptorOf<R, Name> extends Relationship.ToOne<infer T extends Any>
+  DescriptorOf<Res, Name> extends Relationship.ToOne<infer T extends Any>
     ? [Fields] extends [true]
       ? DataDocument<
           Schema.NullOr<AsSchema<SparseMember<T, FieldsetTypes<T, Include>>>>,
@@ -2170,7 +2180,7 @@ export type RelatedSuccess<
           DocMeta
         >
       : DataDocument<Schema.NullOr<T>, IncludedOf<T, Include>, DocMeta>
-    : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
+    : DescriptorOf<Res, Name> extends Relationship.ToMany<infer T extends Any>
       ? [Fields] extends [true]
         ? CollectionDocument<
             AsSchema<SparseMember<T, FieldsetTypes<T, Include>>>,
@@ -2312,7 +2322,7 @@ export const related = <
     readonly meta?: DocMeta;
   },
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>;
+  type Res = Resource<Type, Attributes, Rels, Meta, IdSchema>;
   const descriptor = descriptorFor(resource, name);
   const target = descriptor.ref();
   // A declared surface over the *target* derives the union its document
@@ -2338,7 +2348,7 @@ export const related = <
     Relationship.isToOne(descriptor)
       ? DataDocument(Schema.NullOr(data), { included: includedUnion, meta: docMeta })
       : CollectionDocument(data, { included: includedUnion, meta: docMeta })
-  ) as AsSchema<RelatedSuccess<R, Name, DocMeta, Include, Fields>>;
+  ) as AsSchema<RelatedSuccess<Res, Name, DocMeta, Include, Fields>>;
 
   return HttpApiEndpoint.get(
     (options?.name ?? name) as EndpointName,
@@ -2347,7 +2357,7 @@ export const related = <
       params: Schema.Struct({ id: resource.Id }),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
       query: Query.schema(
-        target as Target<R, Name>,
+        target as Target<Res, Name>,
         queryConfig(options) as {
           readonly include: Include;
           readonly fields: Fields;
@@ -2518,7 +2528,7 @@ export const getRelationship = <
     readonly fields?: Fields;
   },
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>;
+  type Res = Resource<Type, Attributes, Rels, Meta, IdSchema>;
   const descriptor = descriptorFor(resource, name);
   const target = descriptor.ref();
   const include = Option.map(
@@ -2558,7 +2568,7 @@ export const getRelationship = <
   });
   // SAFETY: `linkageData` mirrors `LinkageData` kind by kind, and `included`
   // mirrors `RelationshipSuccess`'s `included` union.
-  const success: RelationshipSuccess<R, Name, DocMeta, Include, Fields> = cast(
+  const success: RelationshipSuccess<Res, Name, DocMeta, Include, Fields> = cast(
     LinkageDocument(linkageData(descriptor, target), {
       meta: (options?.meta ?? AnyMeta) as DocMeta,
       ...someMember("included", included),
@@ -2572,11 +2582,11 @@ export const getRelationship = <
       params: Schema.Struct({ id: resource.Id }),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
       query: Query.schema(
-        // SAFETY: `Parameter` is the resource definition `R` names, and
+        // SAFETY: `Parameter` is the resource definition `Res` names, and
         // `base` its `RelationshipIncludeBase`. The query is the parent's:
         // its include paths are rooted at the relationship, and nothing else
         // it declares depends on the resource it is built over.
-        base as RelationshipIncludeBase<R, Name>,
+        base as RelationshipIncludeBase<Res, Name>,
         {
           include: Option.match(includable, {
             onNone: () => false,
@@ -2587,7 +2597,7 @@ export const getRelationship = <
           fields: options?.fields === true ? fieldsetNames : false,
           sort: false,
           page: options?.page,
-        } as RelationshipQueryOptions<R, Name, Include, Fields, PageFields>,
+        } as RelationshipQueryOptions<Res, Name, Include, Fields, PageFields>,
       ),
       success: asJsonApi(success),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
@@ -2673,15 +2683,15 @@ export const updateRelationship = <
     readonly meta?: DocMeta;
   },
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>;
+  type Res = Resource<Type, Attributes, Rels, Meta, IdSchema>;
   const descriptor = descriptorFor(resource, name);
   const target = descriptor.ref();
   const data = linkageData(descriptor, target);
   // The casts are sound: the runtime schemas mirror the conditional types kind by kind.
-  const payload = Schema.Struct({ data }) as LinkagePayload<R, Name>;
+  const payload = Schema.Struct({ data }) as LinkagePayload<Res, Name>;
   const success = LinkageDocument(data, {
     meta: (options?.meta ?? AnyMeta) as DocMeta,
-  }) as RelationshipSuccess<R, Name, DocMeta>;
+  }) as RelationshipSuccess<Res, Name, DocMeta>;
 
   return HttpApiEndpoint.patch(
     (options?.name ?? `update${capitalize(name)}Relationship`) as EndpointName,
@@ -2771,15 +2781,15 @@ export const addRelationship = <
     readonly meta?: DocMeta;
   },
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>;
+  type Res = Resource<Type, Attributes, Rels, Meta, IdSchema>;
   const descriptor = descriptorFor(resource, name);
   const target = descriptor.ref();
   const data = Schema.Array(target.identifier);
   // The casts are sound: to-many linkage is always an identifier array.
-  const payload = Schema.Struct({ data }) as LinkagePayload<R, Name>;
+  const payload = Schema.Struct({ data }) as LinkagePayload<Res, Name>;
   const success = LinkageDocument(data, {
     meta: (options?.meta ?? AnyMeta) as DocMeta,
-  }) as RelationshipSuccess<R, Name, DocMeta>;
+  }) as RelationshipSuccess<Res, Name, DocMeta>;
 
   return HttpApiEndpoint.post(
     (options?.name ?? `add${capitalize(name)}Relationship`) as EndpointName,
@@ -2864,13 +2874,13 @@ export const removeRelationship = <
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors>,
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>;
+  type Res = Resource<Type, Attributes, Rels, Meta, IdSchema>;
   const descriptor = descriptorFor(resource, name);
   const target = descriptor.ref();
   // The cast is sound: to-many linkage is always an identifier array.
   const payload = Schema.Struct({
     data: Schema.Array(target.identifier),
-  }) as LinkagePayload<R, Name>;
+  }) as LinkagePayload<Res, Name>;
 
   return HttpApiEndpoint.delete(
     (options?.name ?? `remove${capitalize(name)}Relationship`) as EndpointName,
@@ -3052,7 +3062,7 @@ export type MetaOption<Meta extends Schema.Top> = Schema.Top | ((base: Meta) => 
  * @since 0.1.0
  * @category models
  */
-export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
+export interface GetConfig<Meta extends Schema.Top, Res extends Any = Any> {
   readonly name?: string;
   readonly path?: `/${string}`;
   readonly errors?: ReadonlyArray<ErrorClass>;
@@ -3063,7 +3073,7 @@ export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
    * `Include.Surface` legalises exactly a declared surface and derives the
    * matching `included` union for this endpoint's document.
    */
-  readonly include?: Query.IncludeOption<R>;
+  readonly include?: Query.IncludeOption<Res>;
   readonly fields?: boolean;
   readonly meta?: MetaOption<Meta>;
   /**
@@ -3090,8 +3100,8 @@ export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
  * @since 0.1.0
  * @category models
  */
-export interface ListConfig<R extends Any, Meta extends Schema.Top> extends GetConfig<Meta, R> {
-  readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>>;
+export interface ListConfig<Res extends Any, Meta extends Schema.Top> extends GetConfig<Meta, Res> {
+  readonly sort?: boolean | ReadonlyArray<AttributeKeys<Res>>;
   readonly page?: Schema.Struct.Fields;
   /** `true` for the filter grammar over the resource's declaration, or a per-key field map. */
   readonly filter?: Query.FilterOption;
@@ -3200,9 +3210,9 @@ export interface DeleteConfig {
  * @since 0.1.0
  * @category models
  */
-export interface EndpointsOption<R extends Any, Meta extends Schema.Top> {
-  readonly get?: boolean | GetConfig<Meta, R>;
-  readonly list?: boolean | ListConfig<R, Meta>;
+export interface EndpointsOption<Res extends Any, Meta extends Schema.Top> {
+  readonly get?: boolean | GetConfig<Meta, Res>;
+  readonly list?: boolean | ListConfig<Res, Meta>;
   readonly create?: boolean | WriteConfig<Meta>;
   readonly update?: boolean | WriteConfig<Meta>;
   readonly delete?: boolean | DeleteConfig;
@@ -3220,7 +3230,7 @@ export interface EndpointsOption<R extends Any, Meta extends Schema.Top> {
  * @since 0.1.0 (`relationshipInclude` and `relationshipFields` since 0.18.0)
  * @category models
  */
-export interface RelationshipConfig<R extends Any = Any, Name extends string = string> {
+export interface RelationshipConfig<Res extends Any = Any, Name extends string = string> {
   readonly errors?: ReadonlyArray<ErrorClass>;
   readonly include?: boolean;
   readonly fields?: boolean;
@@ -3235,7 +3245,7 @@ export interface RelationshipConfig<R extends Any = Any, Name extends string = s
    *
    * @since 0.18.0
    */
-  readonly relationshipInclude?: RelationshipIncludeOption<R, Name>;
+  readonly relationshipInclude?: RelationshipIncludeOption<Res, Name>;
   /**
    * The `fields` option of this relationship's generated `getRelationship`
    * endpoint: `true` declares `?fields[TYPE]=` for every type its include
@@ -3277,9 +3287,9 @@ export type ResourceRelationshipIncludeOption =
  * @since 0.1.0
  * @category models
  */
-export type RelationshipsOption<R extends Any> =
+export type RelationshipsOption<Res extends Any> =
   | boolean
-  | { readonly [K in RelationshipName<R>]?: boolean | RelationshipConfig<R, K> };
+  | { readonly [K in RelationshipName<Res>]?: boolean | RelationshipConfig<Res, K> };
 
 // --- extraction helpers (config objects are captured via `const`) ----------
 
@@ -3383,14 +3393,14 @@ type EnabledInclude<Include> = [Include] extends [false] ? false : true;
 // override, else the top-level default. Named (rather than inlined at each use
 // site) because `list` needs them twice — once as its own options, once to
 // reconstruct the query schema they compose by default.
-type ListInclude<C, R extends Any, GInclude extends Query.IncludeOption<R>> =
-  FieldOr<C, "include", GInclude> extends Query.IncludeOption<R>
+type ListInclude<C, Res extends Any, GInclude extends Query.IncludeOption<Res>> =
+  FieldOr<C, "include", GInclude> extends Query.IncludeOption<Res>
     ? FieldOr<C, "include", GInclude>
     : GInclude;
 type ListFields<C, GFields extends boolean> =
   FieldOr<C, "fields", GFields> extends boolean ? FieldOr<C, "fields", GFields> : GFields;
-type ListSort<C, R extends Any, GSort extends boolean | ReadonlyArray<AttributeKeys<R>>> =
-  FieldOr<C, "sort", GSort> extends boolean | ReadonlyArray<AttributeKeys<R>>
+type ListSort<C, Res extends Any, GSort extends boolean | ReadonlyArray<AttributeKeys<Res>>> =
+  FieldOr<C, "sort", GSort> extends boolean | ReadonlyArray<AttributeKeys<Res>>
     ? FieldOr<C, "sort", GSort>
     : GSort;
 type ListPage<C, GPage extends Schema.Struct.Fields> =
@@ -3650,12 +3660,12 @@ type RelInclude<RC, GInclude extends boolean> =
   FieldOr<RC, "include", GInclude> extends boolean ? FieldOr<RC, "include", GInclude> : GInclude;
 type RelFields<RC, GFields extends boolean> =
   FieldOr<RC, "fields", GFields> extends boolean ? FieldOr<RC, "fields", GFields> : GFields;
-// The `include` option a generated `getRelationship` over `R`'s relationship
+// The `include` option a generated `getRelationship` over `Res`'s relationship
 // `K` takes: the relationship's own `relationshipInclude`, else the top-level
 // one.
-type RelRelationshipInclude<R extends Any, K extends string, RC, GRelInclude> =
+type RelRelationshipInclude<Res extends Any, K extends string, RC, GRelInclude> =
   FieldOr<RC, "relationshipInclude", GRelInclude> extends infer I
-    ? I extends RelationshipIncludeOption<R, K>
+    ? I extends RelationshipIncludeOption<Res, K>
       ? I
       : false
     : false;

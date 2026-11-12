@@ -274,13 +274,13 @@ export const FLAT_PAYLOAD_MEDIA_TYPE = "application/json";
  * @category models
  */
 export interface FlatReadOnlyOptions<
-  R extends Schema.Top,
+  Res extends Schema.Top,
   List extends Query.FlatListStruct,
   Filters extends ReadonlyArray<Extract<keyof List["fields"], string>>,
   Surface extends AnySurface,
   TM extends Schema.Top = never,
 > {
-  readonly resource: R;
+  readonly resource: Res;
   /** The flat `List<X>` input (the page cursor plus the family's own filters). */
   readonly list: List;
   /** Fields of `list` re-keyed to `filter[…]` on the wire — see `Query.flatList`. */
@@ -310,7 +310,7 @@ export interface FlatReadOnlyOptions<
  * @category models
  */
 export interface FlatOptions<
-  R extends Schema.Top,
+  Res extends Schema.Top,
   List extends Query.FlatListStruct,
   Filters extends ReadonlyArray<Extract<keyof List["fields"], string>>,
   Surface extends AnySurface,
@@ -318,7 +318,7 @@ export interface FlatOptions<
   Update extends Schema.Top,
   Hidden extends boolean = false,
   TM extends Schema.Top = never,
-> extends FlatReadOnlyOptions<R, List, Filters, Surface, TM> {
+> extends FlatReadOnlyOptions<Res, List, Filters, Surface, TM> {
   /** The flat `Create<X>` command input (attributes plus relationship ids) — not the JSON:API envelope. */
   readonly create: Create;
   /** The flat `Update<X>` command input, keyed by the required `id`. */
@@ -352,24 +352,24 @@ const SHARED_FLAT_OPTIONS = {
 type SurfaceIncluded<Surface extends AnySurface> = Surface["included"];
 
 const flatWire = <
-  R extends Schema.Top,
+  Res extends Schema.Top,
   List extends Query.FlatListStruct,
   const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>>,
   Surface extends AnySurface,
   TM extends Schema.Top,
 >(
-  options: FlatReadOnlyOptions<R, List, Filters, Surface, TM>,
+  options: FlatReadOnlyOptions<Res, List, Filters, Surface, TM>,
 ) => {
   const documentOptions = {
     ...definedMember("included", options.include?.included),
     ...definedMember("toManyMeta", options.toManyMeta),
   };
   return {
-    document: Endpoint.ResourceDocument<R, SurfaceIncluded<Surface>, TM>(
+    document: Endpoint.ResourceDocument<Res, SurfaceIncluded<Surface>, TM>(
       options.resource,
       documentOptions,
     ),
-    collection: Endpoint.FlatCollectionDocument<R, SurfaceIncluded<Surface>, TM>(
+    collection: Endpoint.FlatCollectionDocument<Res, SurfaceIncluded<Surface>, TM>(
       options.resource,
       documentOptions,
     ),

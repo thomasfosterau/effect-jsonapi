@@ -389,8 +389,8 @@ assertType<Chain7Collapsed>(true);
 // levels that were written, and terminates on the declaration's own depth
 // rather than on the graph's.
 //
-// The constraint side is where a cycle would bite: `Spec<R>` reaches exactly
-// one hop (`Branch<Target<R, K>, AnySpec>`, not `Spec<Target<R, K>>`), so it
+// The constraint side is where a cycle would bite: `Spec<Res>` reaches exactly
+// one hop (`Branch<Target<Res, K>, AnySpec>`, not `Spec<Target<Res, K>>`), so it
 // never walks the graph either. A branch's own children are checked against
 // *its* target by `nested`'s signature, at the call site that writes them.
 

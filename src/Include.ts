@@ -170,8 +170,8 @@ export interface AnySpec {
  * @since 0.15.0
  * @category models
  */
-export interface Branch<R extends Any, S extends AnySpec> extends AnyBranch {
-  readonly target: R;
+export interface Branch<Res extends Any, S extends AnySpec> extends AnyBranch {
+  readonly target: Res;
   readonly children: S;
 }
 
@@ -190,12 +190,12 @@ export interface Branch<R extends Any, S extends AnySpec> extends AnyBranch {
  * @since 0.15.0
  * @category models
  */
-export type Spec<R extends Any> = {
-  readonly [K in IncludableKeys<R>]?: Target<R, K> | Branch<Target<R, K>, AnySpec>;
+export type Spec<Res extends Any> = {
+  readonly [K in IncludableKeys<Res>]?: Target<Res, K> | Branch<Target<Res, K>, AnySpec>;
 };
 
-// Resolves to `T` for every concrete declaration; needed because `Spec<R>`
-// can't be proven to satisfy `AnySpec` while `R` is still generic. The same
+// Resolves to `T` for every concrete declaration; needed because `Spec<Res>`
+// can't be proven to satisfy `AnySpec` while `Res` is still generic. The same
 // device as `Resource`'s `AsFields`.
 type AsSpec<T> = T extends AnySpec ? T : never;
 
@@ -231,13 +231,13 @@ type AsSpec<T> = T extends AnySpec ? T : never;
  * @since 0.15.0
  * @category constructors
  */
-export const nested = <R extends Any, const S extends Spec<R>>(
-  target: R,
+export const nested = <Res extends Any, const S extends Spec<Res>>(
+  target: Res,
   children: S,
-): Branch<R, AsSpec<S>> => {
+): Branch<Res, AsSpec<S>> => {
   // Annotated rather than cast, so that `TAG` drifting from the discriminant
   // the interfaces declare would be a compile error here.
-  const branch: Branch<R, AsSpec<S>> = {
+  const branch: Branch<Res, AsSpec<S>> = {
     [TAG]: "branch",
     target,
     children: children as AsSpec<S>,
@@ -372,10 +372,10 @@ export interface AnySurface {
  * @since 0.15.0
  * @category models
  */
-export interface Surface<R extends Any, S extends AnySpec> {
+export interface Surface<Res extends Any, S extends AnySpec> {
   readonly "~@thomasfosterau/effect-jsonapi/include": "surface";
   /** The resource whose surface this is. */
-  readonly resource: R;
+  readonly resource: Res;
   /** The declaration itself. */
   readonly spec: S;
   /**
@@ -407,7 +407,7 @@ export interface Surface<R extends Any, S extends AnySpec> {
  * @since 0.15.0
  * @category models
  */
-export type SurfaceFor<R extends Any> = AnySurface & { readonly resource: R };
+export type SurfaceFor<Res extends Any> = AnySurface & { readonly resource: Res };
 
 /**
  * Whether a value is a declared include {@link Surface} — as opposed to a
@@ -549,7 +549,7 @@ export function paths(spec: AnySpec): ReadonlyArray<string> {
 
 /**
  * The `included` union of a read endpoint's default document, for an endpoint
- * over `R` with the `include` option `I`: a `Schema.Union` over the
+ * over `Res` with the `include` option `I`: a `Schema.Union` over the
  * non-`paginated` direct targets (unless `I` is a declared {@link Surface})
  * and, when `I` turns `include` on, every resource a legal include path
  * reaches (#320). For a declared surface that is exactly the resources the
@@ -565,8 +565,8 @@ export function paths(spec: AnySpec): ReadonlyArray<string> {
  * @since 0.17.0
  * @category models
  */
-export interface Reachable<R extends Any, I> extends Schema.Union<
-  ReadonlyArray<I extends unknown ? IncludedResources<R, I> : never>
+export interface Reachable<Res extends Any, I> extends Schema.Union<
+  ReadonlyArray<I extends unknown ? IncludedResources<Res, I> : never>
 > {}
 
 /**
@@ -602,17 +602,17 @@ type MembersIncluded<Members extends Any, I> =
       ? never
       : MembersReachable<Members, Exclude<I, { readonly included: unknown }>>);
 
-// A `Query.IncludeOptions` over `R`, and an endpoint's `include` option over
-// `R` (`Query.IncludeOption`), spelled out here because `Query` is HTTP-tier
+// A `Query.IncludeOptions` over `Res`, and an endpoint's `include` option over
+// `Res` (`Query.IncludeOption`), spelled out here because `Query` is HTTP-tier
 // and this module belongs to the schema-only entry point
 // (`test/entry-points.test.ts`). `test/include-depth-included.types.ts` pins that
 // every `Query.IncludeOption` is accepted.
-interface GraphOptions<R extends Any> {
-  readonly paths?: ReadonlyArray<IncludePathsTo<R, 3>>;
+interface GraphOptions<Res extends Any> {
+  readonly paths?: ReadonlyArray<IncludePathsTo<Res, 3>>;
   readonly depth?: IncludeDepth;
   readonly "~@thomasfosterau/effect-jsonapi/include"?: never;
 }
-type EndpointInclude<R extends Any> = boolean | GraphOptions<R> | SurfaceFor<R>;
+type EndpointInclude<Res extends Any> = boolean | GraphOptions<Res> | SurfaceFor<Res>;
 
 // What an endpoint's `include` option is at runtime: a boolean, a
 // `Query.IncludeOptions`, or a declared surface.
@@ -749,10 +749,10 @@ export function included<const S extends AnySpec>(spec: S): Included<S>;
 // `readonly Any[]`). That is accepted because editors run TypeScript 6. The
 // rejections are pinned by "The overloads cannot be confused" in
 // test/include-depth-included.types.ts.
-export function included<R extends Any, const I extends EndpointInclude<R>>(
-  resource: R,
+export function included<Res extends Any, const I extends EndpointInclude<Res>>(
+  resource: Res,
   options: { readonly include: I },
-): Reachable<R, I>;
+): Reachable<Res, I>;
 export function included<
   const Resources extends ReadonlyArray<Any>,
   const I extends EndpointInclude<Resources[number]>,
@@ -828,10 +828,10 @@ export function included(
  * @since 0.15.0
  * @category constructors
  */
-export const make = <R extends Any, const S extends Spec<R>>(
-  resource: R,
+export const make = <Res extends Any, const S extends Spec<Res>>(
+  resource: Res,
   spec: S,
-): Surface<R, AsSpec<S>> => {
+): Surface<Res, AsSpec<S>> => {
   const entries = entriesOf(Option.some(resource), spec as AsSpec<S>);
   if (Arr.isReadonlyArrayEmpty(entries)) {
     throw declarationError(
@@ -868,5 +868,5 @@ export const make = <R extends Any, const S extends Spec<R>>(
     targets,
     has: (path: string) => HashMap.has(targets, path),
   };
-  return { ...surface, spec } as Surface<R, AsSpec<S>>;
+  return { ...surface, spec } as Surface<Res, AsSpec<S>>;
 };
