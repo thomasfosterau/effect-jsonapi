@@ -494,11 +494,13 @@ const hex = (bytes: ArrayBuffer): string =>
  * @category utils
  */
 export const fingerprint = (request: Fingerprinted): Effect.Effect<string> =>
-  Effect.tryPromise(() =>
-    globalThis.crypto.subtle
-      .digest("SHA-256", new TextEncoder().encode(canonical(request)))
-      .then(hex),
-  ).pipe(
+  Effect.tryPromise({
+    try: () =>
+      globalThis.crypto.subtle
+        .digest("SHA-256", new TextEncoder().encode(canonical(request)))
+        .then(hex),
+    catch: (cause) => cause,
+  }).pipe(
     // SHA-256 is mandatory in every WebCrypto implementation, so a rejection
     // is a broken runtime, not a failure a caller could recover from.
     Effect.orDie,

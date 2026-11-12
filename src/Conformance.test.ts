@@ -5981,10 +5981,8 @@ describe("Conformance: the write fixture", () => {
     7,
   );
 
-  brokenWrite(
-    "a 201 without a Location header",
-    "spec/status/create-location",
-    (canned, request) => (creates(request, canned) ? { ...canned, headers: {} } : canned),
+  brokenWrite("a 201 without a Location header", "spec/status/create-location", (canned, request) =>
+    creates(request, canned) ? { ...canned, headers: {} } : canned,
   );
 
   brokenWrite(

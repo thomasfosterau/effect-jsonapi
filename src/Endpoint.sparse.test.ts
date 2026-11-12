@@ -819,7 +819,10 @@ describe("a projected answer over HTTP (#322)", () => {
   const inMemory = HttpClient.make((request) =>
     Effect.gen(function* () {
       const web = yield* HttpClientRequest.toWeb(request);
-      const response = yield* Effect.tryPromise(() => fetchApp(web));
+      const response = yield* Effect.tryPromise({
+        try: () => fetchApp(web),
+        catch: (cause) => cause,
+      });
       return HttpClientResponse.fromWeb(request, response);
     }).pipe(Effect.orDie),
   );

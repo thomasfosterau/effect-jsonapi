@@ -402,9 +402,17 @@ describe("Idempotency.layer", () => {
       );
       const store = Idempotency.memoryStore();
       const { dispose, request } = server({ api, live, store });
-      yield* Effect.addFinalizer(() => Effect.orDie(Effect.tryPromise(() => dispose())));
-      yield* Effect.tryPromise(() => request({ body: createBody }));
-      yield* Effect.tryPromise(() => request({ body: createBody }));
+      yield* Effect.addFinalizer(() =>
+        Effect.orDie(Effect.tryPromise({ try: () => dispose(), catch: (cause) => cause })),
+      );
+      yield* Effect.tryPromise({
+        try: () => request({ body: createBody }),
+        catch: (cause) => cause,
+      });
+      yield* Effect.tryPromise({
+        try: () => request({ body: createBody }),
+        catch: (cause) => cause,
+      });
       expect(calls).toBe(2);
       expect(yield* store.claim(attempt("k1", "fp"))).toEqual({ _tag: "Claimed" });
     }),
@@ -531,10 +539,13 @@ describe("Idempotency.layer", () => {
       ) as Layer.Layer<any, any, any>;
       const store = Idempotency.memoryStore();
       const { dispose, request } = server({ api, live, store });
-      yield* Effect.addFinalizer(() => Effect.orDie(Effect.tryPromise(() => dispose())));
-      const read = yield* Effect.tryPromise(() =>
-        request({ method: "GET", url: "http://localhost/articles/1", key: "k1" }),
+      yield* Effect.addFinalizer(() =>
+        Effect.orDie(Effect.tryPromise({ try: () => dispose(), catch: (cause) => cause })),
       );
+      const read = yield* Effect.tryPromise({
+        try: () => request({ method: "GET", url: "http://localhost/articles/1", key: "k1" }),
+        catch: (cause) => cause,
+      });
       expect(read.status).toBe(200);
       expect(yield* store.claim(attempt("k1", "fp"))).toEqual({ _tag: "Claimed" });
     }),
