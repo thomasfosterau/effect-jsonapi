@@ -138,4 +138,4 @@ export interface Term<Field extends string = string> {
 export const able =
   () =>
   <S extends Schema.Top>(self: S): Declared<S> =>
-    self.annotate({ [AnnotationId]: true }) as unknown as Declared<S>;
+    self.annotate({ [AnnotationId]: true }) as Declared<S>;

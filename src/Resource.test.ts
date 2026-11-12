@@ -2017,7 +2017,7 @@ describe("Resource.annotate / Resource.annotations", () => {
 
     // The defect: Effect's own `annotate` rebuilds the *schema*, so the members
     // `make` assigned onto it are gone.
-    const bare = Base.annotate({ title: "Widget" }) as unknown as Partial<typeof Base>;
+    const bare = Base.annotate({ title: "Widget" }) as Partial<typeof Base>;
     expect(bare.type).toBeUndefined();
     expect(bare.document).toBeUndefined();
 

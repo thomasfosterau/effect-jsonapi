@@ -544,7 +544,7 @@ export const one = <
     filter: options?.filter ?? false,
     key: storageKey("Relationship.one", options?.key),
     meta: options?.meta ?? AnyMeta,
-  }) as unknown as One<R, NoInfer<F>, NoInfer<K>, NoInfer<M>>;
+  }) as One<R, NoInfer<F>, NoInfer<K>, NoInfer<M>>;
 
 /**
  * Declares an optional (nullable) to-one relationship: `data` is a resource
@@ -588,7 +588,7 @@ export const optional = <
     filter: options?.filter ?? false,
     key: storageKey("Relationship.optional", options?.key),
     meta: options?.meta ?? AnyMeta,
-  }) as unknown as Optional<R, NoInfer<F>, NoInfer<K>, NoInfer<M>>;
+  }) as Optional<R, NoInfer<F>, NoInfer<K>, NoInfer<M>>;
 
 /**
  * Declares a to-many relationship with inline linkage: `data` is an array of
@@ -616,7 +616,7 @@ export const many = <R extends Any, M extends Schema.Top = typeof AnyMeta>(
   ref: () => R,
   options?: MetaOptions<M>,
 ): Many<R, NoInfer<M>> =>
-  ({ kind: "many", ref, meta: options?.meta ?? AnyMeta }) as unknown as Many<R, NoInfer<M>>;
+  ({ kind: "many", ref, meta: options?.meta ?? AnyMeta }) as Many<R, NoInfer<M>>;
 
 /**
  * Declares an unbounded to-many relationship with no inline linkage: the
@@ -695,7 +695,7 @@ export const paginated = <
     ref,
     order: order as NoInfer<O>,
     meta: options?.meta ?? AnyMeta,
-  } as unknown as Paginated<R, NoInfer<O>, NoInfer<M>>;
+  } as Paginated<R, NoInfer<O>, NoInfer<M>>;
 };
 
 // ---------------------------------------------------------------------------

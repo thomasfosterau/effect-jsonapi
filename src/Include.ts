@@ -534,7 +534,8 @@ const entriesOf = (owner: Any | undefined, spec: AnySpec): ReadonlyArray<Entry> 
  * @since 0.15.0
  * @category accessors
  */
-export const paths = <const S extends AnySpec>(spec: S): ReadonlyArray<Paths<S>> => {
+export function paths<const S extends AnySpec>(spec: S): ReadonlyArray<Paths<S>>;
+export function paths(spec: AnySpec): ReadonlyArray<string> {
   const seen = MutableHashSet.empty<string>();
   const out: Array<string> = [];
   Arr.forEach(entriesOf(undefined, spec), (entry) => {
@@ -542,8 +543,8 @@ export const paths = <const S extends AnySpec>(spec: S): ReadonlyArray<Paths<S>>
     MutableHashSet.add(seen, entry.path);
     out.push(entry.path);
   });
-  return out as unknown as ReadonlyArray<Paths<S>>;
-};
+  return out;
+}
 
 /**
  * The `included` union of a read endpoint's default document, for an endpoint
@@ -866,5 +867,5 @@ export const make = <R extends Any, const S extends Spec<R>>(
     targets,
     has: (path: string) => HashMap.has(targets, path),
   };
-  return { ...surface, spec } as unknown as Surface<R, AsSpec<S>>;
+  return { ...surface, spec } as Surface<R, AsSpec<S>>;
 };

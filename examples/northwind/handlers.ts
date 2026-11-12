@@ -32,6 +32,7 @@ import * as Iterable from "effect/Iterable";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ord from "effect/Order";
+import * as P from "effect/Predicate";
 import { HttpApiBuilder } from "effect/http-api";
 import { Document, Handlers, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
 import {
@@ -565,7 +566,11 @@ const orderItemTargets = {
 } satisfies Handlers.IncludeTargets;
 
 // Apply `?sort=` terms (already decoded to `{ field, direction }`) in order.
-const sortBy = <A extends { readonly attributes: any }>(
+const sortBy = <
+  A extends {
+    readonly attributes: { readonly [field: string]: string | number | boolean | Date };
+  },
+>(
   items: Array<A>,
   sort: ReadonlyArray<{ readonly field: string; readonly direction: "asc" | "desc" }> | undefined,
 ): Array<A> => {
@@ -573,6 +578,8 @@ const sortBy = <A extends { readonly attributes: any }>(
     const ascending = Ord.make<A>((a, b) => {
       const left = a.attributes[term.field];
       const right = b.attributes[term.field];
+      // An absent attribute compares equal to anything, as `undefined < x` is false both ways.
+      if (P.isUndefined(left) || P.isUndefined(right)) return 0;
       return left < right ? -1 : left > right ? 1 : 0;
     });
     // In place, as callers expect: each pass is a stable sort by one term.

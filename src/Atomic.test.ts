@@ -137,9 +137,9 @@ describe("operation schemas", () => {
         attributes: { title: "Hello", body: "World" },
       },
     }) as { op: string; data: { type: string; lid?: string } };
-    expect(operation.op).toBe("add");
-    expect(operation.data.type).toBe("articles");
-    expect(operation.data.lid).toBe("a1");
+    expect(operation).toHaveProperty(["op"], "add");
+    expect(operation).toHaveProperty(["data", "type"], "articles");
+    expect(operation).toHaveProperty(["data", "lid"], "a1");
   });
 
   it("decodes an add operation with lid-based relationship linkage", () => {
@@ -153,8 +153,11 @@ describe("operation schemas", () => {
           comments: { data: [{ type: "comments", lid: "c1" }] },
         },
       },
-    }) as any;
-    expect(operation.data.relationships.comments.data).toEqual([{ type: "comments", lid: "c1" }]);
+    });
+    expect(operation).toHaveProperty(
+      ["data", "relationships", "comments", "data"],
+      [{ type: "comments", lid: "c1" }],
+    );
   });
 
   it("requires `one` relationships in add operations", () => {
@@ -173,8 +176,11 @@ describe("operation schemas", () => {
         attributes: { body: "Nice" },
         relationships: { author: { data: { type: "people", lid: "p1" } } },
       },
-    }) as any;
-    expect(operation.data.relationships.author.data).toEqual({ type: "people", lid: "p1" });
+    });
+    expect(operation).toHaveProperty(["data", "relationships", "author", "data"], {
+      type: "people",
+      lid: "p1",
+    });
   });
 
   it("excludes `paginated` relationships from add operations", () => {
@@ -186,8 +192,8 @@ describe("operation schemas", () => {
       attributes: { title: "Hello", body: "" },
       relationships: { author: { data: null } },
     };
-    const operation = decodeOperation({ op: "add", data }) as any;
-    expect(operation.data.relationships).toEqual({ author: { data: null } });
+    const operation = decodeOperation({ op: "add", data });
+    expect(operation).toHaveProperty(["data", "relationships"], { author: { data: null } });
     expect(
       issuesOf(
         Schema.decodeUnknownResult(Atomic.AddOperation(Article))({
@@ -214,26 +220,26 @@ describe("operation schemas", () => {
         id: "1",
         attributes: { title: "Updated" },
       },
-    }) as any;
-    expect(operation.op).toBe("update");
-    expect(operation.data.id).toBe("1");
-    expect(operation.data.attributes).toEqual({ title: "Updated" });
+    });
+    expect(operation).toHaveProperty(["op"], "update");
+    expect(operation).toHaveProperty(["data", "id"], "1");
+    expect(operation).toHaveProperty(["data", "attributes"], { title: "Updated" });
   });
 
   it("update operation honours the tri-state attribute semantics (set / unset / leave)", () => {
     const Widget = Resource("widgets", { attributes: { note: Schema.NullOr(Schema.String) } });
-    const Op = Atomic.UpdateOperation(Widget) as Schema.Codec<any, unknown>;
+    const Op = Atomic.UpdateOperation(Widget);
     const decode = <A>(attributes: A) =>
       Schema.decodeUnknownSync(Op)({
         op: "update",
         data: { type: "widgets", id: "1", attributes },
       });
     // present `undefined` is accepted (the runtime now matches the widened type)
-    expect("note" in decode({ note: undefined }).data.attributes).toBe(true);
+    expect("note" in (decode({ note: undefined }).data.attributes ?? {})).toBe(true);
     // null clears, value sets, absent leaves unchanged
-    expect(decode({ note: null }).data.attributes.note).toBeNull();
-    expect(decode({ note: "hi" }).data.attributes.note).toBe("hi");
-    expect("note" in decode({}).data.attributes).toBe(false);
+    expect(decode({ note: null }).data.attributes?.note).toBeNull();
+    expect(decode({ note: "hi" }).data.attributes?.note).toBe("hi");
+    expect("note" in (decode({}).data.attributes ?? {})).toBe(false);
     // the declared type advertises value | null | undefined
     type Attrs = NonNullable<Atomic.UpdateOperation<typeof Widget>["Type"]["data"]["attributes"]>;
     expectTypeOf<Attrs["note"]>().toEqualTypeOf<string | null | undefined>();
@@ -243,17 +249,17 @@ describe("operation schemas", () => {
     const operation = decodeOperation({
       op: "remove",
       ref: { type: "articles", id: "1" },
-    }) as any;
-    expect(operation.op).toBe("remove");
-    expect(operation.ref).toEqual({ type: "articles", id: "1" });
+    });
+    expect(operation).toHaveProperty(["op"], "remove");
+    expect(operation).toHaveProperty(["ref"], { type: "articles", id: "1" });
   });
 
   it("decodes a remove operation targeted by lid", () => {
     const operation = decodeOperation({
       op: "remove",
       ref: { type: "articles", lid: "a1" },
-    }) as any;
-    expect(operation.ref).toEqual({ type: "articles", lid: "a1" });
+    });
+    expect(operation).toHaveProperty(["ref"], { type: "articles", lid: "a1" });
   });
 
   it("rejects operations on resources outside the set", () => {
@@ -281,9 +287,9 @@ describe("relationship operation schemas", () => {
       op: "update",
       ref: { type: "comments", id: "5", relationship: "author" },
       data: { type: "people", id: "9" },
-    }) as any;
-    expect(operation.ref.relationship).toBe("author");
-    expect(operation.data).toEqual({ type: "people", id: "9" });
+    });
+    expect(operation).toHaveProperty(["ref", "relationship"], "author");
+    expect(operation).toHaveProperty(["data"], { type: "people", id: "9" });
   });
 
   it("rejects null data for required (`one`) to-one relationship updates", () => {
@@ -301,8 +307,8 @@ describe("relationship operation schemas", () => {
       op: "update",
       ref: { type: "articles", id: "1", relationship: "author" },
       data: null,
-    }) as any;
-    expect(operation.data).toBeNull();
+    });
+    expect(operation).toHaveProperty(["data"], null);
   });
 
   it("decodes `many` relationship add / update / remove", () => {
@@ -314,10 +320,10 @@ describe("relationship operation schemas", () => {
           { type: "comments", id: "5" },
           { type: "comments", lid: "c1" },
         ],
-      }) as any;
-      expect(operation.op).toBe(op);
-      expect(operation.ref.relationship).toBe("comments");
-      expect(operation.data).toHaveLength(2);
+      });
+      expect(operation).toHaveProperty(["op"], op);
+      expect(operation).toHaveProperty(["ref", "relationship"], "comments");
+      expect(operation).toHaveProperty(["data", "length"], 2);
     });
   });
 
@@ -329,9 +335,9 @@ describe("relationship operation schemas", () => {
         op,
         ref: { type: "articles", id: "1", relationship: "subscribers" },
         data: [{ type: "people", id: "9" }],
-      }) as any;
-      expect(operation.op).toBe(op);
-      expect(operation.ref.relationship).toBe("subscribers");
+      });
+      expect(operation).toHaveProperty(["op"], op);
+      expect(operation).toHaveProperty(["ref", "relationship"], "subscribers");
     });
   });
 
@@ -376,17 +382,17 @@ describe("operation union disambiguation", () => {
       op: "update",
       ref: { type: "articles", id: "1", relationship: "comments" },
       data: [{ type: "comments", id: "5" }],
-    }) as any;
-    expect(operation.ref.relationship).toBe("comments");
-    expect(Array.isArray(operation.data)).toBe(true);
+    });
+    expect(operation).toHaveProperty(["ref", "relationship"], "comments");
+    expect(operation).toHaveProperty("data", [{ type: "comments", id: "5" }]);
   });
 
   it("resource removes still decode (refs without relationship)", () => {
     const operation = decodeOperation({
       op: "remove",
       ref: { type: "comments", id: "5" },
-    }) as any;
-    expect(operation.ref).toEqual({ type: "comments", id: "5" });
+    });
+    expect(operation).toHaveProperty(["ref"], { type: "comments", id: "5" });
   });
 });
 
@@ -404,8 +410,8 @@ describe("RequestDocument", () => {
         },
         { op: "remove", ref: { type: "comments", id: "5" } },
       ],
-    }) as any;
-    expect(document["atomic:operations"]).toHaveLength(2);
+    });
+    expect(document).toHaveProperty(["atomic:operations", "length"], 2);
   });
 
   it("rejects empty operation lists", () => {
@@ -434,9 +440,9 @@ describe("RequestDocument", () => {
       Atomic.removeFromRelationship(Article, "1", "subscribers", [Person.ref("9")]),
     );
 
-    const encoded = encodeRequest(value) as any;
-    expect(encoded["atomic:operations"]).toHaveLength(7);
-    expect(encoded["atomic:operations"][0]).toEqual({
+    const encoded = encodeRequest(value);
+    expect(encoded).toHaveProperty(["atomic:operations", "length"], 7);
+    expect(encoded).toHaveProperty(["atomic:operations", 0], {
       op: "add",
       data: {
         type: "articles",
@@ -448,25 +454,25 @@ describe("RequestDocument", () => {
         },
       },
     });
-    expect(encoded["atomic:operations"][3]).toEqual({
+    expect(encoded).toHaveProperty(["atomic:operations", 3], {
       op: "update",
       ref: { type: "comments", id: "5", relationship: "author" },
       data: { type: "people", id: "9" },
     });
-    expect(encoded["atomic:operations"][4]).toEqual({
+    expect(encoded).toHaveProperty(["atomic:operations", 4], {
       op: "update",
       ref: { type: "articles", id: "1", relationship: "author" },
       data: null,
     });
-    expect(encoded["atomic:operations"][5]).toEqual({
+    expect(encoded).toHaveProperty(["atomic:operations", 5], {
       op: "add",
       ref: { type: "articles", lid: "a1", relationship: "comments" },
       data: [{ type: "comments", id: "5" }],
     });
 
     // and the wire form decodes back
-    const decoded = decodeRequest(encoded) as any;
-    expect(decoded["atomic:operations"]).toHaveLength(7);
+    const decoded = decodeRequest(encoded);
+    expect(decoded).toHaveProperty(["atomic:operations", "length"], 7);
   });
 });
 
@@ -480,11 +486,11 @@ describe("ResultDocument", () => {
   it("decodes results with data, null data and empty objects", () => {
     const document = decodeResults({
       "atomic:results": [{ data: article }, { data: null }, {}],
-    }) as any;
-    expect(document["atomic:results"]).toHaveLength(3);
-    expect(document["atomic:results"][0].data.attributes.title).toBe("Hello");
-    expect(document["atomic:results"][1].data).toBeNull();
-    expect(document["atomic:results"][2]).toEqual({});
+    });
+    expect(document).toHaveProperty(["atomic:results", "length"], 3);
+    expect(document).toHaveProperty(["atomic:results", 0, "data", "attributes", "title"], "Hello");
+    expect(document).toHaveProperty(["atomic:results", 1, "data"], null);
+    expect(document).toHaveProperty(["atomic:results", 2], {});
   });
 
   it("encodes values built with the results helpers", () => {
@@ -492,9 +498,9 @@ describe("ResultDocument", () => {
       meta: { processed: 2 },
     });
 
-    const encoded = encodeResults(value) as any;
-    expect(encoded["atomic:results"]).toHaveLength(2);
-    expect(encoded.meta).toEqual({ processed: 2 });
+    const encoded = encodeResults(value);
+    expect(encoded).toHaveProperty(["atomic:results", "length"], 2);
+    expect(encoded).toHaveProperty(["meta"], { processed: 2 });
   });
 
   it("rejects results outside the resource set", () => {
@@ -823,7 +829,11 @@ describe("input-only attributes in operations", () => {
       op: "add",
       data: { type: "uploads", attributes: { fileName: "a.png", file: bytes, secret: "s" } },
     });
-    expect(decoded.data.attributes).toEqual({ fileName: "a.png", file: bytes, secret: "s" });
+    expect(decoded).toHaveProperty(["data", "attributes"], {
+      fileName: "a.png",
+      file: bytes,
+      secret: "s",
+    });
     // required: the add operation demands `file`, as `createPayload` does
     expect(() =>
       Schema.decodeUnknownSync(Atomic.AddOperation(Upload))({
@@ -846,7 +856,7 @@ describe("input-only attributes in operations", () => {
       op: "update",
       data: { type: "uploads", id: "1", attributes: { secret: "t" } },
     });
-    expect(decoded.data.attributes).toEqual({ secret: "t" });
+    expect(decoded).toHaveProperty(["data", "attributes"], { secret: "t" });
     // `file` (update: false) is not an update attribute: rejected at its path (#292)
     expect(
       issuesOf(

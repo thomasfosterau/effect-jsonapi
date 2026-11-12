@@ -11,11 +11,13 @@
 import { it } from "@effect/vitest";
 import { assert, describe, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import type * as Scope from "effect/Scope";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
-import { ApiError, Client, MEDIA_TYPE } from "@thomasfosterau/effect-jsonapi";
+import { ApiError, Client, MEDIA_TYPE, Registry } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
 import {
   blogClient,
@@ -30,8 +32,13 @@ import { Article } from "../resources.js";
 
 const jsonText = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
-const run = <A, E>(effect: Effect.Effect<A, E, any>): Effect.Effect<A, E> =>
-  effect.pipe(Effect.scoped, Effect.provide(ServerHttpClient)) as Effect.Effect<A, E>;
+// What the effects under test read: the group services of the live layers, and
+// the platform services `HttpApiTest` names but a JSON:API never uses.
+const Provided = Layer.provide(ServerHttpClient, Registry.platformLayer);
+
+const run = <A, E>(
+  effect: Effect.Effect<A, E, Layer.Success<typeof Provided> | Scope.Scope>,
+): Effect.Effect<A, E> => effect.pipe(Effect.scoped, Effect.provide(Provided));
 
 /** A load balancer in front of the server, answering with its own opaque body. */
 const gateway = (body: string, status: number, contentType: string): HttpClient.HttpClient =>

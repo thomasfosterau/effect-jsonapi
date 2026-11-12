@@ -178,7 +178,7 @@ export const ResourceRef = <R extends Any>(resource: R): ResourceRef<R> =>
       meta: Schema.optionalKey(AnyMeta),
       relationship: Schema.optionalKey(Schema.Never),
     }),
-  ]) as unknown as ResourceRef<R>;
+  ]) as ResourceRef<R>;
 
 /**
  * A ref to one of a resource's relationships — the target of relationship
@@ -224,7 +224,7 @@ export const RelationshipRef = <R extends Any, const K extends RelationshipName<
       lid: Schema.String,
       relationship: Schema.tag(relationship),
     }),
-  ]) as unknown as RelationshipRef<R, K>;
+  ]) as RelationshipRef<R, K>;
 
 // ---------------------------------------------------------------------------
 // Relationship linkage inside operations (refs may be lid-based)
@@ -440,7 +440,7 @@ export const AddOperation = <R extends Any>(resource: R): AddOperation<R> => {
       }),
     ),
     meta: Schema.optionalKey(AnyMeta),
-  }) as unknown as AddOperation<R>;
+  }) as AddOperation<R>;
 };
 
 /**
@@ -493,7 +493,7 @@ export const UpdateOperation = <R extends Any>(resource: R): UpdateOperation<R> 
       relationships: Schema.optionalKey(updateRelationshipFields(resource.relationships, cap)),
     }),
     meta: Schema.optionalKey(AnyMeta),
-  }) as unknown as UpdateOperation<R>;
+  }) as UpdateOperation<R>;
 };
 
 /**
@@ -819,12 +819,12 @@ const flattenOperations = (operations: ResourceOperations<Any>): Array<Schema.To
  * @since 0.1.0
  * @category schemas
  */
-export const Operations = <const Resources extends ReadonlyArray<Any>>(
+export function Operations<const Resources extends ReadonlyArray<Any>>(
   resources: Resources,
-): Operations<Resources[number]> =>
-  Schema.Union(
-    resources.flatMap((resource) => flattenOperations(operationsFor(resource))),
-  ) as unknown as Operations<Resources[number]>;
+): Operations<Resources[number]>;
+export function Operations(resources: ReadonlyArray<Any>): Schema.Top {
+  return Schema.Union(resources.flatMap((resource) => flattenOperations(operationsFor(resource))));
+}
 
 /**
  * The `atomic:operations` request document schema for a set of resources: a

@@ -16,6 +16,7 @@ import * as Schema from "effect/Schema";
 import * as R from "effect/Record";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { HttpApi } from "effect/http-api";
+import type { HttpApiGroup } from "effect/http-api";
 import * as Conformance from "./Conformance.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
@@ -209,10 +210,10 @@ const serve =
   };
 
 /** The paths a run sent, in order. */
-const run = (
+const runAgainst = <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
+  target: HttpApi.HttpApi<ApiId, Groups>,
   answer: (path: string) => Answer,
-  target: HttpApi.HttpApi<string, any> = api,
-  ruleId: string = RULE,
+  ruleId: string,
 ) =>
   Effect.gen(function* () {
     const sent: Array<string> = [];
@@ -237,6 +238,9 @@ const run = (
     assert(outcome !== undefined, `no outcome for ${ruleId}`);
     return { outcome, sent };
   });
+
+const run = (answer: (path: string) => Answer, ruleId: string = RULE) =>
+  runAgainst(api, answer, ruleId);
 
 const findingsOf = (outcome: Conformance.Outcome) => {
   expect(outcome._tag).toBe("Failed");
@@ -462,7 +466,7 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
           },
         ),
       );
-      const { outcome, sent } = yield* run(serve(profileSorter), many);
+      const { outcome, sent } = yield* runAgainst(many, serve(profileSorter), RULE);
       expect(sent).toHaveLength(60);
       expect(outcome).toMatchObject({
         _tag: "Passed",
@@ -475,7 +479,7 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
   it.effect("skips an api with no list or related endpoint declaring `sort`", () =>
     Effect.gen(function* () {
       const unsorted = HttpApi.make("unsorted").add(Group.make(Task, Endpoint.list(Task)));
-      const { outcome, sent } = yield* run(serve(profileSorter), unsorted);
+      const { outcome, sent } = yield* runAgainst(unsorted, serve(profileSorter), RULE);
       expect(outcome).toMatchObject({
         _tag: "Skipped",
         reason: "no list or related endpoint in this api declares `sort`",
@@ -496,7 +500,7 @@ describe("Conformance: several sort fields (filter-grammar §10.4, S-MULTI-1)", 
 
   it.effect("passes a server that orders lexicographically, each term in its own direction", () =>
     Effect.gen(function* () {
-      const { outcome, sent } = yield* run(serve(profileSorter), api, MULTI);
+      const { outcome, sent } = yield* runAgainst(api, serve(profileSorter), MULTI);
       expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
       // `rank` ties tasks 1 and 4, whose `title`s differ: both directions of each term are asked for.
       expect(sent).toEqual([
@@ -513,7 +517,11 @@ describe("Conformance: several sort fields (filter-grammar §10.4, S-MULTI-1)", 
   it.effect("fails a server that ignores every term but the first", () =>
     Effect.gen(function* () {
       // Ties on `rank` fall to `id` order, which `rank,-title` happens to agree with; `-rank,title` does not.
-      const { outcome } = yield* run(serve({ ...profileSorter, firstTermOnly: true }), api, MULTI);
+      const { outcome } = yield* runAgainst(
+        api,
+        serve({ ...profileSorter, firstTermOnly: true }),
+        MULTI,
+      );
       const findings = findingsOf(outcome);
       expect(findings.map((found) => found.detail)).toEqual([
         '`?sort=-rank,title` lists tasks:1 (2, "b") before tasks:4 (2, "B")',
@@ -530,7 +538,11 @@ describe("Conformance: several sort fields (filter-grammar §10.4, S-MULTI-1)", 
 
   it.effect("fails a server that applies the first term's direction to every term", () =>
     Effect.gen(function* () {
-      const { outcome } = yield* run(serve({ ...profileSorter, oneDirection: true }), api, MULTI);
+      const { outcome } = yield* runAgainst(
+        api,
+        serve({ ...profileSorter, oneDirection: true }),
+        MULTI,
+      );
       expect(findingsOf(outcome).map((found) => found.detail)).toEqual([
         '`?sort=rank,-title` lists tasks:4 (2, "B") before tasks:1 (2, "b")',
         '`?sort=-rank,title` lists tasks:1 (2, "b") before tasks:4 (2, "B")',
@@ -542,9 +554,9 @@ describe("Conformance: several sort fields (filter-grammar §10.4, S-MULTI-1)", 
 
   it.effect("passes over a pair the server refuses for the next", () =>
     Effect.gen(function* () {
-      const { outcome, sent } = yield* run(
-        serve({ ...profileSorter, refuses: ["title"] }),
+      const { outcome, sent } = yield* runAgainst(
         api,
+        serve({ ...profileSorter, refuses: ["title"] }),
         MULTI,
       );
       expect(outcome).toMatchObject({ _tag: "Passed" });
@@ -562,7 +574,7 @@ describe("Conformance: several sort fields (filter-grammar §10.4, S-MULTI-1)", 
     () =>
       Effect.gen(function* () {
         const distinct = TASKS.map((task, at) => ({ ...task, attributes: { rank: at } }));
-        const { outcome } = yield* run(serve(profileSorter, distinct), api, MULTI);
+        const { outcome } = yield* runAgainst(api, serve(profileSorter, distinct), MULTI);
         expect(outcome).toMatchObject({
           _tag: "Skipped",
           reason:
@@ -583,7 +595,7 @@ describe("Conformance: the `id` tiebreak (filter-grammar §10.5, S-TIE-1)", () =
 
   it.effect("passes a server that breaks ties by `id` whatever the direction", () =>
     Effect.gen(function* () {
-      const { outcome, sent } = yield* run(serve(profileSorter), api, TIE);
+      const { outcome, sent } = yield* runAgainst(api, serve(profileSorter), TIE);
       expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
       expect(sent).toEqual([
         "/tasks",
@@ -599,7 +611,7 @@ describe("Conformance: the `id` tiebreak (filter-grammar §10.5, S-TIE-1)", () =
   it.effect("fails a server that answers `-f` by reversing its answer to `f`", () =>
     Effect.gen(function* () {
       // The order on `rank` itself is right both ways: only the tie shows the reversal.
-      const { outcome } = yield* run(serve({ ...profileSorter, reverses: true }), api, TIE);
+      const { outcome } = yield* runAgainst(api, serve({ ...profileSorter, reverses: true }), TIE);
       const findings = findingsOf(outcome);
       expect(findings.map((found) => found.detail)).toEqual([
         "`?sort=rank` lists tasks:1 before tasks:4 and `?sort=-rank` lists tasks:4 before tasks:1, though the two tie on `rank` (2)",
@@ -616,9 +628,9 @@ describe("Conformance: the `id` tiebreak (filter-grammar §10.5, S-TIE-1)", () =
 
   it.effect("passes over an attribute the server refuses for the next tie", () =>
     Effect.gen(function* () {
-      const { outcome, sent } = yield* run(
-        serve({ ...profileSorter, refuses: ["rank"] }),
+      const { outcome, sent } = yield* runAgainst(
         api,
+        serve({ ...profileSorter, refuses: ["rank"] }),
         TIE,
       );
       expect(outcome).toMatchObject({ _tag: "Passed" });
@@ -634,7 +646,7 @@ describe("Conformance: the `id` tiebreak (filter-grammar §10.5, S-TIE-1)", () =
   it.effect("skips a collection in which no two resources tie", () =>
     Effect.gen(function* () {
       const distinct = TASKS.map((task, at) => ({ ...task, attributes: { rank: at } }));
-      const { outcome } = yield* run(serve(profileSorter, distinct), api, TIE);
+      const { outcome } = yield* runAgainst(api, serve(profileSorter, distinct), TIE);
       expect(outcome).toMatchObject({
         _tag: "Skipped",
         reason:
@@ -655,7 +667,7 @@ describe("Conformance: the order across pages (filter-grammar §10.6, S-PAGE-1)"
 
   it.effect("passes a server that sorts the collection before it pages it, walking `next`", () =>
     Effect.gen(function* () {
-      const { outcome, sent } = yield* run(serve(profileSorter), api, PAGES);
+      const { outcome, sent } = yield* runAgainst(api, serve(profileSorter), PAGES);
       expect(outcome).toMatchObject({ _tag: "Passed", probes: 3, note: undefined });
       // Only the list declares a page size; half the baseline's four resources a page.
       expect(sent).toEqual([
@@ -668,7 +680,11 @@ describe("Conformance: the order across pages (filter-grammar §10.6, S-PAGE-1)"
 
   it.effect("fails a server that sorts each page on its own", () =>
     Effect.gen(function* () {
-      const { outcome } = yield* run(serve({ ...profileSorter, sortsEachPage: true }), api, PAGES);
+      const { outcome } = yield* runAgainst(
+        api,
+        serve({ ...profileSorter, sortsEachPage: true }),
+        PAGES,
+      );
       const findings = findingsOf(outcome);
       expect(findings.map((found) => found.detail)).toEqual([
         'page 1 of `?sort=due&page[limit]=2` (/tasks?sort=due&page[limit]=2) lists tasks:2 (NULL), which sorts after tasks:3 ("2026-01-01T00:00:00.000Z") on page 2 (/tasks?sort=due&page[offset]=2&page[limit]=2)',
@@ -685,7 +701,7 @@ describe("Conformance: the order across pages (filter-grammar §10.6, S-PAGE-1)"
 
   it.effect("decides nothing on a server that ignores the page size", () =>
     Effect.gen(function* () {
-      const { outcome } = yield* run(serve({ ...profileSorter, unpaged: true }), api, PAGES);
+      const { outcome } = yield* runAgainst(api, serve({ ...profileSorter, unpaged: true }), PAGES);
       expect(outcome).toMatchObject({
         _tag: "Skipped",
         reason:
@@ -696,7 +712,7 @@ describe("Conformance: the order across pages (filter-grammar §10.6, S-PAGE-1)"
 
   it.effect("skips an api with no endpoint declaring both `sort` and a page size", () =>
     Effect.gen(function* () {
-      const { outcome, sent } = yield* run(serve(profileSorter), unpagedApi, PAGES);
+      const { outcome, sent } = yield* runAgainst(unpagedApi, serve(profileSorter), PAGES);
       expect(outcome).toMatchObject({
         _tag: "Skipped",
         reason:

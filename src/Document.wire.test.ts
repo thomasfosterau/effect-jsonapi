@@ -12,8 +12,8 @@ import * as Resource from "./Resource.js";
 
 const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
 
-const decode = <S extends Schema.Top>(schema: S) =>
-  Schema.decodeUnknownSync(schema as unknown as Schema.Codec<S["Type"]>);
+const decode = <S extends Schema.Codec<unknown, unknown>>(schema: S) =>
+  Schema.decodeUnknownSync(schema);
 
 const Place = Resource.make("places", { attributes: { name: Schema.NonEmptyString } });
 const Person = Resource.make("people", {

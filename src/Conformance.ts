@@ -970,8 +970,8 @@ const selected = (options: Options | undefined): ReadonlyArray<Core.RuleImpl> =>
 
 const IN_PROCESS_ORIGIN = "http://conformance.invalid";
 
-const execute = (
-  api: HttpApi.HttpApi<string, any>,
+const execute = <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
+  api: HttpApi.HttpApi<ApiId, Groups>,
   client: HttpClient.HttpClient,
   transport: Report["transport"],
   baseUrl: string,
@@ -1109,9 +1109,14 @@ export const verify = Effect.fnUntraced(function* <
   // `HttpApiTest.groups` takes them, so a run drives the api's real wiring.
   const context = yield* Effect.context<HttpApiGroup.ToService<ApiId, Groups>>();
   const handler = yield* HttpRouter.toHttpEffect(
-    HttpApiBuilder.layer(api).pipe(
-      Layer.provide(Layer.succeedContext(context)),
-    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>,
+    // SAFETY: the handler layers were provided from the ambient context above;
+    // the platform services the router layer still lists are unused by a
+    // JSON:API (file responses only).
+    HttpApiBuilder.layer(api).pipe(Layer.provide(Layer.succeedContext(context))) as Layer.Layer<
+      never,
+      never,
+      HttpRouter.HttpRouter
+    >,
   );
   const client = HttpClient.make(
     Effect.fnUntraced(function* (request) {
@@ -1126,13 +1131,7 @@ export const verify = Effect.fnUntraced(function* <
       return HttpServerResponse.toClientResponse(response);
     }, Effect.scoped),
   );
-  return yield* execute(
-    api as HttpApi.HttpApi<string, any>,
-    client,
-    "in-process",
-    IN_PROCESS_ORIGIN,
-    options,
-  );
+  return yield* execute(api, client, "in-process", IN_PROCESS_ORIGIN, options);
 });
 
 /**
@@ -1217,8 +1216,7 @@ export const verifyWith = <ApiId extends string, Groups extends HttpApiGroup.Con
     /** The origin every probe is sent to. */
     readonly baseUrl: string;
   },
-): Effect.Effect<Report> =>
-  execute(api as HttpApi.HttpApi<string, any>, options.client, "http", options.baseUrl, options);
+): Effect.Effect<Report> => execute(api, options.client, "http", options.baseUrl, options);
 
 // ---------------------------------------------------------------------------
 // Reading a report

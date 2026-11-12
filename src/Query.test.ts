@@ -725,7 +725,7 @@ describe("include: repeated keys", () => {
     page: Query.Page.Offset,
     filter: undefined,
   });
-  const decode = Schema.decodeUnknownSync(query as Schema.Codec<any, any>);
+  const decode = Schema.decodeUnknownSync(query);
 
   it("decodes the spec's comma grammar (regression: unchanged)", () => {
     expect(decode({ include: "author,comments,comments.author" })).toEqual({
@@ -762,14 +762,14 @@ describe("include: repeated keys", () => {
       page: undefined,
       filter: undefined,
     });
-    const narrow = Schema.decodeUnknownSync(constrained as Schema.Codec<any, any>);
+    const narrow = Schema.decodeUnknownSync(constrained);
     expect(narrow({ include: ["author"] })).toEqual({ include: ["author"] });
     expect(() => narrow({ include: ["author", "comments"] })).toThrow();
   });
 
   it("encodes back to the single comma form (regression: the wire shape a client is handed)", () => {
     expect(
-      Schema.encodeUnknownSync(query as Schema.Codec<any, any>)({
+      Schema.encodeUnknownSync(query)({
         include: ["author", "comments"],
       }),
     ).toEqual({
@@ -786,7 +786,7 @@ describe("sort and fields[TYPE]: repeated keys (issue #102)", () => {
     page: Query.Page.Offset,
     filter: undefined,
   });
-  const decode = Schema.decodeUnknownSync(query as Schema.Codec<any, any>);
+  const decode = Schema.decodeUnknownSync(query);
 
   it("?sort=-createdAt&sort=title decodes the same as ?sort=-createdAt,title", () => {
     expect(decode({ sort: ["-createdAt", "title"] })).toEqual(decode({ sort: "-createdAt,title" }));
@@ -838,7 +838,7 @@ describe("sort and fields[TYPE]: repeated keys (issue #102)", () => {
   });
 
   it("encodes both back to the single comma form", () => {
-    const encoded = Schema.encodeUnknownSync(query as Schema.Codec<any, any>)({
+    const encoded = Schema.encodeUnknownSync(query)({
       sort: [{ field: "createdAt", direction: "desc" }],
       fields: { articles: ["title", "body"] },
     });
@@ -900,7 +900,7 @@ describe("Query.canonical", () => {
     page: Query.Page.Offset,
     filter: { author: Schema.String, q: Schema.String },
   });
-  const decode = Schema.decodeUnknownSync(query as Schema.Codec<any, any>) as (
+  const decode = Schema.decodeUnknownSync(query) as (
     input: R.ReadonlyRecord<string, unknown>,
   ) => typeof query.Type;
   const canonical = Query.canonical(query);

@@ -194,8 +194,8 @@ describe("Middleware.schemaError", () => {
 });
 
 describe("Middleware.schemaErrorDocument", () => {
-  const failure = <S extends Schema.Top>(schema: S, input: Schema.Json) => {
-    const result = Schema.decodeResult(schema as unknown as Schema.Codec<unknown, unknown>)(input, {
+  const failure = <S extends Schema.Codec<unknown, unknown>>(schema: S, input: Schema.Json) => {
+    const result = Schema.decodeResult(schema)(input, {
       errors: "all",
     });
     assert(Result.isFailure(result), "expected a failure");
@@ -364,10 +364,12 @@ const request = async (
   // `HttpPlatform`, …) that multipart and file responses would need; none of
   // these endpoints use them, so the requirement is discharged by the cast
   // rather than by pulling in a platform package for the test.
+  // SAFETY: every middleware the api's endpoints require is provided here; the
+  // platform services `HttpApiBuilder.layer` lists are unused by these routes.
   const appLayer = HttpApiBuilder.layer(Api).pipe(
     Layer.provide(ArticlesLive),
     Layer.provide(middlewareLayer),
-  ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+  ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
 
   const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
   onTestFinished(() => dispose());
@@ -393,11 +395,13 @@ const requestTraced = async (
     },
   });
 
+  // SAFETY: every middleware the api's endpoints require is provided here; the
+  // platform services `HttpApiBuilder.layer` lists are unused by these routes.
   const appLayer = HttpApiBuilder.layer(Api).pipe(
     Layer.provide(ArticlesLive),
     Layer.provide(middlewareLayer),
     Layer.provide(Layer.succeed(Tracer.Tracer, recordingTracer)),
-  ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+  ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
 
   const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
   onTestFinished(() => dispose());

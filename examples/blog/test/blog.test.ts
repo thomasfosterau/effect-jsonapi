@@ -11,13 +11,14 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import type * as Scope from "effect/Scope";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HttpApiTest, OpenApi } from "effect/http-api";
-import { Atomic, Client, Middleware, Resource } from "@thomasfosterau/effect-jsonapi";
+import { Atomic, Client, Middleware, Resource, Registry } from "@thomasfosterau/effect-jsonapi";
 import { Api, SearchQuery } from "../api.js";
 import { ArticleNotFound, CommentNotFound, PersonNotFound, TitleTaken } from "../errors.js";
 import {
@@ -37,21 +38,21 @@ const buildClient = HttpApiTest.groups(Api, ["articles", "search"]);
 
 const jsonText = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
-const run = <A, E>(effect: Effect.Effect<A, E, any>): Effect.Effect<A, E> =>
-  effect.pipe(
-    Effect.scoped,
-    Effect.provide(Layer.provideMerge(Layer.mergeAll(ArticlesLive, SearchLive), Middleware.layer)),
-  ) as Effect.Effect<A, E>;
+// What the effects under test read: the group services of the live layers, and
+// the platform services `HttpApiTest` names but a JSON:API never uses.
+const Provided = Layer.mergeAll(
+  Layer.provideMerge(Layer.mergeAll(ArticlesLive, SearchLive), Middleware.layer),
+  Registry.platformLayer,
+);
 
-const runExit = <A, E>(effect: Effect.Effect<A, E, any>): Effect.Effect<Exit.Exit<A, E>> =>
-  Effect.exit(
-    effect.pipe(
-      Effect.scoped,
-      Effect.provide(
-        Layer.provideMerge(Layer.mergeAll(ArticlesLive, SearchLive), Middleware.layer),
-      ),
-    ) as Effect.Effect<A, E>,
-  );
+const run = <A, E>(
+  effect: Effect.Effect<A, E, Layer.Success<typeof Provided> | Scope.Scope>,
+): Effect.Effect<A, E> => effect.pipe(Effect.scoped, Effect.provide(Provided));
+
+const runExit = <A, E>(
+  effect: Effect.Effect<A, E, Layer.Success<typeof Provided> | Scope.Scope>,
+): Effect.Effect<Exit.Exit<A, E>> =>
+  Effect.exit(effect.pipe(Effect.scoped, Effect.provide(Provided)));
 
 const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
   const result = Cause.findError(cause);
@@ -685,7 +686,7 @@ describe("blog example: relationship endpoints", () => {
     expect(spec.paths["/articles/{id}/relationships/author"]?.patch).toBeDefined();
     // The related comment collection documents its pagination parameters
     const commentParams = spec.paths["/articles/{id}/comments"]?.get?.parameters?.map(
-      (parameter: any) => parameter.name,
+      (parameter: { readonly name: string }) => parameter.name,
     );
     expect(commentParams).toContain("page[offset]");
     expect(commentParams).toContain("page[limit]");
@@ -844,7 +845,9 @@ describe("blog example: heterogeneous search", () => {
   it("documents the search endpoint in OpenAPI", () => {
     const spec = OpenApi.fromApi(Api);
     expect(spec.paths["/search"]?.get).toBeDefined();
-    const params = spec.paths["/search"]?.get?.parameters?.map((parameter: any) => parameter.name);
+    const params = spec.paths["/search"]?.get?.parameters?.map(
+      (parameter: { readonly name: string }) => parameter.name,
+    );
     expect(params).toContain("filter[q]");
     expect(params).toContain("fields[articles]");
     expect(params).toContain("fields[people]");
@@ -900,7 +903,7 @@ describe("blog example: spec compliance on the wire", () => {
     expect(spec.paths["/articles/{id}"]?.get?.responses).toHaveProperty("404");
     // typed query parameters are documented
     const listParams = spec.paths["/articles"]?.get?.parameters?.map(
-      (parameter: any) => parameter.name,
+      (parameter: { readonly name: string }) => parameter.name,
     );
     expect(listParams).toContain("sort");
     expect(listParams).toContain("page[offset]");

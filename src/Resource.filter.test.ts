@@ -173,7 +173,7 @@ describe("Resource.filterable / Resource.sortable", () => {
     >();
 
     const list = Endpoint.list(Product, { sort: sortable(Product) });
-    const listQuery = list.query as Schema.Codec<any, any>;
+    const listQuery = list.query as Schema.Codec<unknown, unknown>;
     expect(Schema.decodeSync(listQuery)({ sort: "priceCents" })).toEqual({
       sort: [{ field: "priceCents", direction: "asc" }],
     });

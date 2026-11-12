@@ -523,7 +523,7 @@ export const readOnly = <
   Targets extends Handlers.IncludeTargets = never,
 >(
   config: ReadOnlyConfig<TQuery, TResource, TId, V, E, R, RV, RL, RC, Targets>,
-): ReadOnlyHandlers<TResource, TId, TQuery, E, R, RV, RL, RC, Targets> => {
+): NoInfer<ReadOnlyHandlers<TResource, TId, TQuery, E, R, RV, RL, RC, Targets>> => {
   const { ops, segment, cache, include, capabilities, capabilitiesOnIncluded } = config;
   const maxPageLimit = config.maxPageLimit ?? 100;
   const viewer = (config.viewer ?? none) as Effect.Effect<V, never, RV>;
@@ -675,23 +675,25 @@ export const make = <
     RT,
     HType
   >,
-): CrudHandlers<
-  TCreate,
-  TUpdate,
-  TResource,
-  TId,
-  TQuery,
-  E,
-  R,
-  RW,
-  RV,
-  RL,
-  RC,
-  Targets,
-  Tx,
-  ET,
-  RT,
-  Committed<NoInfer<HType>, TId>
+): NoInfer<
+  CrudHandlers<
+    TCreate,
+    TUpdate,
+    TResource,
+    TId,
+    TQuery,
+    E,
+    R,
+    RW,
+    RV,
+    RL,
+    RC,
+    Targets,
+    Tx,
+    ET,
+    RT,
+    Committed<NoInfer<HType>, TId>
+  >
 > => {
   const { ops, segment, cache, capabilities, capabilitiesOnIncluded } = config;
   const viewer = (config.viewer ?? none) as Effect.Effect<V, never, RV>;
@@ -795,7 +797,7 @@ export const make = <
     create,
     update,
     delete: remove,
-  } as unknown as CrudHandlers<
+  } as CrudHandlers<
     TCreate,
     TUpdate,
     TResource,

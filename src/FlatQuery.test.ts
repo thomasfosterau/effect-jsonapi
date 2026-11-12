@@ -10,10 +10,10 @@ import * as Schema from "effect/Schema";
 import * as FlatQuery from "./FlatQuery.js";
 import * as Resource from "./Resource.js";
 
-const decode = <S extends Schema.Top>(schema: S) =>
-  Schema.decodeUnknownSync(schema as unknown as Schema.Codec<S["Type"]>);
-const encode = <S extends Schema.Top>(schema: S) =>
-  Schema.encodeUnknownSync(schema as unknown as Schema.Codec<S["Type"], S["Encoded"]>);
+const decode = <S extends Schema.Codec<unknown, unknown>>(schema: S) =>
+  Schema.decodeUnknownSync(schema);
+const encode = <S extends Schema.Codec<unknown, unknown>>(schema: S) =>
+  Schema.encodeUnknownSync(schema);
 
 describe("pagination", () => {
   const Defaulted = Schema.Struct(FlatQuery.pagination({ maxLimit: 100 }));

@@ -961,7 +961,7 @@ export type IncludeTarget<A extends ResourceValue = ResourceValue, E = never, Re
  * @category models
  */
 export interface IncludeTargets {
-  readonly [type: string]: IncludeTarget<ResourceValue, any, any>;
+  readonly [type: string]: IncludeTarget<ResourceValue, unknown, unknown>;
 }
 
 // The `(resource, error, services)` triple a target's Effect carries.
@@ -1086,7 +1086,7 @@ const resolve = (
   targets: IncludeTargets,
   concurrency: number | "unbounded",
   depth: number,
-): Effect.Effect<ReadonlyArray<ResourceValue>, any, any> =>
+): Effect.Effect<ReadonlyArray<ResourceValue>, unknown, unknown> =>
   Effect.gen(function* () {
     // Every resource the document already holds, keyed `type\0id`. Seeded with
     // the primary data: a resource already in `data` is never loaded again and
@@ -1140,7 +1140,7 @@ const resolve = (
           // already have. A type with no target is not loadable: its references are
           // dropped here.
           const batches: Array<{
-            readonly load: IncludeTarget<ResourceValue, any, any>;
+            readonly load: IncludeTarget<ResourceValue, unknown, unknown>;
             readonly ids: Array<string>;
           }> = [];
           const byType = MutableHashMap.empty<string, Array<string>>();
@@ -1347,7 +1347,7 @@ export const resolveIncluded = <Targets extends IncludeTargets>(
   IncludeTargetError<Targets>,
   IncludeTargetServices<Targets>
 > =>
-  (paths === undefined
+  paths === undefined
     ? Effect.undefined
     : Arr.isReadonlyArrayEmpty(paths)
       ? Effect.succeed([])
@@ -1357,11 +1357,7 @@ export const resolveIncluded = <Targets extends IncludeTargets>(
           targets,
           options?.concurrency ?? "unbounded",
           options?.depth ?? 3,
-        )) as Effect.Effect<
-    ReadonlyArray<IncludeTargetResource<Targets>> | undefined,
-    IncludeTargetError<Targets>,
-    IncludeTargetServices<Targets>
-  >;
+        );
 
 /**
  * A top-level JSON:API document *value* — the shape {@link data} and

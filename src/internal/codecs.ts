@@ -3,6 +3,7 @@
  *
  * @internal
  */
+import { cast } from "effect/Function";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -126,15 +127,18 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
     Schema.decodeTo(
       Schema.Array(item),
       SchemaTransformation.transform<Encoded, string>({
+        // SAFETY: a term outside `fields` is rejected by the item schema.
         decode: (value) =>
-          value
-            .split(",")
-            .filter((term) => term !== "")
-            .map((term) =>
-              term.startsWith("-")
-                ? { field: term.slice(1), direction: "desc" as const }
-                : { field: term, direction: "asc" as const },
-            ) as unknown as Encoded,
+          cast<ReadonlyArray<{ field: string; direction: "asc" | "desc" }>, Encoded>(
+            value
+              .split(",")
+              .filter((term) => term !== "")
+              .map((term) =>
+                term.startsWith("-")
+                  ? { field: term.slice(1), direction: "desc" as const }
+                  : { field: term, direction: "asc" as const },
+              ),
+          ),
         encode: (terms) =>
           terms
             .map((term) => (term.direction === "desc" ? `-${term.field}` : term.field))
