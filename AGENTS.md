@@ -93,7 +93,7 @@ The same split explains why filtering has two forms with different flat encoding
 - `vp exec fallow audit --base origin/trunk` — change-set review (dead code, complexity, duplication); not a CI gate.
 - `pnpm changeset` — add a changeset.
 
-Invoke everything through `vp` (`vp exec` instead of `npx`; `vp run <task>` instead of bare `pnpm run`). CI installs as `pnpm install --frozen-lockfile --ignore-scripts` and then runs `pnpm run prepare` explicitly (see `.github/actions/setup`).
+Invoke everything through `vp` (`vp exec` instead of `npx`; `vp run <task>` instead of bare `pnpm run`). CI sets up with `voidzero-dev/setup-vp`, installs with `--frozen-lockfile --ignore-scripts` and then runs `pnpm run prepare` explicitly (see `.github/workflows/ci.yml`).
 
 ## Verification
 
