@@ -22,7 +22,7 @@ Agent work happens in git worktrees under `.claude/worktrees/` (git-ignored), on
 
 - No credential, database, browser or Docker is needed, but the Dev Container workflow (`.github/workflows/devcontainer.yml`) builds the container image and cannot run in a cloud session.
 - The session-start installer needs `vite.plus` and `viteplus.dev` on the environment's network allowlist; without them `vp` falls back to the checkout's `node_modules` copy.
-- GitHub Actions workflows (CI, release, auto-assign) run only on GitHub; check them through the PR's checks.
+- GitHub Actions workflows (CI, Release, Dev Container) run only on GitHub; check them through the PR's checks.
 - `uvx zizmor` needs network access to fetch zizmor unless it is already installed.
 
 ## Fallow local gate
