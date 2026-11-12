@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { AnyMeta } from "./Document.js";
@@ -283,21 +284,26 @@ describe("Relationship.paginated `order`", () => {
       },
     });
 
-    expect(Page.relationships.revisions.order).toEqual([
+    expect(Option.getOrUndefined(Page.relationships.revisions.order)).toEqual([
       { field: "createdAt", direction: "desc" },
       { field: "id", direction: "asc" },
     ]);
     expectTypeOf(Page.relationships.revisions.order).toEqualTypeOf<
-      readonly [
-        { readonly field: "createdAt"; readonly direction: "desc" },
-        { readonly field: "id"; readonly direction: "asc" },
-      ]
+      Option.Option<
+        readonly [
+          { readonly field: "createdAt"; readonly direction: "desc" },
+          { readonly field: "id"; readonly direction: "asc" },
+        ]
+      >
     >();
   });
 
-  it("is `undefined` when no order is declared", () => {
-    expect(Relationship.paginated(() => Revision).order).toBeUndefined();
-    expect(Article.relationships.revisions.order).toBeUndefined();
+  it("is `Option.none()` when no order is declared", () => {
+    expect(Option.isNone(Relationship.paginated(() => Revision).order)).toBe(true);
+    expect(Option.isNone(Article.relationships.revisions.order)).toBe(true);
+    expectTypeOf(Relationship.paginated(() => Revision).order).toEqualTypeOf<
+      Option.Option<never>
+    >();
   });
 
   it("orders only by the related resource's attributes, or its id", () => {
@@ -305,8 +311,10 @@ describe("Relationship.paginated `order`", () => {
     // is a compile error: test/rejected-calls.types.ts
     // the negative control: a real attribute of the *related* resource compiles
     expect(
-      Relationship.paginated(() => Revision, { order: [{ field: "note", direction: "asc" }] })
-        .order,
+      Option.getOrUndefined(
+        Relationship.paginated(() => Revision, { order: [{ field: "note", direction: "asc" }] })
+          .order,
+      ),
     ).toEqual([{ field: "note", direction: "asc" }]);
   });
 
@@ -352,17 +360,17 @@ describe("Relationship.one / optional `key` (#509)", () => {
         sitter: Relationship.optional(() => Owner, { key: "sitterId", filter: ["eq", "isnull"] }),
       },
     });
-    expect(relationshipsOf(Pet).owner.key).toBe("ownerId");
-    expect(relationshipsOf(Pet).sitter.key).toBe("sitterId");
+    expect(Option.getOrUndefined(relationshipsOf(Pet).owner.key)).toBe("ownerId");
+    expect(Option.getOrUndefined(relationshipsOf(Pet).sitter.key)).toBe("sitterId");
     expect(relationshipsOf(Pet).sitter.filter).toEqual(["eq", "isnull"]);
-    expectTypeOf(relationshipsOf(Pet).owner.key).toEqualTypeOf<"ownerId">();
-    expectTypeOf(relationshipsOf(Pet).sitter.key).toEqualTypeOf<"sitterId">();
+    expectTypeOf(relationshipsOf(Pet).owner.key).toEqualTypeOf<Option.Option<"ownerId">>();
+    expectTypeOf(relationshipsOf(Pet).sitter.key).toEqualTypeOf<Option.Option<"sitterId">>();
   });
 
-  it("is `undefined` when none is declared", () => {
-    expect(Relationship.one(() => Owner).key).toBeUndefined();
-    expect(Relationship.optional(() => Owner, { filter: true }).key).toBeUndefined();
-    expectTypeOf(Relationship.one(() => Owner).key).toEqualTypeOf<undefined>();
+  it("is `Option.none()` when none is declared", () => {
+    expect(Option.isNone(Relationship.one(() => Owner).key)).toBe(true);
+    expect(Option.isNone(Relationship.optional(() => Owner, { filter: true }).key)).toBe(true);
+    expectTypeOf(Relationship.one(() => Owner).key).toEqualTypeOf<Option.Option<never>>();
   });
 
   it("is a storage fact: the wire schema is unchanged", () => {
@@ -422,10 +430,10 @@ describe("Relationship.one / optional `key` (#509)", () => {
       relationships: { owner: Relationship.one(() => Owner, { key: "ownerId" }) },
     });
     const Dog = extend(Pet, "dogs", { attributes: { breed: Schema.String } });
-    expect(relationshipsOf(Dog).owner.key).toBe("ownerId");
-    expectTypeOf(relationshipsOf(Dog).owner.key).toEqualTypeOf<"ownerId">();
+    expect(Option.getOrUndefined(relationshipsOf(Dog).owner.key)).toBe("ownerId");
+    expectTypeOf(relationshipsOf(Dog).owner.key).toEqualTypeOf<Option.Option<"ownerId">>();
     const Labelled = annotate(Pet, { title: "Pet" });
-    expect(relationshipsOf(Labelled).owner.key).toBe("ownerId");
+    expect(Option.getOrUndefined(relationshipsOf(Labelled).owner.key)).toBe("ownerId");
     expect(() => extend(Pet, "cats", { attributes: { ownerId: Schema.String } })).toThrow(
       /Resource\.extend\("cats"\): relationship "owner" declares storage key "ownerId", which is also an attribute/,
     );

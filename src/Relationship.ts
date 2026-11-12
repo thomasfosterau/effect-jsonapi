@@ -49,6 +49,7 @@
  * @since 0.1.0
  */
 import * as MutableHashSet from "effect/MutableHashSet";
+import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
@@ -120,18 +121,19 @@ export type FilterDeclaration = boolean | ReadonlyArray<FilterOperator>;
 /**
  * A to-one relationship's storage key: the name of the field on the declaring
  * resource's stored row that holds the related resource's id (`"authorId"`
- * for `author: Relationship.one(() => Person, { key: "authorId" })`), or
- * `undefined` when none is declared. See {@link one}.
+ * for `author: Relationship.one(() => Person, { key: "authorId" })`). A
+ * descriptor carries it as `Option<K>` — `Option.none()` when none is
+ * declared, which the type reads as `Option<never>`. See {@link one}.
  *
  * @since 0.20.0
  * @category type-level
  */
-export type StorageKey = string | undefined;
+export type StorageKey = string;
 
 /**
  * A required to-one relationship: linkage is always a single resource
  * identifier, never `null`. `F` records its `filter` declaration and `K` its
- * storage {@link StorageKey} (`undefined` when none is declared); `M` is the
+ * storage {@link StorageKey} (`never` when none is declared); `M` is the
  * schema of its relationship object's `meta`.
  *
  * @since 0.1.0
@@ -154,14 +156,15 @@ export interface One<
   readonly filter: F;
   /**
    * The name of the field on the declaring resource's stored row that holds
-   * the related resource's id (a foreign key such as `authorId`), or
-   * `undefined` when the relationship declares none. A storage fact, not a
-   * wire one: it changes nothing in the document, the query grammar or the
-   * endpoints. Read by derivations from the resource definition into storage.
+   * the related resource's id (a foreign key such as `authorId`):
+   * `Option.some(key)` when the relationship declares one, `Option.none()`
+   * when it declares none. A storage fact, not a wire one: it changes nothing
+   * in the document, the query grammar or the endpoints. Read by derivations
+   * from the resource definition into storage.
    *
    * @since 0.20.0
    */
-  readonly key: K;
+  readonly key: Option.Option<K>;
   /**
    * The schema of the relationship object's `meta` member: the one declared
    * with the constructor's `meta` option, or `Document.AnyMeta` (an open
@@ -175,7 +178,7 @@ export interface One<
 /**
  * An optional (nullable) to-one relationship: linkage is a single resource
  * identifier or `null`. `F` records its `filter` declaration and `K` its
- * storage {@link StorageKey} (`undefined` when none is declared); `M` is the
+ * storage {@link StorageKey} (`never` when none is declared); `M` is the
  * schema of its relationship object's `meta`.
  *
  * @since 0.1.0
@@ -198,14 +201,15 @@ export interface Optional<
   readonly filter: F;
   /**
    * The name of the field on the declaring resource's stored row that holds
-   * the related resource's id (a foreign key such as `authorId`), or
-   * `undefined` when the relationship declares none. A storage fact, not a
-   * wire one: it changes nothing in the document, the query grammar or the
-   * endpoints. Read by derivations from the resource definition into storage.
+   * the related resource's id (a foreign key such as `authorId`):
+   * `Option.some(key)` when the relationship declares one, `Option.none()`
+   * when it declares none. A storage fact, not a wire one: it changes nothing
+   * in the document, the query grammar or the endpoints. Read by derivations
+   * from the resource definition into storage.
    *
    * @since 0.20.0
    */
-  readonly key: K;
+  readonly key: Option.Option<K>;
   /**
    * The schema of the relationship object's `meta` member: the one declared
    * with the constructor's `meta` option, or `Document.AnyMeta` (an open
@@ -272,7 +276,7 @@ export type Order<R extends Any> = ReadonlyArray<Sort.Term<AttributeKeys<R> | "i
  * An unbounded to-many relationship with *no* inline linkage: the relationship
  * object carries only a required `related` link pointing at a paginated
  * collection endpoint. `O` records its declared canonical {@link Order}
- * (`undefined` when none is declared); `M` is the schema of its relationship
+ * (`never` when none is declared); `M` is the schema of its relationship
  * object's `meta`.
  *
  * @since 0.1.0
@@ -280,7 +284,7 @@ export type Order<R extends Any> = ReadonlyArray<Sort.Term<AttributeKeys<R> | "i
  */
 export interface Paginated<
   R extends Any,
-  O extends Order<R> | undefined = Order<R> | undefined,
+  O extends Order<R> = Order<R>,
   M extends Schema.Top = Schema.Top,
 > {
   readonly kind: "paginated";
@@ -292,12 +296,13 @@ export interface Paginated<
    */
   readonly "~target": R;
   /**
-   * The declared canonical {@link Order} of the related collection, or
-   * `undefined` when the relationship declares none.
+   * The declared canonical {@link Order} of the related collection:
+   * `Option.some(order)` when the relationship declares one, `Option.none()`
+   * when it declares none.
    *
    * @since 0.15.0
    */
-  readonly order: O;
+  readonly order: Option.Option<O>;
   /**
    * The schema of the relationship object's `meta` member: the one declared
    * with the constructor's `meta` option, or `Document.AnyMeta` (an open
@@ -328,7 +333,7 @@ export interface Paginated<
 export interface one<
   R extends Any,
   F extends FilterDeclaration = false,
-  K extends StorageKey = undefined,
+  K extends StorageKey = never,
   M extends Schema.Top = typeof AnyMeta,
 > extends One<R, F, K, M> {}
 
@@ -343,7 +348,7 @@ export interface one<
 export interface optional<
   R extends Any,
   F extends FilterDeclaration = false,
-  K extends StorageKey = undefined,
+  K extends StorageKey = never,
   M extends Schema.Top = typeof AnyMeta,
 > extends Optional<R, F, K, M> {}
 
@@ -359,8 +364,8 @@ export interface many<R extends Any, M extends Schema.Top = typeof AnyMeta> exte
 /**
  * The type of `Relationship.paginated(ref)` — {@link Paginated} with the
  * canonical {@link Order} defaulted the way the constructor defaults it
- * (`undefined`, no declared order), rather than to the whole
- * `Order<R> | undefined` union. Named to read like the declaration it
+ * (`never`, no declared order: `order` is `Option<never>`), rather than to
+ * the whole `Order<R>`. Named to read like the declaration it
  * annotates in a recursive resource definition; the {@link one} note on
  * annotating recursive definitions applies here too. For a relationship that
  * declares an order, pass it as the `const` tuple the constructor infers:
@@ -371,7 +376,7 @@ export interface many<R extends Any, M extends Schema.Top = typeof AnyMeta> exte
  */
 export interface paginated<
   R extends Any,
-  O extends Order<R> | undefined = undefined,
+  O extends Order<R> = never,
   M extends Schema.Top = typeof AnyMeta,
 > extends Paginated<R, O, M> {}
 
@@ -464,8 +469,11 @@ export interface MetaOptions<M extends Schema.Top = Schema.Top> {
 // An empty key names no field: refused when the relationship is declared.
 // The checks that need the whole resource (an attribute or another to-one
 // relationship with the same key) run in `Resource.make`.
-const storageKey = <K extends StorageKey>(constructor: string, key: K): K => {
-  if (key === "") {
+const storageKey = <K extends StorageKey>(
+  constructor: string,
+  key: Option.Option<K>,
+): Option.Option<K> => {
+  if (Option.isSome(key) && key.value === "") {
     throw declarationError(
       `${constructor}: \`key\` is empty; name the stored field that holds the related id, or omit the option`,
     );
@@ -496,13 +504,13 @@ const storageKey = <K extends StorageKey>(constructor: string, key: K): K => {
  * or a sync engine, so the fact is declared once, beside the relationship. It
  * must be non-empty, must not be an attribute name of the resource, and must
  * not repeat across the resource's to-one relationships; `Resource.make`
- * refuses a violation at definition time. Without it the descriptor's `key` is
- * `undefined`.
+ * refuses a violation at definition time. The descriptor's `key` is
+ * `Option.some(key)` when declared and `Option.none()` without it.
  *
  * @example
  * ```ts
  * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
- * import { Schema } from "effect"
+ * import { Option, Schema } from "effect"
  * import { strictEqual } from "node:assert"
  *
  * const Person = Resource.make("people", {
@@ -517,7 +525,9 @@ const storageKey = <K extends StorageKey>(constructor: string, key: K): K => {
  * })
  *
  * Resource.filterable(Article).author.operators // ["eq", "in"]
- * strictEqual(Resource.relationships(Article).author.key, "authorId")
+ * // `Option.some("authorId")`; a derivation into storage falls back to its own default
+ * const column = Option.getOrElse(Resource.relationships(Article).author.key, () => "author_id")
+ * strictEqual(column, "authorId")
  * ```
  *
  * @since 0.1.0
@@ -532,7 +542,7 @@ const storageKey = <K extends StorageKey>(constructor: string, key: K): K => {
 export const one = <
   R extends Any,
   const F extends FilterDeclaration = false,
-  const K extends StorageKey = undefined,
+  const K extends StorageKey = never,
   M extends Schema.Top = typeof AnyMeta,
 >(
   ref: () => R,
@@ -542,7 +552,7 @@ export const one = <
     kind: "one",
     ref,
     filter: options?.filter ?? false,
-    key: storageKey("Relationship.one", options?.key),
+    key: storageKey("Relationship.one", Option.fromUndefinedOr(options?.key)),
     meta: options?.meta ?? AnyMeta,
   }) as One<R, NoInfer<F>, NoInfer<K>, NoInfer<M>>;
 
@@ -576,7 +586,7 @@ export const one = <
 export const optional = <
   R extends Any,
   const F extends FilterDeclaration = false,
-  const K extends StorageKey = undefined,
+  const K extends StorageKey = never,
   M extends Schema.Top = typeof AnyMeta,
 >(
   ref: () => R,
@@ -586,7 +596,7 @@ export const optional = <
     kind: "optional",
     ref,
     filter: options?.filter ?? false,
-    key: storageKey("Relationship.optional", options?.key),
+    key: storageKey("Relationship.optional", Option.fromUndefinedOr(options?.key)),
     meta: options?.meta ?? AnyMeta,
   }) as Optional<R, NoInfer<F>, NoInfer<K>, NoInfer<M>>;
 
@@ -631,7 +641,8 @@ export const many = <R extends Any, M extends Schema.Top = typeof AnyMeta>(
  * total order its `links.related` collection is paged in. Paging is only
  * well-defined over a stable order (see {@link Order}), so this is a property of
  * the relationship's wire contract, and it is read straight off the descriptor:
- * `Resource.relationships(Article).comments.order`. Each term names an attribute
+ * `Resource.relationships(Article).comments.order`, `Option.some(terms)` when
+ * declared and `Option.none()` without it. Each term names an attribute
  * of the *related* resource, or its `id`; a term naming anything else is a
  * compile error, and an empty or repeating order is refused at definition time.
  *
@@ -656,7 +667,7 @@ export const many = <R extends Any, M extends Schema.Top = typeof AnyMeta>(
  * })
  *
  * Resource.relationships(Article).comments.order
- * // [{ field: "createdAt", direction: "desc" }, { field: "id", direction: "asc" }]
+ * // Option.some([{ field: "createdAt", direction: "desc" }, { field: "id", direction: "asc" }])
  * ```
  *
  * @since 0.1.0
@@ -664,10 +675,10 @@ export const many = <R extends Any, M extends Schema.Top = typeof AnyMeta>(
  */
 // `NoInfer` keeps `O` from being inferred off the *contextual* return type (the
 // `Relationships` record of a `Resource.make` call widens it); it is inferred
-// from `options.order` alone, and defaults to `undefined` — no declared order.
+// from `options.order` alone, and defaults to `never` — no declared order.
 export const paginated = <
   R extends Any,
-  const O extends Order<R> | undefined = undefined,
+  const O extends Order<R> = never,
   M extends Schema.Top = typeof AnyMeta,
 >(
   ref: () => R,
@@ -693,7 +704,7 @@ export const paginated = <
   return {
     kind: "paginated",
     ref,
-    order: order as NoInfer<O>,
+    order: order === undefined ? Option.none<O>() : Option.some(order),
     meta: options?.meta ?? AnyMeta,
   } as Paginated<R, NoInfer<O>, NoInfer<M>>;
 };

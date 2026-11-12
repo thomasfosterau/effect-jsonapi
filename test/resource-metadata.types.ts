@@ -18,6 +18,7 @@
  * `@ts-expect-error` expects.
  */
 import * as DateTime from "effect/DateTime";
+import type * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Relationship, Resource, Sort } from "@thomasfosterau/effect-jsonapi";
 
@@ -171,9 +172,12 @@ const Thread = Resource.make("threads", {
 
 export const declaredOrder: Equals<
   (typeof Thread.relationships.replies)["order"],
-  readonly [{ readonly field: "postedAt"; readonly direction: "asc" }]
+  Option.Option<readonly [{ readonly field: "postedAt"; readonly direction: "asc" }]>
 > = true;
-export const noOrder: Equals<(typeof Thread.relationships.unordered)["order"], undefined> = true;
+export const noOrder: Equals<
+  (typeof Thread.relationships.unordered)["order"],
+  Option.Option<never>
+> = true;
 
 // An order is a list of sort terms — the same shape `Query.Sort` decodes into.
 assertType<ReadonlyArray<Sort.Term<"postedAt" | "body" | "id">>>(order);

@@ -208,7 +208,7 @@ const Article = Resource.make("articles", {
   },
 });
 
-Resource.relationships(Article).comments.order; // the declared terms
+Resource.relationships(Article).comments.order; // Option.some(the declared terms); Option.none() when none is declared
 ```
 
 Each term names an attribute of the **related** resource, or its `id`; anything else is a compile error, and an empty or repeating order is refused at definition time.
@@ -224,7 +224,10 @@ const Article = Resource.make("articles", {
   },
 });
 
-Resource.relationships(Article).author.key; // "authorId" (`undefined` when none is declared)
+Resource.relationships(Article).author.key; // Option.some("authorId"); Option.none() when none is declared
+
+// a derivation into storage falls back to its own column name
+const column = Option.getOrElse(Resource.relationships(Article).author.key, () => "author_id");
 ```
 
 The key is a **storage** fact, not a wire one: the document, the query grammar and the endpoints are unchanged, and on the wire `author` stays linkage, never an attribute. It must be non-empty, must not be an attribute name of the resource, and must not repeat across its to-one relationships; `Resource.make` (and `Resource.extend`) refuse a violation at definition time. The paginated `order` and the to-one `key` are the two storage-facing declarations a relationship carries.

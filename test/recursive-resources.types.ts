@@ -19,6 +19,7 @@
  * broke.
  */
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { HttpApiEndpoint } from "effect/http-api";
 import {
@@ -350,12 +351,22 @@ const Post: Post = Resource.make("posts", {
   relationships: { feed: Relationship.one(() => Feed) },
 });
 
-assertType<"desc">(Feed.relationships.posts.order[0].direction);
+const firstDirection = Option.map(Feed.relationships.posts.order, (terms) => terms[0].direction);
+assertType<Option.Option<"desc">>(firstDirection);
 // @ts-expect-error -- the declared order is read back as its literal tuple
-assertType<"asc">(Feed.relationships.posts.order[0].direction);
+assertType<Option.Option<"asc">>(firstDirection);
 
-// An order-less `paginated` in a cycle keeps the constructor's `undefined`.
-assertType<undefined>(Article.relationships.revisions.order);
+// An order-less `paginated` in a cycle keeps the constructor's `Option<never>`
+// (`Option.none()`)…
+assertType<Option.Option<never>>(Article.relationships.revisions.order);
+// @ts-expect-error -- …and not a declared one
+assertType<Option.Option<never>>(Feed.relationships.posts.order);
+
+// The wide `Paginated<Any>` still matches an ordered and an order-less descriptor.
+const wideOrdered: Relationship.Paginated<Resource.Any> = Feed.relationships.posts;
+const wideUnordered: Relationship.Paginated<Resource.Any> = Article.relationships.revisions;
+assertType<Option.Option<Relationship.Order<Resource.Any>>>(wideOrdered.order);
+assertType<Option.Option<Relationship.Order<Resource.Any>>>(wideUnordered.order);
 
 type FeedPaths = Resource.IncludePath<Feed>;
 // @ts-expect-error -- a paginated relationship is never includable, order or not
