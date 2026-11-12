@@ -1,3 +1,4 @@
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
@@ -37,7 +38,7 @@ describe("Filter", () => {
   });
 
   it("spells the operators as typed constants", () => {
-    expect(Object.keys(Filter.Op)).toEqual([...Filter.operators]);
+    expect(R.keys(Filter.Op)).toEqual([...Filter.operators]);
     Arr.forEach(Filter.operators, (operator) => {
       expect(Filter.Op[operator]).toBe(operator);
     });

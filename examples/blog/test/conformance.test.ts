@@ -8,6 +8,7 @@
  * here), and a disappearing one means a fixed bug whose entry should come
  * off this list.
  */
+import * as R from "effect/Record";
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -97,7 +98,7 @@ describe("blog: JSON:API conformance", () => {
     // (#301). `report.samples` records each such read with its status (#319).
     // Keyed by type, so a sample that did not resolve shows up under its type.
     expect(
-      Object.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
+      R.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
       Conformance.format(report),
     ).toEqual({ articles: 200 });
   });

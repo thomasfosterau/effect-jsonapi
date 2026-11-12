@@ -1,3 +1,4 @@
+import * as R from "effect/Record";
 import { it } from "@effect/vitest";
 import { afterEach, describe, expect, expectTypeOf } from "vite-plus/test";
 import * as Arr from "effect/Array";
@@ -412,9 +413,9 @@ describe("Query.schema", () => {
 
 describe("Query.Page", () => {
   it("provides offset, number and cursor strategies", () => {
-    expect(Object.keys(Query.Page.Offset)).toEqual(["offset", "limit"]);
-    expect(Object.keys(Query.Page.Number)).toEqual(["number", "size"]);
-    expect(Object.keys(Query.Page.Cursor)).toEqual(["cursor", "size"]);
+    expect(R.keys(Query.Page.Offset)).toEqual(["offset", "limit"]);
+    expect(R.keys(Query.Page.Number)).toEqual(["number", "size"]);
+    expect(R.keys(Query.Page.Cursor)).toEqual(["cursor", "size"]);
   });
 
   it("number strategy decodes page[number]/page[size]", () => {
@@ -432,7 +433,7 @@ describe("Query.Page", () => {
 
 describe("Query.Page.offset (factory)", () => {
   it("produces the same { offset, limit } shape as the constant", () => {
-    expect(Object.keys(Query.Page.offset())).toEqual(["offset", "limit"]);
+    expect(R.keys(Query.Page.offset())).toEqual(["offset", "limit"]);
   });
 
   it("fromString: false decodes a plain number and rejects a numeric string", () => {
@@ -521,7 +522,7 @@ describe("Query.Page.offset (factory)", () => {
 
 describe("Query.Page.number (factory)", () => {
   it("produces the { number, size } shape and decodes", () => {
-    expect(Object.keys(Query.Page.number())).toEqual(["number", "size"]);
+    expect(R.keys(Query.Page.number())).toEqual(["number", "size"]);
     const page = Schema.Struct(Query.Page.number({ fromString: false }));
     expect(Schema.decodeUnknownSync(page)({ number: 2, size: 25 })).toEqual({
       number: 2,
@@ -554,7 +555,7 @@ describe("Query.bracketPageKeys", () => {
 
   it("renames only the page cursor's encoded keys, leaving other fields flat", () => {
     const wire = Query.bracketPageKeys(ListArticles);
-    expect(Arr.sort(Object.keys(wire.from.fields), Order.String)).toEqual([
+    expect(Arr.sort(R.keys(wire.from.fields), Order.String)).toEqual([
       "authorId",
       "page[limit]",
       "page[offset]",
@@ -603,8 +604,8 @@ describe("Query.bracketPageKeys", () => {
     // decoded cursor under `page`, this leaves it flat. The wire keys match.
     const composed = Query.schema(Article, { page: Query.Page.Offset });
     const standalone = Query.bracketPageKeys(Schema.Struct(Query.Page.Offset));
-    expect(Arr.sort(Object.keys(standalone.from.fields), Order.String)).toEqual(
-      Arr.sort(Object.keys(composed.from.fields), Order.String),
+    expect(Arr.sort(R.keys(standalone.from.fields), Order.String)).toEqual(
+      Arr.sort(R.keys(composed.from.fields), Order.String),
     );
     expect(
       Schema.decodeUnknownSync(composed)({ "page[offset]": "20", "page[limit]": "10" }),
@@ -624,7 +625,7 @@ describe("Query.bracketKeys", () => {
 
   it("renames only the given keys under the given prefix, leaving the rest flat", () => {
     const wire = ListArticles.pipe(Query.bracketKeys("filter", ["status"]));
-    expect(Arr.sort(Object.keys(wire.from.fields), Order.String)).toEqual([
+    expect(Arr.sort(R.keys(wire.from.fields), Order.String)).toEqual([
       "authorId",
       "filter[status]",
       "limit",
@@ -643,8 +644,8 @@ describe("Query.bracketKeys", () => {
   it("reproduces bracketPageKeys' exact behaviour", () => {
     const wire = ListArticles.pipe(Query.bracketKeys("page", ["offset", "limit"]));
     const viaBracketPageKeys = Query.bracketPageKeys(ListArticles);
-    expect(Arr.sort(Object.keys(wire.from.fields), Order.String)).toEqual(
-      Arr.sort(Object.keys(viaBracketPageKeys.from.fields), Order.String),
+    expect(Arr.sort(R.keys(wire.from.fields), Order.String)).toEqual(
+      Arr.sort(R.keys(viaBracketPageKeys.from.fields), Order.String),
     );
     const encoded = { "page[offset]": 20, "page[limit]": 10, authorId: "9", status: "open" };
     expect(Schema.decodeUnknownSync(wire)(encoded)).toEqual(
@@ -659,7 +660,7 @@ describe("Query.bracketKeys", () => {
     );
 
     it("bracket-keys every family applied so far, not just the last one", () => {
-      expect(Arr.sort(Object.keys(wire.from.fields), Order.String)).toEqual([
+      expect(Arr.sort(R.keys(wire.from.fields), Order.String)).toEqual([
         "filter[authorId]",
         "filter[status]",
         "page[limit]",
@@ -706,8 +707,8 @@ describe("Query.bracketKeys", () => {
         Query.bracketKeys("filter", ["authorId", "status"]),
         Query.bracketKeys("page", ["offset", "limit"]),
       );
-      expect(Arr.sort(Object.keys(reversed.from.fields), Order.String)).toEqual(
-        Arr.sort(Object.keys(wire.from.fields), Order.String),
+      expect(Arr.sort(R.keys(reversed.from.fields), Order.String)).toEqual(
+        Arr.sort(R.keys(wire.from.fields), Order.String),
       );
     });
   });
@@ -915,7 +916,7 @@ describe("Query.canonical", () => {
   const pairs = Query.canonicalPairs(query);
   // `URLSearchParams` is what a client (and `UrlParams.toRecord`) parses the
   // string with; repeated keys never occur in canonical output.
-  const parse = (s: string): Record<string, string> => Object.fromEntries(new URLSearchParams(s));
+  const parse = (s: string): Record<string, string> => R.fromEntries(new URLSearchParams(s));
 
   const expected =
     "include=author%2Ccomments.author&fields[articles]=title%2Cbody&fields[people]=firstName" +
@@ -981,7 +982,7 @@ describe("Query.canonical", () => {
       },
     ];
     const strings = spellings.map((spelling) => canonical(decode(spelling)));
-    expect(new Set(strings).size).toBe(1);
+    expect(Arr.dedupe(strings).length).toBe(1);
     expect(strings[0]).toBe(expected);
     // and the ordered pairs behind the string are the same list
     expect(pairs(decode(spellings[2]))).toEqual(pairs(decode(spellings[0])));
@@ -1002,7 +1003,7 @@ describe("Query.canonical", () => {
       "include=comments.author%2Cauthor&fields[articles]=body&filter[author]=&filter[q]=a%2Cb%20%26%20c%3Dd%3F%C3%A9%5C%2C&sort=title&page[limit]=5",
     );
     const params = new URLSearchParams(s);
-    expect([...params.keys()].length).toBe(new Set(params.keys()).size);
+    expect([...params.keys()].length).toBe(Arr.dedupe(params.keys()).length);
     expect(decode(parse(s))).toEqual(decoded);
     expect(canonical(decode(parse(s)))).toBe(s);
   });

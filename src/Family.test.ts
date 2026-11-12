@@ -1,3 +1,4 @@
+import * as R from "effect/Record";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 import * as Endpoint from "./Endpoint.js";
@@ -231,7 +232,7 @@ describe("Resource.family (no-base form)", () => {
     const fam = family("ab", [A, B]);
     const Late = Resource("late", { attributes: { z: Schema.String } });
     // The shared relationship resolves on access.
-    expect(Object.keys(fam.relationships)).toContain("target");
+    expect(R.keys(fam.relationships)).toContain("target");
     expect(
       (fam.relationships as { readonly target: Relationship.One<typeof Late> }).target.ref().type,
     ).toBe("late");

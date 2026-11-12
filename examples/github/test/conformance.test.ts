@@ -8,6 +8,7 @@
  * here), and a disappearing one means a fixed bug whose entry should come
  * off this list.
  */
+import * as R from "effect/Record";
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -119,7 +120,7 @@ describe("github: JSON:API conformance", () => {
     // `labels` and `issueComments` have no `GET /:type/:id` endpoint, so their
     // samples key relationship and related reads only, and record no read.
     expect(
-      Object.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
+      R.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
       Conformance.format(report),
     ).toEqual({ users: 200, repositories: 200, issues: 200, pulls: 200 });
   });

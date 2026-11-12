@@ -932,7 +932,7 @@ describe("github example: heterogeneous search", () => {
       }),
     );
 
-    const types = Arr.sort([...new Set(document.data.map((result) => result.type))], Order.String);
+    const types = Arr.sort(Arr.dedupe(document.data.map((result) => result.type)), Order.String);
     expect(types).toEqual(["issues", "repositories", "users"]);
 
     // the union is discriminated by the `type` tag; the endpoint declares

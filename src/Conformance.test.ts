@@ -6,6 +6,7 @@
  * flag. A kit that reports nothing against a real server is only trustworthy
  * once it has been shown to report the right things against a broken one.
  */
+import * as HashSet from "effect/HashSet";
 import { it } from "@effect/vitest";
 import { assert, describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
@@ -113,8 +114,8 @@ const cannedClient = (serve: (request: CannedRequest) => Canned): HttpClient.Htt
   HttpClient.make((request, url) =>
     Effect.sync(() => {
       const headers = new Headers();
-      Arr.forEach(Object.entries(request.headers), ([name, value]) => {
-        if (value !== undefined) headers.set(name, value);
+      Arr.forEach(Rec.toEntries<string, unknown>(request.headers), ([name, value]) => {
+        if (P.isString(value)) headers.set(name, value);
       });
       const canned = serve({
         method: request.method,
@@ -286,7 +287,7 @@ const refused = (path: string) =>
   `a redirect the transport followed itself, ending in a transport error at https://elsewhere.test${path}: https://elsewhere.test is another origin than the one the request was sent to, http://fixture.test, and the transport has already tried the request there`;
 
 /** The families of query parameter JSON:API defines. */
-const FAMILIES = ["include", "sort", "page", "filter", "fields"];
+const FAMILIES = HashSet.make("include", "sort", "page", "filter", "fields");
 
 /**
  * The names of the specification's families `conformantServe` processes: the
@@ -294,7 +295,7 @@ const FAMILIES = ["include", "sort", "page", "filter", "fields"];
  * for each type it serves. It does not paginate or filter, so any other name
  * of a family is one it does not know how to process (#310).
  */
-const PROCESSED = ["include", "sort", "fields[articles]", "fields[people]"];
+const PROCESSED = HashSet.make("include", "sort", "fields[articles]", "fields[people]");
 
 /**
  * Whether `conformantServe` refuses a query parameter with a 400: a name of a
@@ -306,8 +307,8 @@ const PROCESSED = ["include", "sort", "fields[articles]", "fields[people]"];
  */
 const refusesParameter = (key: string): boolean => {
   const base = key.split("[")[0] ?? key;
-  return FAMILIES.includes(base)
-    ? !PROCESSED.includes(key)
+  return HashSet.has(FAMILIES, base)
+    ? !HashSet.has(PROCESSED, key)
     : /^[a-z]+$/.test(key) || !/^[A-Za-z0-9](?:[\w -]*[A-Za-z0-9])?$/.test(base);
 };
 
@@ -396,7 +397,7 @@ const conformantServe = (request: {
   // The comma grammar and the repeated-key spelling denote the same set, so the
   // baseline unions repeated keys before reading any of them.
   const params = new URLSearchParams();
-  Arr.forEach(new Set(raw.keys()), (key) => {
+  Arr.forEach(Arr.dedupe(raw.keys()), (key) => {
     params.set(key, raw.getAll(key).join(","));
   });
   const refused = Arr.findFirst([...params.keys()], refusesParameter);
@@ -424,8 +425,8 @@ const conformantServe = (request: {
   const project = (type: string, attributes: Readonly<Record<string, unknown>>) => {
     const requested = params.get(`fields[${type}]`);
     if (requested === null) return attributes;
-    const keep = new Set(requested.split(","));
-    return Object.fromEntries(Object.entries(attributes).filter(([key]) => keep.has(key)));
+    const keep = HashSet.fromIterable(requested.split(","));
+    return Rec.fromEntries(Rec.toEntries(attributes).filter(([key]) => HashSet.has(keep, key)));
   };
 
   const articleObject = {
@@ -464,7 +465,7 @@ const conformantServe = (request: {
 describe("Conformance: the catalogue", () => {
   it("every rule has a unique id, a citation and a normative sentence", () => {
     const ids = Conformance.rules.map((rule) => rule.id);
-    expect(new Set(ids).size).toBe(ids.length);
+    expect(Arr.dedupe(ids).length).toBe(ids.length);
     Arr.forEach(Conformance.rules, (rule) => {
       expect(rule.requirement.length).toBeGreaterThan(20);
       expect(rule.reference).toMatch(/^https:\/\//);
@@ -1667,7 +1668,7 @@ describe("Conformance: detects a deliberately broken server", () => {
     (canned, request) => {
       const params = new URLSearchParams(request.path.split("?")[1] ?? "");
       const repeated = Arr.findFirst(
-        new Set(params.keys()),
+        Arr.dedupe(params.keys()),
         (key) => params.getAll(key).length > 1,
       );
       if (Option.isSome(repeated)) {
@@ -2988,7 +2989,10 @@ describe("Conformance: the filter grammar profile", () => {
     ["priceCents", ["eq", "gt", "lt"]],
   ]);
 
-  type Conditions = Map<string, { path?: string; operator?: string; value?: string }>;
+  type Conditions = MutableHashMap.MutableHashMap<
+    string,
+    { path?: string; operator?: string; value?: string }
+  >;
 
   /** The parameter a shorthand `filter[field]` / `filter[field][op]` key is refused at, if any. */
   const shorthandRefusal = (
@@ -3003,7 +3007,7 @@ describe("Conformance: the filter grammar profile", () => {
     const operators = Option.getOrUndefined(HashMap.get(declared, field));
     const operator = segments.length === 2 ? segments[1] : "eq";
     if (operators === undefined || !operators.includes(operator)) return Option.some(key);
-    conditions.set(key, { path: field, operator, value });
+    MutableHashMap.set(conditions, key, { path: field, operator, value });
     return Option.none();
   };
 
@@ -3023,9 +3027,9 @@ describe("Conformance: the filter grammar profile", () => {
     if (segments.length === 3 && segments[1] === "condition") {
       const member = segments[2];
       if (member !== "path" && member !== "operator" && member !== "value") return Option.some(key);
-      const entry = conditions.get(segments[0]) ?? {};
+      const entry = Option.getOrUndefined(MutableHashMap.get(conditions, segments[0])) ?? {};
       entry[member] = value;
-      conditions.set(segments[0], entry);
+      MutableHashMap.set(conditions, segments[0], entry);
       return Option.none();
     }
     return shorthandRefusal(key, segments, value, conditions);
@@ -3061,8 +3065,10 @@ describe("Conformance: the filter grammar profile", () => {
       body: { errors: [{ status: "400", title: "Bad Request", source: { parameter } }] },
     });
 
-    const conditions: Conditions = new Map();
-    const refused = Arr.findFirst(new Set(raw.keys()), (key) => keyRefusal(raw, conditions, key));
+    const conditions: Conditions = MutableHashMap.empty();
+    const refused = Arr.findFirst(Arr.dedupe(raw.keys()), (key) =>
+      keyRefusal(raw, conditions, key),
+    );
     if (Option.isSome(refused)) return reject(refused.value);
     const incomplete = Arr.findFirst(conditions, ([id, condition]) =>
       conditionRefusal(id, condition),
@@ -3957,18 +3963,19 @@ describe("Conformance: the filter evaluation oracle", () => {
       // names a group it has not read yet is dropped.
       const inKeyOrder = (request: { readonly path: string }) => {
         const query = queryOf(request);
-        const seen = new Set<string>();
-        const dropped = new Set<string>();
+        const seen = MutableHashSet.empty<string>();
+        const dropped = MutableHashSet.empty<string>();
         Arr.forEach(query, ([key, value]) => {
           const [, id, kind, member] =
             /^filter\[([^\]]+)\]\[(group|condition)\]\[([^\]]+)\]$/.exec(key) ?? [];
           if (id === undefined) return;
-          if (kind === "group") seen.add(id);
-          if (member === "memberOf" && !seen.has(value)) dropped.add(id);
+          if (kind === "group") MutableHashSet.add(seen, id);
+          if (member === "memberOf" && !MutableHashSet.has(seen, value))
+            MutableHashSet.add(dropped, id);
         });
         const kept = Arr.filter(
           [...query],
-          ([key]) => !Arr.some([...dropped], (id) => key.startsWith(`filter[${id}]`)),
+          ([key]) => !Arr.some(Arr.fromIterable(dropped), (id) => key.startsWith(`filter[${id}]`)),
         );
         return { path: `/products?${new URLSearchParams(kept).toString()}` };
       };
@@ -5162,13 +5169,15 @@ describe("Conformance: the write fixture", () => {
         // do the client-generated id rules, which this fixture opts into none of
         // (theirs are under "Conformance: client-generated ids" and "…through
         // atomic operations").
-        const reads = new Set([
+        const reads = HashSet.fromIterable([
           ...WRITE_RULES,
           ...ATOMIC_PROCESSING_RULES,
           ...CLIENT_ID_RULES,
           ...ATOMIC_CLIENT_ID_RULES,
         ]);
-        const reading = Conformance.rules.map((rule) => rule.id).filter((id) => reads.has(id));
+        const reading = Conformance.rules
+          .map((rule) => rule.id)
+          .filter((id) => HashSet.has(reads, id));
         expect(errored.map((outcome) => outcome.rule.id)).toEqual(reading);
         expect(errored.map((outcome) => outcome.message)).toEqual(
           reading.map(() => "FixturesUnreadable"),
@@ -5807,14 +5816,14 @@ describe("Conformance: the write fixture", () => {
         expect(report.outcomes.map((outcome) => outcome.rule.id)).toEqual(
           Conformance.rules.map((rule) => rule.id),
         );
-        const created = writes.map((write) => `GET /articles/${write.id}`);
+        const created = HashSet.fromIterable(writes.map((write) => `GET /articles/${write.id}`));
         const firstCreate = log.findIndex(
           ({ request, status }) =>
             /^POST \/(articles|operations)$/.test(request) && status >= 200 && status < 300,
         );
         const lastRead = log.findLastIndex(
           ({ request }) =>
-            request.startsWith("GET ") && !created.includes(request.split("?")[0] ?? ""),
+            request.startsWith("GET ") && !HashSet.has(created, request.split("?")[0] ?? ""),
         );
         expect(firstCreate).toBeGreaterThan(0);
         expect(lastRead).toBeGreaterThan(0);
@@ -6149,7 +6158,7 @@ describe("Conformance: the write fixture", () => {
   {
     // A 204 says the server changed nothing beyond the request, so the
     // request is what must read back; here a later read shows another title.
-    const patched = new Set<string>();
+    const patched = MutableHashSet.empty<string>();
     brokenWrite(
       "a 204 update whose request does not read back",
       "spec/status/update-read-back",
@@ -6157,10 +6166,10 @@ describe("Conformance: the write fixture", () => {
         const id = /^\/articles\/(\d+)$/.exec(request.path)?.[1];
         if (id === undefined) return canned;
         if (request.method === "PATCH" && canned.status === undefined) {
-          patched.add(id);
+          MutableHashSet.add(patched, id);
           return { status: 204 };
         }
-        return request.method === "GET" && patched.has(id)
+        return request.method === "GET" && MutableHashSet.has(patched, id)
           ? withData(canned, (body) => {
               const data = body["data"] as Record<string, unknown>;
               return { ...body, data: { ...data, attributes: { title: "unstored" } } };
@@ -11183,7 +11192,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     author: Identifier | null;
     tags: Array<Identifier>;
   }
-  type Posts = Map<string, Stored>;
+  type Posts = MutableHashMap.MutableHashMap<string, Stored>;
 
   /** How the canned server departs from the specification, one switch per breakage. */
   interface Breakage {
@@ -11267,7 +11276,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
   };
 
   /** The resources a relationship write may link to: the `ids` samples the runs pass. */
-  const linkable: ReadonlyArray<string> = ["people:9", "tags:7"];
+  const linkable: HashSet.HashSet<string> = HashSet.make("people:9", "tags:7");
 
   const mutationServer = (posts: Posts, breakage: Breakage) => {
     let next = 100;
@@ -11292,9 +11301,9 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
         onSome: ({ data }) => {
           if (refusesId(data.id)) return forbidden(breakage.pointer ?? "id");
           const id = honours(data.id) ? data.id : `${next++}`;
-          if (posts.has(id) && breakage.overwrites !== true) return refused(409);
+          if (MutableHashMap.has(posts, id) && breakage.overwrites !== true) return refused(409);
           const post: Stored = { title: data.attributes?.title ?? "", author: null, tags: [] };
-          posts.set(id, post);
+          MutableHashMap.set(posts, id, post);
           return created(id, post, data.id);
         },
       });
@@ -11321,7 +11330,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     const absent = (method: string, data: Stored["author"] | ReadonlyArray<Identifier>): boolean =>
       (method === "DELETE" ? breakage.removesAbsent404 === true : breakage.linksAbsent !== true) &&
       (Array.isArray(data) ? data : data === null ? [] : [data]).some(
-        (item: Identifier) => !linkable.includes(`${item.type}:${item.id}`),
+        (item: Identifier) => !HashSet.has(linkable, `${item.type}:${item.id}`),
       );
     const onWrite = (request: CannedRequest, post: Stored, name: "author" | "tags"): Canned =>
       Option.match(decodeLinkage(request.body), {
@@ -11349,7 +11358,10 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     return (request: CannedRequest): Canned => {
       if (request.method === "POST" && request.path === "/posts") return onCreate(request);
       const match = /^\/posts\/([^/?]+)(?:\/relationships\/(author|tags))?$/.exec(request.path);
-      const post = match === null ? undefined : posts.get(decodeURIComponent(match[1]));
+      const post =
+        match === null
+          ? undefined
+          : Option.getOrUndefined(MutableHashMap.get(posts, decodeURIComponent(match[1])));
       if (match === null || post === undefined) return refused(404);
       const name = match[2] as "author" | "tags" | undefined;
       if (name !== undefined) return onRelationship(request, post, name);
@@ -11369,7 +11381,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     verify: typeof verifyCanned = verifyOver(mutationApi),
   ) =>
     Effect.gen(function* () {
-      const posts: Posts = new Map();
+      const posts: Posts = MutableHashMap.empty();
       const seen: Array<string> = [];
       const serve = mutationServer(posts, breakage);
       const report = yield* verify(
@@ -11384,7 +11396,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
           writes: {
             posts: {
               create: () => ({ type: "posts", attributes: { title: `post ${++sequence}` } }),
-              cleanup: (id) => Effect.sync(() => posts.delete(id)),
+              cleanup: (id) => Effect.sync(() => MutableHashMap.remove(posts, id)),
               clientId: clientId === "none" ? undefined : clientId,
             },
           },
@@ -11442,7 +11454,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
         expect(outcomeFor(report, "spec/relationships/remove-absent-succeeds")).toMatchObject({
           probes: 2,
         });
-        expect(posts.size).toBe(0);
+        expect(MutableHashMap.size(posts)).toBe(0);
         expect(writes.map((write) => write.disposal)).toEqual(writes.map(() => "cleaned-up"));
         // The first create under a client id is the kit's under that id.
         expect(
@@ -11458,7 +11470,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
       expect(
         tags(report, ["spec/status/create-client-id", "spec/status/create-conflict-id"]),
       ).toEqual(["Passed", "Passed"]);
-      expect(posts.size).toBe(0);
+      expect(MutableHashMap.size(posts)).toBe(0);
       expect(writes.find((write) => write.rule === "spec/status/create-client-id")).toEqual(
         expect.objectContaining({ id: expect.stringMatching(/^client-/), disposal: "cleaned-up" }),
       );
@@ -11482,7 +11494,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
         _tag: "Skipped",
         reason: expect.stringContaining("see spec/status/create-client-id"),
       });
-      expect(posts.size).toBe(0);
+      expect(MutableHashMap.size(posts)).toBe(0);
     }),
   );
 
@@ -11506,7 +11518,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
           expect.objectContaining({ disposal: "cleaned-up" }),
           expect.objectContaining({ id: undefined, disposal: "left" }),
         ]);
-        expect(posts.size).toBe(0);
+        expect(MutableHashMap.size(posts)).toBe(0);
       }),
   );
 
@@ -11533,7 +11545,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
           expected: "403 Forbidden",
         }),
       ]);
-      expect(posts.size).toBe(0);
+      expect(MutableHashMap.size(posts)).toBe(0);
       expect(writes.map((write) => write.disposal)).toEqual(writes.map(() => "cleaned-up"));
     }),
   );
@@ -11589,7 +11601,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
         expect(found.probe?.method).toBe(method);
         expect(found.detail).toMatch(/reads back/);
       });
-      expect(posts.size).toBe(0);
+      expect(MutableHashMap.size(posts)).toBe(0);
     }),
   );
 
@@ -11639,7 +11651,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
             probe: expect.objectContaining({ method: "PATCH" }),
           }),
         ]);
-        expect(posts.size).toBe(0);
+        expect(MutableHashMap.size(posts)).toBe(0);
       }),
   );
 
@@ -11667,7 +11679,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
           }),
         ),
       );
-      expect(posts.size).toBe(0);
+      expect(MutableHashMap.size(posts)).toBe(0);
     }),
   );
 
@@ -11718,7 +11730,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
             /^POST \S+\/relationships\/tags linking tags:conformance-absent-id-0000/,
           ),
         ]);
-        expect(posts.size).toBe(0);
+        expect(MutableHashMap.size(posts)).toBe(0);
       }),
   );
 
@@ -11737,7 +11749,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
             probe: expect.objectContaining({ method: "DELETE" }),
           }),
         ]);
-        expect(posts.size).toBe(0);
+        expect(MutableHashMap.size(posts)).toBe(0);
       }),
   );
 

@@ -68,7 +68,7 @@ describe("Resource.filterable / Resource.sortable", () => {
 
   it("returns the declared sets, undeclared keys absent", () => {
     const declared = filterable(Product);
-    expect(Object.keys(declared)).toEqual(["priceCents", "stock", "supplier"]);
+    expect(Rec.keys(declared)).toEqual(["priceCents", "stock", "supplier"]);
     expect("name" in declared).toBe(false);
     expect("sku" in declared).toBe(false);
     expect("maker" in declared).toBe(false);
@@ -112,7 +112,7 @@ describe("Resource.filterable / Resource.sortable", () => {
       attributes: { colour: attribute(Schema.String, { filter: ["eq", "in"], sort: true }) },
       relationships: { origin: Relationship.optional(() => Supplier, { filter: ["isnull"] }) },
     });
-    expect(Object.keys(filterable(Child))).toEqual([
+    expect(Rec.keys(filterable(Child))).toEqual([
       "priceCents",
       "stock",
       "colour",
@@ -187,7 +187,7 @@ describe("Resource.filterable / Resource.sortable", () => {
     const Person = extend(Node, "people", { inheritId: true });
     const Organisation = extend(Node, "organisations", { inheritId: true });
     const Anchored = family(Node, [Person, Organisation]);
-    expect(Object.keys(filterable(Anchored))).toEqual(["name", "owner"]);
+    expect(Rec.keys(filterable(Anchored))).toEqual(["name", "owner"]);
     expect(filterable(Anchored).name.operators).toEqual(["eq", "in"]);
     expect(filterable(Anchored).owner.operators).toEqual(Relationship.filterOperators);
     expect(sortable(Anchored)).toEqual(["name"]);
@@ -216,7 +216,7 @@ describe("Resource.filterable / Resource.sortable", () => {
 
     it("declares on `one` and `optional`; `true` is the five relationship operators", () => {
       const declared = filterable(Article);
-      expect(Object.keys(declared)).toEqual(["author", "editor"]);
+      expect(Rec.keys(declared)).toEqual(["author", "editor"]);
       expect(declared.author.operators).toEqual(["eq", "ne", "in", "nin", "isnull"]);
       expect(declared.author.operators).toEqual(Relationship.filterOperators);
       expect(declared.editor.operators).toEqual(["eq", "isnull"]);
@@ -718,7 +718,7 @@ describe("Resource.filterable / Resource.sortable", () => {
         attributes: { n: attribute(Schema.Number, { filter: ["eq"], sort: true }) },
       });
       Arr.forEach([Piped, Wrapped, Sugar], (R) => {
-        expect(Object.keys(filterable(R))).toEqual(["n"]);
+        expect(Rec.keys(filterable(R))).toEqual(["n"]);
         expect(filterable(R).n.operators).toEqual(["eq"]);
         expect(Schema.decodeUnknownSync(filterable(R).n.literal)("2")).toBe(2);
         expect(sortable(R)).toEqual(["n"]);
@@ -753,13 +753,7 @@ describe("Resource.filterable / Resource.sortable", () => {
       const descriptor = Schema.resolveAnnotations(field)?.[AttributeDescriptorAnnotationId] as {
         readonly schema: Schema.Top;
       };
-      expect(Object.keys(descriptor)).toEqual([
-        "schema",
-        "resource",
-        "create",
-        "update",
-        "clearable",
-      ]);
+      expect(Rec.keys(descriptor)).toEqual(["schema", "resource", "create", "update", "clearable"]);
       expect(annotationsOf(descriptor.schema)).toEqual({
         filter: { operators: ["eq"], literal: undefined },
         sort: true,
@@ -813,7 +807,7 @@ describe("Resource.filterable / Resource.sortable", () => {
             b: Schema.optionalKey(declared),
           },
         });
-        expect(Object.keys(filterable(R))).toEqual(["a", "b"]);
+        expect(Rec.keys(filterable(R))).toEqual(["a", "b"]);
         expect(filterable(R).a.operators).toEqual(["eq", "gte"]);
         expect(filterable(R).b.operators).toEqual(["eq", "gte"]);
         expect(Schema.decodeUnknownSync(filterable(R).b.literal)("2")).toBe(2);
@@ -831,7 +825,7 @@ describe("Resource.filterable / Resource.sortable", () => {
             score: attribute(Schema.NullOr(declared), { create: "optional" }),
           },
         });
-        expect(Object.keys(filterable(R))).toEqual(["rating", "score"]);
+        expect(Rec.keys(filterable(R))).toEqual(["rating", "score"]);
         expect(filterable(R).rating.operators).toEqual(["eq", "gte"]);
         expect(Schema.decodeUnknownSync(filterable(R).rating.literal)("4.5")).toBe(4.5);
         expect(() => Schema.decodeUnknownSync(filterable(R).rating.literal)("null")).toThrow();
@@ -853,13 +847,13 @@ describe("Resource.filterable / Resource.sortable", () => {
           },
         });
         const R = Resource("by-hand", { attributes: { n: byHand } });
-        expect(Object.keys(filterable(R))).toEqual(["n"]);
+        expect(Rec.keys(filterable(R))).toEqual(["n"]);
         expect(sortable(R)).toEqual(["n"]);
       });
 
       it("a Schema.suspend — at runtime; the suspension is opaque to the type level", () => {
         const R = Resource("suspended", { attributes: { n: Schema.suspend(() => declared) } });
-        expect(Object.keys(filterable(R))).toEqual(["n"]);
+        expect(Rec.keys(filterable(R))).toEqual(["n"]);
         const entries = filterable(R) as Record<
           string,
           { readonly operators: ReadonlyArray<string> }
@@ -876,7 +870,7 @@ describe("Resource.filterable / Resource.sortable", () => {
       const keysOf = <R extends { readonly type: string }>(
         R: R & Parameters<typeof filterable>[0],
       ) => ({
-        filterable: Object.keys(filterable(R)),
+        filterable: Rec.keys<string, unknown>(filterable(R)),
         sortable: [...sortable(R)],
       });
 
@@ -983,7 +977,7 @@ describe("Resource.filterable / Resource.sortable", () => {
       const Spread = Resource("spreads", {
         attributes: { ...attributes(Base), extra: Schema.String },
       });
-      expect(Object.keys(filterable(Spread))).toEqual(["n", "s"]);
+      expect(Rec.keys(filterable(Spread))).toEqual(["n", "s"]);
       expect(filterable(Spread).n.operators).toEqual(["eq"]);
       expect(sortable(Spread)).toEqual(["n"]);
       expectTypeOf<FilterableKeys<typeof Spread>>().toEqualTypeOf<"n" | "s">();
@@ -992,7 +986,7 @@ describe("Resource.filterable / Resource.sortable", () => {
       const Extended = extend(Base, "extendeds", {
         attributes: { t: Schema.String.pipe(Sort.able()) },
       });
-      expect(Object.keys(filterable(Extended))).toEqual(["n", "s"]);
+      expect(Rec.keys(filterable(Extended))).toEqual(["n", "s"]);
       expect(sortable(Extended)).toEqual(["n", "t"]);
       expectTypeOf<SortableKeys<typeof Extended>>().toEqualTypeOf<"n" | "t">();
     });
@@ -1053,7 +1047,7 @@ describe("Resource.filterable / Resource.sortable", () => {
       const R = Resource("nullable-annotated", {
         attributes: { rating: attribute(s, { clearable: undefined }) },
       });
-      expect(Object.keys(filterable(R))).toEqual(["rating"]);
+      expect(Rec.keys(filterable(R))).toEqual(["rating"]);
       expect(sortable(R)).toEqual(["rating"]);
       // the literal is the non-null member's: never null
       expect(Schema.decodeUnknownSync(filterable(R).rating.literal)("1")).toBe(1);
@@ -1104,16 +1098,14 @@ describe("Resource.filterable / Resource.sortable", () => {
         ),
       ).toEqual(["n"]);
       expect(
-        Object.keys(
+        Rec.keys(
           filterable(
             Resource("kept", { attributes: { n: attribute(sortDeclared, { filter: true }) } }),
           ),
         ),
       ).toEqual(["n"]);
       expect(
-        Object.keys(
-          filterable(Resource("plain", { attributes: { n: attribute(filterDeclared) } })),
-        ),
+        Rec.keys(filterable(Resource("plain", { attributes: { n: attribute(filterDeclared) } }))),
       ).toEqual(["n"]);
     });
   });

@@ -5,6 +5,7 @@
  * path-match that keeps a page-only URL out of the JSON:API namespace, and
  * an alternate representation negotiated ahead of JSON:API.
  */
+import * as R from "effect/Record";
 import { describe, expect, it } from "vite-plus/test";
 import { MimeType } from "@thomasfosterau/effect-ext/Mime";
 import * as Arr from "effect/Array";
@@ -85,7 +86,7 @@ describe("isApiPath", () => {
   });
 
   it("accepts the group list the api was assembled from, equivalently", () => {
-    const fromGroups = Negotiation.make({ api: Object.values(Api.groups) });
+    const fromGroups = Negotiation.make({ api: R.values(Api.groups) });
     expect(fromGroups.isApiPath("/contests")).toBe(true);
     expect(fromGroups.isApiPath("/about")).toBe(false);
   });

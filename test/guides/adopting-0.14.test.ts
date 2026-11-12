@@ -11,6 +11,7 @@
  * cannot describe a call shape that does not compile or a property that does
  * not hold.
  */
+import * as R from "effect/Record";
 import { it } from "@effect/vitest";
 import { assert, describe, expect, onTestFinished } from "vite-plus/test";
 import * as Arr from "effect/Array";
@@ -105,7 +106,7 @@ describe("1. Include.make replaces IncludeSpec / nested / includablePaths / incl
       page: Query.Page.Offset,
       relationships: false,
     });
-    expect(Arr.sort(Object.keys(group.endpoints), Order.String)).toEqual([
+    expect(Arr.sort(R.keys(group.endpoints), Order.String)).toEqual([
       "create",
       "delete",
       "get",

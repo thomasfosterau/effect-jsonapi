@@ -925,7 +925,7 @@ const unread = (
 export const HOP_CAP = 5;
 
 /** The statuses that redirect to their `Location`. */
-const REDIRECTS: ReadonlyArray<number> = [301, 302, 303, 307, 308];
+const REDIRECTS: HashSet.HashSet<number> = HashSet.make(301, 302, 303, 307, 308);
 
 /** The longest `Location` a note quotes, in UTF-16 code units. */
 const LOCATION_LIMIT = 200;
@@ -1240,7 +1240,7 @@ export const runner =
         const response = result.success;
         const location = response.headers["location"];
         // An empty `Location` names nothing to follow, as a missing one does.
-        if (!REDIRECTS.includes(response.status) || location === undefined || location === "") {
+        if (!HashSet.has(REDIRECTS, response.status) || location === undefined || location === "") {
           return answered(yield* answerOf(record, response, redirects));
         }
         const hop = hopOf({ status: response.status, location }, { ...sent, sentTo }, origin, {
@@ -1499,7 +1499,7 @@ const failedOnRead = (
   if (P.isTagged(outcome, "Passed")) return Option.none();
   const lost = unread.map(({ probe }) => probe);
   const findings = outcome.findings.filter(
-    ({ probe }) => probe === undefined || !lost.includes(probe),
+    ({ probe }) => probe === undefined || !Arr.some(lost, (read) => read === probe),
   );
   return Arr.isReadonlyArrayNonEmpty(findings)
     ? Option.some({ ...outcome, findings })

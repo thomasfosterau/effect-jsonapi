@@ -643,9 +643,7 @@ describe("the per-resource transform pass", () => {
     expect(document.included?.[0]?.attributes).toEqual({ title: "Yo" });
     // the assertion that matters: one type, one shape
     assert(document.included !== undefined);
-    expect(Object.keys(document.data.attributes)).toEqual(
-      Object.keys(document.included[0].attributes),
-    );
+    expect(Rec.keys(document.data.attributes)).toEqual(Rec.keys(document.included[0].attributes));
     // …and the relationship that carried the linkage went with the
     // fieldset, which exempts the member it linked (#494)
     expect("relationships" in document.data).toBe(false);
@@ -659,8 +657,8 @@ describe("the per-resource transform pass", () => {
     expect(document.data[0]?.attributes).toEqual({ title: "Hi" });
     expect(document.included?.[0]?.attributes).toEqual({ title: "Yo" });
     assert(document.included !== undefined);
-    expect(Object.keys(document.data[0].attributes)).toEqual(
-      Object.keys(document.included[0].attributes),
+    expect(Rec.keys(document.data[0].attributes)).toEqual(
+      Rec.keys(document.included[0].attributes),
     );
   });
 
@@ -1027,7 +1025,7 @@ describe("relationship URL helpers", () => {
   it("paginatedRelationship with self: false omits the self link", () => {
     const value = Handlers.paginatedRelationship("people", "9", "articles", { self: false });
     expect(value).toEqual({ links: { related: "/people/9/articles" } });
-    expect(Object.keys(value.links)).toEqual(["related"]);
+    expect(Rec.keys(value.links)).toEqual(["related"]);
   });
 
   it("paginatedRelationship with a self string uses that path verbatim", () => {

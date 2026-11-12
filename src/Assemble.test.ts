@@ -5,6 +5,7 @@
  * with its whitelist / depth guards and its batching, and the §8.4
  * relationship document.
  */
+import * as HashSet from "effect/HashSet";
 import { it } from "@effect/vitest";
 import * as Arr from "effect/Array";
 import * as DateTime from "effect/DateTime";
@@ -40,9 +41,9 @@ const adminCapabilities = Assemble.roleCapabilities(
 );
 
 /** The applications' family rule: political types by role, ingested types never. */
-const POLITICAL = new Set(["people", "places"]);
+const POLITICAL = HashSet.make("people", "places");
 const familyCapabilities: Assemble.CapabilitiesHook<User | null> = (resource, viewer) =>
-  POLITICAL.has(resource.type)
+  HashSet.has(POLITICAL, resource.type)
     ? adminCapabilities(resource, viewer)
     : { canEdit: false, canDelete: false };
 
@@ -118,8 +119,8 @@ const registry = (known: ReadonlyArray<Assemble.ResourceLike>) => {
           (r) => r.type === type && ids.includes(r.id),
         ) as ReadonlyArray<Handlers.ResourceValue>;
       });
-  const targets = Object.fromEntries(
-    [...new Set(known.map((r) => r.type))].map((type) => [type, target(type)]),
+  const targets = Rec.fromEntries(
+    Arr.dedupe(known.map((r) => r.type)).map((type) => [type, target(type)]),
   ) satisfies Handlers.IncludeTargets;
   return { calls, targets };
 };
@@ -209,9 +210,9 @@ describe("Assemble.resource", () => {
   it.effect("applies sparse fieldset projection to attributes, by type", () =>
     Effect.gen(function* () {
       const projected = yield* Assemble.resource(person("p1"), { fields: { people: ["name"] } });
-      expect(Object.keys(projected.data.attributes)).toEqual(["name"]);
+      expect(Rec.keys(projected.data.attributes)).toEqual(["name"]);
       const untouched = yield* Assemble.resource(person("p1"), { fields: { places: ["name"] } });
-      expect(Object.keys(untouched.data.attributes).length).toBeGreaterThan(1);
+      expect(Rec.keys(untouched.data.attributes).length).toBeGreaterThan(1);
     }),
   );
 

@@ -8,6 +8,7 @@
  * here), and a disappearing one means a fixed bug whose entry should come
  * off this list.
  */
+import * as R from "effect/Record";
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -200,9 +201,9 @@ describe("northwind: JSON:API conformance", () => {
     // Keyed by type, so a sample that did not resolve shows up under its type,
     // and a type the kit resolved no read for is missing.
     expect(
-      Object.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
+      R.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
       Conformance.format(report),
-    ).toEqual(Object.fromEntries(Object.keys(IDS).map((type) => [type, 200])));
+    ).toEqual(R.fromEntries(R.keys(IDS).map((type) => [type, 200])));
   });
 
   it("breaks exactly the rules that are already filed", () => {

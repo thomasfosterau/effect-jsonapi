@@ -21,6 +21,9 @@
  * other reads declare no `fields`, so their clients read every attribute as
  * required.
  */
+import * as R from "effect/Record";
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Arr from "effect/Array";
@@ -79,7 +82,7 @@ const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUns
 const definedAttributes = <A extends Record<string, unknown>>(
   attributes: A,
 ): { readonly [K in keyof A]: Exclude<A[K], undefined> } =>
-  Object.fromEntries(Object.entries(attributes).filter(([, value]) => value !== undefined)) as {
+  R.fromEntries(R.toEntries(attributes).filter(([, value]) => value !== undefined)) as {
     readonly [K in keyof A]: Exclude<A[K], undefined>;
   };
 
@@ -381,18 +384,36 @@ export const lineItems: ReadonlyArray<OrderItem> = [
 ];
 
 const store = {
-  categories: new Map<string, Category>([beverages, condiments, seafood].map((c) => [c.id, c])),
-  suppliers: new Map<string, Supplier>([exotic, tokyo, grandma].map((s) => [s.id, s])),
-  shippers: new Map<string, Shipper>([speedy, united, federal].map((s) => [s.id, s])),
-  customers: new Map<string, Customer>([alfreds, aroundHorn, bottomDollar].map((c) => [c.id, c])),
-  territories: new Map<string, Territory>([westboro, boston, santaMonica].map((t) => [t.id, t])),
-  employees: new Map<string, Employee>([nancy, andrew, janet, margaret].map((e) => [e.id, e])),
-  products: new Map<string, Product>([chai, chang, aniseed, konbu, gumbo].map((p) => [p.id, p])),
-  orders: new Map<string, Order>([order10248, order10249, order10250].map((o) => [o.id, o])),
-  orderItems: new Map<string, OrderItem>(lineItems.map((item) => [item.id, item])),
+  categories: MutableHashMap.fromIterable<string, Category>(
+    [beverages, condiments, seafood].map((c) => [c.id, c]),
+  ),
+  suppliers: MutableHashMap.fromIterable<string, Supplier>(
+    [exotic, tokyo, grandma].map((s) => [s.id, s]),
+  ),
+  shippers: MutableHashMap.fromIterable<string, Shipper>(
+    [speedy, united, federal].map((s) => [s.id, s]),
+  ),
+  customers: MutableHashMap.fromIterable<string, Customer>(
+    [alfreds, aroundHorn, bottomDollar].map((c) => [c.id, c]),
+  ),
+  territories: MutableHashMap.fromIterable<string, Territory>(
+    [westboro, boston, santaMonica].map((t) => [t.id, t]),
+  ),
+  employees: MutableHashMap.fromIterable<string, Employee>(
+    [nancy, andrew, janet, margaret].map((e) => [e.id, e]),
+  ),
+  products: MutableHashMap.fromIterable<string, Product>(
+    [chai, chang, aniseed, konbu, gumbo].map((p) => [p.id, p]),
+  ),
+  orders: MutableHashMap.fromIterable<string, Order>(
+    [order10248, order10249, order10250].map((o) => [o.id, o]),
+  ),
+  orderItems: MutableHashMap.fromIterable<string, OrderItem>(
+    lineItems.map((item) => [item.id, item]),
+  ),
   // The paginated line-item feed is backed by its own index, not by inline
   // linkage on the order.
-  itemsByOrder: new Map<string, Array<string>>([
+  itemsByOrder: MutableHashMap.fromIterable<string, Array<string>>([
     [order10248.id, ["1", "2"]],
     [order10249.id, ["3"]],
     [order10250.id, []],
@@ -413,40 +434,40 @@ const relationshipsOf = <T extends { readonly relationships?: object }>(
   );
 
 const loadCategory = (id: string): Effect.Effect<Category, CategoryNotFound> => {
-  const category = store.categories.get(id);
+  const category = Option.getOrUndefined(MutableHashMap.get(store.categories, id));
   return category === undefined
     ? Effect.fail(new CategoryNotFound({ id }))
     : Effect.succeed(category);
 };
 
 const loadSupplier = (id: string): Effect.Effect<Supplier, SupplierNotFound> => {
-  const supplier = store.suppliers.get(id);
+  const supplier = Option.getOrUndefined(MutableHashMap.get(store.suppliers, id));
   return supplier === undefined
     ? Effect.fail(new SupplierNotFound({ id }))
     : Effect.succeed(supplier);
 };
 
 const loadShipper = (id: string): Effect.Effect<Shipper, ShipperNotFound> => {
-  const shipper = store.shippers.get(id);
+  const shipper = Option.getOrUndefined(MutableHashMap.get(store.shippers, id));
   return shipper === undefined ? Effect.fail(new ShipperNotFound({ id })) : Effect.succeed(shipper);
 };
 
 const loadCustomer = (id: string): Effect.Effect<Customer, CustomerNotFound> => {
-  const customer = store.customers.get(id);
+  const customer = Option.getOrUndefined(MutableHashMap.get(store.customers, id));
   return customer === undefined
     ? Effect.fail(new CustomerNotFound({ id }))
     : Effect.succeed(customer);
 };
 
 const loadTerritory = (id: string): Effect.Effect<Territory, TerritoryNotFound> => {
-  const territory = store.territories.get(id);
+  const territory = Option.getOrUndefined(MutableHashMap.get(store.territories, id));
   return territory === undefined
     ? Effect.fail(new TerritoryNotFound({ id }))
     : Effect.succeed(territory);
 };
 
 const loadEmployee = (id: string): Effect.Effect<Employee, EmployeeNotFound> => {
-  const employee = store.employees.get(id);
+  const employee = Option.getOrUndefined(MutableHashMap.get(store.employees, id));
   return employee === undefined
     ? Effect.fail(new EmployeeNotFound({ id }))
     : Effect.succeed(employee);
@@ -468,7 +489,7 @@ const withKnownTerritories = (
  */
 export const discardProduct = (id: string): Effect.Effect<void> =>
   Effect.sync(() => {
-    store.products.delete(id);
+    MutableHashMap.remove(store.products, id);
   });
 
 /**
@@ -477,17 +498,17 @@ export const discardProduct = (id: string): Effect.Effect<void> =>
  */
 export const discardOrder = (id: string): Effect.Effect<void> =>
   Effect.sync(() => {
-    store.orders.delete(id);
-    store.itemsByOrder.delete(id);
+    MutableHashMap.remove(store.orders, id);
+    MutableHashMap.remove(store.itemsByOrder, id);
   });
 
 const loadProduct = (id: string): Effect.Effect<Product, ProductNotFound> => {
-  const product = store.products.get(id);
+  const product = Option.getOrUndefined(MutableHashMap.get(store.products, id));
   return product === undefined ? Effect.fail(new ProductNotFound({ id })) : Effect.succeed(product);
 };
 
 const loadOrder = (id: string): Effect.Effect<Order, OrderNotFound> => {
-  const order = store.orders.get(id);
+  const order = Option.getOrUndefined(MutableHashMap.get(store.orders, id));
   return order === undefined ? Effect.fail(new OrderNotFound({ id })) : Effect.succeed(order);
 };
 
@@ -502,12 +523,13 @@ const loadOrder = (id: string): Effect.Effect<Order, OrderNotFound> => {
 // needs is one loader per resource type the paths can reach; over this
 // in-memory store, a loader is a lookup in that type's table.
 const loadFrom =
-  <A extends Handlers.ResourceValue>(table: ReadonlyMap<string, A>): Handlers.IncludeTarget<A> =>
+  <A extends Handlers.ResourceValue>(
+    table: MutableHashMap.MutableHashMap<string, A>,
+  ): Handlers.IncludeTarget<A> =>
   (ids) =>
     Effect.succeed(
       ids.flatMap((id) => {
-        const resource = table.get(id);
-        return resource === undefined ? [] : [resource];
+        return Arr.fromOption(MutableHashMap.get(table, id));
       }),
     );
 
@@ -601,7 +623,10 @@ export const CategoriesLive = HttpApiBuilder.group(Api, "categories", (handlers)
       ),
     )
     .handle("list", ({ query }) => {
-      const categories = sortBy([...store.categories.values()], query.sort);
+      const categories = sortBy(
+        Arr.fromIterable(MutableHashMap.values(store.categories)),
+        query.sort,
+      );
       const { limit, offset, page, total } = paginate(categories, query.page);
       return Effect.succeed(
         Handlers.collection(page, {
@@ -625,7 +650,7 @@ export const SuppliersLive = HttpApiBuilder.group(Api, "suppliers", (handlers) =
       ),
     )
     .handle("list", ({ query }) => {
-      let suppliers = [...store.suppliers.values()];
+      let suppliers = Arr.fromIterable(MutableHashMap.values(store.suppliers));
       const country = query.filter?.country;
       if (country !== undefined) {
         suppliers = suppliers.filter((supplier) => supplier.attributes.country === country);
@@ -654,7 +679,7 @@ export const ShippersLive = HttpApiBuilder.group(Api, "shippers", (handlers) =>
       ),
     )
     .handle("list", ({ query }) => {
-      const shippers = sortBy([...store.shippers.values()], query.sort);
+      const shippers = sortBy(Arr.fromIterable(MutableHashMap.values(store.shippers)), query.sort);
       const { limit, offset, page, total } = paginate(shippers, query.page);
       return Effect.succeed(
         Handlers.collection(page, {
@@ -681,7 +706,7 @@ export const TerritoriesLive = HttpApiBuilder.group(Api, "territories", (handler
       ),
     )
     .handle("list", ({ query }) => {
-      let territories = [...store.territories.values()];
+      let territories = Arr.fromIterable(MutableHashMap.values(store.territories));
       const region = query.filter?.region;
       if (region !== undefined) {
         territories = territories.filter((territory) => territory.attributes.region === region);
@@ -710,7 +735,7 @@ export const CustomersLive = HttpApiBuilder.group(Api, "customers", (handlers) =
       ),
     )
     .handle("list", ({ query }) => {
-      let customers = [...store.customers.values()];
+      let customers = Arr.fromIterable(MutableHashMap.values(store.customers));
       const country = query.filter?.country;
       if (country !== undefined) {
         customers = customers.filter((customer) => customer.attributes.country === country);
@@ -748,7 +773,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
       }),
     )
     .handle("list", ({ query }) => {
-      let products = [...store.products.values()];
+      let products = Arr.fromIterable(MutableHashMap.values(store.products));
 
       // filter[category]=<category id> — a category's products
       const category = query.filter?.category;
@@ -800,18 +825,23 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
     .handle("create", ({ payload }) =>
       Effect.gen(function* () {
         const name = payload.data.attributes.name;
-        if (Iterable.some(store.products.values(), (existing) => existing.attributes.name === name))
+        if (
+          Iterable.some(
+            MutableHashMap.values(store.products),
+            (existing) => existing.attributes.name === name,
+          )
+        )
           return yield* new ProductNameTaken({ name });
         // `category` and `supplier` are required (`one`) relationships — the
         // payload always carries them, and both targets must exist.
         yield* loadCategory(payload.data.relationships.category.data.id);
         yield* loadSupplier(payload.data.relationships.supplier.data.id);
         const product = Product.make({
-          id: Product.Id.make(`${store.products.size + 1}`),
+          id: Product.Id.make(`${MutableHashMap.size(store.products) + 1}`),
           attributes: definedAttributes(payload.data.attributes),
           relationships: payload.data.relationships,
         });
-        store.products.set(product.id, product);
+        MutableHashMap.set(store.products, product.id, product);
         // The created resource carries its own `self` link: the 201's `Location`
         // header is copied from it, so the two match.
         const self = `/products/${product.id}`;
@@ -829,7 +859,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
               supplier: payload.data.relationships?.supplier ?? relationshipsOf(product).supplier,
             },
           });
-          store.products.set(updated.id, updated);
+          MutableHashMap.set(store.products, updated.id, updated);
           return Handlers.data(updated, {
             self: `/products/${updated.id}`,
             jsonapi: Document.v1_1,
@@ -840,7 +870,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
     .handle("delete", ({ params }) =>
       loadProduct(params.id).pipe(
         Effect.map((product) => {
-          store.products.delete(product.id);
+          MutableHashMap.remove(store.products, product.id);
         }),
       ),
     )
@@ -848,7 +878,10 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
     .handle("supplier", ({ params }) =>
       loadProduct(params.id).pipe(
         Effect.map((product) => {
-          const supplier = store.suppliers.get(relationshipsOf(product).supplier.data.id) ?? null;
+          const supplier =
+            Option.getOrUndefined(
+              MutableHashMap.get(store.suppliers, relationshipsOf(product).supplier.data.id),
+            ) ?? null;
           return Handlers.data(supplier, {
             self: Handlers.relatedLink("products", product.id, "supplier"),
             jsonapi: Document.v1_1,
@@ -866,7 +899,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
                 ...product,
                 relationships: { ...relationshipsOf(product), category: { data: payload.data } },
               });
-              store.products.set(updated.id, updated);
+              MutableHashMap.set(store.products, updated.id, updated);
               return Handlers.linkage(payload.data, {
                 self: Handlers.relationshipLink("products", product.id, "category"),
                 jsonapi: Document.v1_1,
@@ -886,7 +919,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
                 ...product,
                 relationships: { ...relationshipsOf(product), supplier: { data: payload.data } },
               });
-              store.products.set(updated.id, updated);
+              MutableHashMap.set(store.products, updated.id, updated);
               return Handlers.linkage(payload.data, {
                 self: Handlers.relationshipLink("products", product.id, "supplier"),
                 jsonapi: Document.v1_1,
@@ -916,7 +949,7 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
       }),
     )
     .handle("list", ({ query }) => {
-      let employees = [...store.employees.values()];
+      let employees = Arr.fromIterable(MutableHashMap.values(store.employees));
       // filter[manager]=<employee id> — an employee's direct reports
       const manager = query.filter?.manager;
       if (manager !== undefined) {
@@ -958,7 +991,7 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
             ...employee,
             relationships: { ...relationshipsOf(employee), territories: { data: payload.data } },
           });
-          store.employees.set(updated.id, updated);
+          MutableHashMap.set(store.employees, updated.id, updated);
           return Handlers.linkage(payload.data, {
             self: Handlers.relationshipLink("employees", employee.id, "territories"),
             jsonapi: Document.v1_1,
@@ -971,13 +1004,16 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
       withKnownTerritories(params.id, payload.data).pipe(
         Effect.map((employee) => {
           const existing = employee.relationships?.territories.data ?? [];
-          const known = new Set<string>(existing.map((ref) => ref.id));
-          const added = [...existing, ...payload.data.filter((ref) => !known.has(ref.id))];
+          const known = MutableHashSet.fromIterable<string>(existing.map((ref) => ref.id));
+          const added = [
+            ...existing,
+            ...payload.data.filter((ref) => !MutableHashSet.has(known, ref.id)),
+          ];
           const updated = Employee.make({
             ...employee,
             relationships: { ...relationshipsOf(employee), territories: { data: added } },
           });
-          store.employees.set(updated.id, updated);
+          MutableHashMap.set(store.employees, updated.id, updated);
           return Handlers.linkage(added, {
             self: Handlers.relationshipLink("employees", employee.id, "territories"),
             jsonapi: Document.v1_1,
@@ -989,15 +1025,15 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
     .handle("removeTerritoriesRelationship", ({ params, payload }) =>
       loadEmployee(params.id).pipe(
         Effect.map((employee) => {
-          const remove = new Set<string>(payload.data.map((ref) => ref.id));
+          const remove = MutableHashSet.fromIterable<string>(payload.data.map((ref) => ref.id));
           const remaining = (employee.relationships?.territories.data ?? []).filter(
-            (ref) => !remove.has(ref.id),
+            (ref) => !MutableHashSet.has(remove, ref.id),
           );
           const updated = Employee.make({
             ...employee,
             relationships: { ...relationshipsOf(employee), territories: { data: remaining } },
           });
-          store.employees.set(updated.id, updated);
+          MutableHashMap.set(store.employees, updated.id, updated);
         }),
       ),
     ),
@@ -1009,10 +1045,12 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
 
 // The line items attached to an order, via the relationship index.
 const itemsFor = (orderId: string): Array<OrderItem> =>
-  (store.itemsByOrder.get(orderId) ?? []).flatMap((itemId) => {
-    const item = store.orderItems.get(itemId);
-    return item === undefined ? [] : [item];
-  });
+  (Option.getOrUndefined(MutableHashMap.get(store.itemsByOrder, orderId)) ?? []).flatMap(
+    (itemId) => {
+      const item = Option.getOrUndefined(MutableHashMap.get(store.orderItems, itemId));
+      return item === undefined ? [] : [item];
+    },
+  );
 
 export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
   handlers
@@ -1029,7 +1067,7 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
       }),
     )
     .handle("list", ({ query }) => {
-      let orders = [...store.orders.values()];
+      let orders = Arr.fromIterable(MutableHashMap.values(store.orders));
 
       // filter[customer]=<customer id> — a customer's orders
       const customer = query.filter?.customer;
@@ -1076,7 +1114,7 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
         // payload always carries them, and both must exist.
         yield* loadCustomer(payload.data.relationships.customer.data.id);
         yield* loadEmployee(payload.data.relationships.employee.data.id);
-        const id = Order.Id.make(`${10248 + store.orders.size}`);
+        const id = Order.Id.make(`${10248 + MutableHashMap.size(store.orders)}`);
         const order = Order.make({
           id,
           attributes: definedAttributes(payload.data.attributes),
@@ -1089,8 +1127,8 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
             lineItems: orderLineItems(id),
           },
         });
-        store.orders.set(order.id, order);
-        store.itemsByOrder.set(order.id, []);
+        MutableHashMap.set(store.orders, order.id, order);
+        MutableHashMap.set(store.itemsByOrder, order.id, []);
         // The created resource carries its own `self` link: the 201's `Location`
         // header is copied from it, so the two match.
         const self = `/orders/${order.id}`;
@@ -1111,7 +1149,7 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
               lineItems: relationships.lineItems,
             },
           });
-          store.orders.set(updated.id, updated);
+          MutableHashMap.set(store.orders, updated.id, updated);
           return Handlers.data(updated, { self: `/orders/${updated.id}`, jsonapi: Document.v1_1 });
         }),
       ),
@@ -1176,7 +1214,7 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
                 ...order,
                 relationships: { ...relationshipsOf(order), shipper: { data: payload.data } },
               });
-              store.orders.set(updated.id, updated);
+              MutableHashMap.set(store.orders, updated.id, updated);
               return Handlers.linkage(payload.data, {
                 self: Handlers.relationshipLink("orders", order.id, "shipper"),
                 jsonapi: Document.v1_1,
@@ -1197,13 +1235,13 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
     const q = query.filter?.q ?? "";
 
     // search across all three resource types; results stay discriminated by `type`
-    const products = [...store.products.values()].filter((product) =>
+    const products = Arr.fromIterable(MutableHashMap.values(store.products)).filter((product) =>
       matches([product.attributes.name], q),
     );
-    const customers = [...store.customers.values()].filter((customer) =>
+    const customers = Arr.fromIterable(MutableHashMap.values(store.customers)).filter((customer) =>
       matches([customer.attributes.companyName, customer.attributes.contactName], q),
     );
-    const suppliers = [...store.suppliers.values()].filter((supplier) =>
+    const suppliers = Arr.fromIterable(MutableHashMap.values(store.suppliers)).filter((supplier) =>
       matches([supplier.attributes.companyName, supplier.attributes.contactName], q),
     );
     const results = [...products, ...customers, ...suppliers];
