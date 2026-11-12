@@ -1,5 +1,7 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Option, Schema } from "effect";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { HttpApi, HttpApiClient } from "effect/http-api";
 import { Conflict, make as ApiErrorMake, toDocument } from "./ApiError.js";

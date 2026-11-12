@@ -8,8 +8,9 @@
  * same expression in its legal form — so an annotation cannot pass merely
  * because the surrounding code is broken.
  */
-import type { Option } from "effect";
-import { Effect, Schema } from "effect";
+import type * as Option from "effect/Option";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import type { HttpClient } from "effect/http";
 import { HttpApi } from "effect/http-api";
 import { Client, Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi";

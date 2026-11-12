@@ -10,7 +10,7 @@
  * This file is type-checked by `tsconfig.test.json`; the `@ts-expect-error`
  * annotations are the assertions.
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import type { HttpApiGroup } from "effect/http-api";
 import { Endpoint, Group, Idempotency, Resource } from "@thomasfosterau/effect-jsonapi";
 

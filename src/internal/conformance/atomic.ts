@@ -35,7 +35,13 @@
  * @since 0.17.0
  * @internal
  */
-import { Array as Arr, Effect, Option, Predicate, Record as Rec, Result, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Rec from "effect/Record";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { MEDIA_TYPE } from "../media.js";
 import {
   answeredFrom,
@@ -610,7 +616,7 @@ const listPathFor = (ctx: Context, target: WriteTarget): Result.Result<string, s
   ).pipe(
     Result.flatMap((endpoint) => {
       const resolution = resolvePath(endpoint, ctx.options);
-      return Predicate.isTagged(resolution, "Resolved")
+      return P.isTagged(resolution, "Resolved")
         ? Result.succeed(resolution.path)
         : Result.fail(resolution.reason);
     }),
@@ -945,7 +951,7 @@ const orderProbe = (
         (batch) =>
           Effect.map(confirmRemoved(ctx, target, batch), (requests) => {
             const verdict = judgeOrder(target, payload, batch);
-            return Predicate.isTagged(verdict, "Decided")
+            return P.isTagged(verdict, "Decided")
               ? decided(verdict.requests + requests, verdict.findings)
               : verdict;
           }),

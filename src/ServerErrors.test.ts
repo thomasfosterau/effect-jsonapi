@@ -5,7 +5,13 @@
  * arm), and `respond`'s two catch paths.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Cause, Effect, Exit, Option, Predicate, Schema, SchemaIssue } from "effect";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
 import { HttpServerResponse } from "effect/http";
 import * as ApiError from "./ApiError.js";
 import * as ServerErrors from "./ServerErrors.js";
@@ -485,7 +491,7 @@ describe("respond", () => {
 
   it("consults the caller's override ahead of the catalogue (#565)", async () => {
     const override = (cause: unknown) =>
-      Predicate.isTagged(cause, "Conflict")
+      P.isTagged(cause, "Conflict")
         ? Option.some(
             new ServerErrors.JsonapiError({
               status: 409,

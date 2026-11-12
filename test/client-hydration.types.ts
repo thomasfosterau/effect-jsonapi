@@ -3,7 +3,8 @@
  * relationship's cardinality and target, `walk` by the last hop of the path,
  * and a key or path the definition does not declare is refused.
  */
-import { Option, Schema } from "effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { Client, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 
 const assertType = <Expected>(_value: Expected): void => {};

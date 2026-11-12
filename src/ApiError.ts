@@ -29,8 +29,11 @@
  *
  * @since 0.1.0
  */
-import type { Cause } from "effect";
-import { Array as Arr, Predicate, Schema, SchemaTransformation } from "effect";
+import type * as Cause from "effect/Cause";
+import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import { HttpApiSchema } from "effect/http-api";
 import { ErrorDocument, ErrorObject } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
@@ -105,7 +108,7 @@ export interface Any extends Cause.YieldableError {
  * @category guards
  */
 export const isApiError = (input: unknown): input is Any =>
-  Predicate.hasProperty(input, TypeId) && input[TypeId] === TypeId;
+  P.hasProperty(input, TypeId) && input[TypeId] === TypeId;
 
 /**
  * The endpoint error schema derived from an error class: decodes a JSON:API

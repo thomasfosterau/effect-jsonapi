@@ -3,7 +3,7 @@
  * `Date` codecs, optionality, unions — is untouched.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import * as Document from "./Document.js";
 import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";

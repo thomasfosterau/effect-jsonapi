@@ -6,7 +6,10 @@
  * relationship document.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Exit, Record as Rec, Schema } from "effect";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Rec from "effect/Record";
+import * as Schema from "effect/Schema";
 import * as ApiError from "./ApiError.js";
 import * as Assemble from "./Assemble.js";
 import type * as Handlers from "./Handlers.js";

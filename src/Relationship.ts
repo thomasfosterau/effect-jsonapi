@@ -48,7 +48,8 @@
  *
  * @since 0.1.0
  */
-import { Array as Arr, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 import { AnyMeta, PaginatedRelationshipLinks, RelationshipLinks } from "./Document.js";
 import type { Operator } from "./Filter.js";
 import type { Any, AttributeKeys } from "./Resource.js";

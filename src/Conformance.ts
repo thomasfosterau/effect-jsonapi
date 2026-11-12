@@ -88,17 +88,15 @@
  *
  * @since 0.15.0
  */
-import {
-  Array as Arr,
-  Duration,
-  Effect,
-  Layer,
-  MutableHashSet,
-  Option,
-  Order,
-  Predicate,
-  Schema,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as Option from "effect/Option";
+import * as Order from "effect/Order";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import type { FileSystem } from "effect/FileSystem";
 import type { Path } from "effect/Path";
 import type { Scope } from "effect/Scope";
@@ -1329,9 +1327,7 @@ export const summarise = (report: Report): Summary => ReportFormat.summarise(rep
  * @category accessors
  */
 export const findings = (report: Report): ReadonlyArray<Finding> =>
-  report.outcomes.flatMap((outcome) =>
-    Predicate.isTagged(outcome, "Failed") ? outcome.findings : [],
-  );
+  report.outcomes.flatMap((outcome) => (P.isTagged(outcome, "Failed") ? outcome.findings : []));
 
 /**
  * Fails with the report's first {@link ContractViolation}, or succeeds with the
@@ -1345,7 +1341,7 @@ export const findings = (report: Report): ReadonlyArray<Finding> =>
  * gate cannot pass, and it is not a finding about the server, so it is not a
  * `ContractViolation`. `assert` dies on the first one instead — before looking
  * at failures — with a tagged defect, `_tag: "RuleDied"` (match it with
- * `Predicate.isTagged(defect, "RuleDied")`), whose `rule` is the rule's id,
+ * `P.isTagged(defect, "RuleDied")`), whose `rule` is the rule's id,
  * whose message names the rule and the defect's, and whose `cause` is the
  * original defect. That keeps the gate as strict as when a rule's defect
  * killed the whole run, while the report itself stays readable. Its `message`
@@ -1394,7 +1390,7 @@ export const findings = (report: Report): ReadonlyArray<Finding> =>
 export const assert = (report: Report): Effect.Effect<Report, ContractViolation> =>
   Option.match(
     Arr.findFirst(report.outcomes, (outcome) =>
-      Predicate.isTagged(outcome, "Errored") ? Option.some(outcome) : Option.none(),
+      P.isTagged(outcome, "Errored") ? Option.some(outcome) : Option.none(),
     ),
     {
       onSome: (died) =>

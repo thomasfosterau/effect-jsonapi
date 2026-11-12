@@ -1,5 +1,10 @@
 import { assert, describe, expect, expectTypeOf, it, onTestFinished } from "vite-plus/test";
-import { Cause, Effect, Exit, Layer, Result, Schema } from "effect";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
 import {
   HttpApi,

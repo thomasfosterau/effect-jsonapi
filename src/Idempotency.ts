@@ -52,16 +52,14 @@
  * @see `docs/idempotency.md` for the profile's normative semantics.
  * @since 0.15.0
  */
-import {
-  Array as Arr,
-  Effect,
-  Layer,
-  Option,
-  Order,
-  Predicate,
-  Schema,
-  SchemaTransformation,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Opt from "effect/Option";
+import * as Order from "effect/Order";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import { HttpServerRequest } from "effect/http/HttpServerRequest";
 import type * as ServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
@@ -454,8 +452,8 @@ export const canonical = (request: Fingerprinted): string => {
     request.body === ""
       ? request.body
       : // Not JSON — compare the bytes as received.
-        Option.getOrElse(
-          Option.liftThrowable(() => JSON.stringify(canonicalValue(JSON.parse(request.body))))(),
+        Opt.getOrElse(
+          Opt.liftThrowable(() => JSON.stringify(canonicalValue(JSON.parse(request.body))))(),
           () => request.body,
         );
   return `${request.method.toUpperCase()}\n${path ?? ""}\n${pairs.join("&")}\n${body}`;
@@ -870,10 +868,10 @@ export const layer = (store: Store): Layer.Layer<Middleware> =>
         const claim = yield* store.claim(attempt);
         // A key already seen: a different request under it is a mismatch;
         // the same one is still in flight, or replays its recorded response.
-        if (Predicate.isTagged(claim, "InProgress")) {
+        if (P.isTagged(claim, "InProgress")) {
           return yield* claim.fingerprint !== print ? new KeyMismatch() : new KeyInProgress();
         }
-        if (Predicate.isTagged(claim, "Completed")) {
+        if (P.isTagged(claim, "Completed")) {
           if (claim.fingerprint !== print) return yield* new KeyMismatch();
           return replay(claim.response);
         }

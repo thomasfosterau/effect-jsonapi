@@ -22,16 +22,14 @@
  * other reads declare no `fields`, so their clients read every attribute as
  * required.
  */
-import {
-  Array as Arr,
-  Effect,
-  Layer,
-  Match,
-  Option,
-  Order,
-  Predicate,
-  String as Str,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
+import * as Option from "effect/Option";
+import * as Order from "effect/Order";
+import * as P from "effect/Predicate";
+import * as Str from "effect/String";
 import { HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { Document, Filter, Handlers, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
@@ -496,8 +494,7 @@ type IssueFilter = Query.FilterAst<typeof Issue>;
 type IssueField = Extract<IssueFilter, { readonly _tag: "Compare" }>["field"];
 
 /** A value in its JSON form, the one F-ORD-1 compares on: a `Date` as its ISO-8601 text. */
-const toJson = (value: Scalar | Date): Scalar =>
-  Predicate.isDate(value) ? value.toISOString() : value;
+const toJson = (value: Scalar | Date): Scalar => (P.isDate(value) ? value.toISOString() : value);
 
 /**
  * §6.1 F-EVAL-4: an attribute's JSON value, or a to-one relationship's related
@@ -515,7 +512,7 @@ const codePointOrder = Order.mapInput(Arr.makeOrder(Order.Number), (text: string
 
 /** F-ORD-1: numbers numerically, `false < true`, strings by code point. */
 const compareJson = (value: Scalar, literal: Scalar): number =>
-  Predicate.isString(value) && Predicate.isString(literal)
+  P.isString(value) && P.isString(literal)
     ? codePointOrder(value, literal)
     : Number(value) - Number(literal);
 

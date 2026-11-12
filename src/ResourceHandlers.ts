@@ -35,7 +35,13 @@
  *
  * @since 0.16.0
  */
-import { Array as Arr, Cause, Effect, Exit, Option, Predicate, Ref } from "effect";
+import * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Ref from "effect/Ref";
 import * as ApiError from "./ApiError.js";
 import * as Assemble from "./Assemble.js";
 import type * as Handlers from "./Handlers.js";
@@ -833,9 +839,9 @@ const isHidden = <E>(cause: Cause.Cause<E>, when: (error: E) => boolean): boolea
  * number as is, a `bigint` as its decimal string, anything else none.
  */
 const wireVersion = ({ version }: WriteResult<string>): Option.Option<string | number> =>
-  Predicate.isString(version) || (Predicate.isNumber(version) && Number.isFinite(version))
+  P.isString(version) || (P.isNumber(version) && Number.isFinite(version))
     ? Option.some(version)
-    : Predicate.isBigInt(version)
+    : P.isBigInt(version)
       ? Option.some(version.toString())
       : Option.none();
 

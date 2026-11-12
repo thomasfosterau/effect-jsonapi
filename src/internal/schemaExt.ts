@@ -20,16 +20,14 @@
  */
 // The bare `effect` barrel: the schema-only entry point reaches this module,
 // and `test/entry-points.test.ts` pins `effect` as its only external.
-import {
-  Array as Arr,
-  Match,
-  Option,
-  Predicate,
-  Record as Rec,
-  Schema,
-  SchemaAST,
-  SchemaIssue,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Match from "effect/Match";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Rec from "effect/Record";
+import * as Schema from "effect/Schema";
+import * as SchemaAST from "effect/SchemaAST";
+import * as SchemaIssue from "effect/SchemaIssue";
 
 /** One terminal issue of a schema failure, with the path that reaches it. */
 export interface IssueLeaf {
@@ -46,7 +44,7 @@ export interface IssueLeaf {
 
 /** An `InvalidValue` leaf carrying no `message` annotation of its own. */
 const isBareInvalidValue = (leaf: SchemaIssue.Issue): boolean =>
-  Predicate.isTagged(leaf, "InvalidValue") && !Predicate.isString(leaf.annotations?.message);
+  P.isTagged(leaf, "InvalidValue") && !P.isString(leaf.annotations?.message);
 
 /**
  * A bare `InvalidValue` is described by the nearest `Filter` above it when
@@ -123,10 +121,7 @@ export const defaultMaxUndeclaredMemberErrors = 12;
  * else with `JSON.stringify`.
  */
 export const validateMaxUndeclaredMemberErrors = (where: string, cap: number): number => {
-  if (
-    Predicate.isNumber(cap) &&
-    (cap === Number.POSITIVE_INFINITY || (Number.isInteger(cap) && cap > 0))
-  ) {
+  if (P.isNumber(cap) && (cap === Number.POSITIVE_INFINITY || (Number.isInteger(cap) && cap > 0))) {
     return cap;
   }
   throw new Error(
@@ -138,7 +133,7 @@ export const validateMaxUndeclaredMemberErrors = (where: string, cap: number): n
 // with `JSON.stringify` (`"12"`, `true`), or `String` again for a value JSON
 // writes as nothing (a symbol, a function).
 const showValue = (value: number): string =>
-  Predicate.isNumber(value)
+  P.isNumber(value)
     ? String(value)
     : // oxlint-disable-next-line effect/avoid-direct-json -- a diagnostic rendering of an arbitrary value, not a wire boundary
       (JSON.stringify(value) ?? String(value));
@@ -157,7 +152,7 @@ const moreUndeclared = (count: number): string =>
 // more there are (#308), so the issues, and the 400 a server renders from
 // them, stay bounded however many keys a request sends. The keys are still
 // all read, so the count is exact; only the issues are capped.
-// It reads the enumerable own string keys (`Record.keys`), then the enumerable
+// It reads the enumerable own string keys (`Rec.keys`), then the enumerable
 // own symbol keys, which is the order `Reflect.ownKeys` gives, at a fraction of
 // its cost. So a symbol key counts too, and an own `__proto__` / `constructor`
 // (`JSON.parse` makes both) is rejected like any other name. A non-enumerable
@@ -168,7 +163,7 @@ const moreUndeclared = (count: number): string =>
 // A non-object is answered first, the way a struct with fields answers it:
 // "Expected object" at the member itself. Only a struct that declares no
 // fields lets one through to here (in the pinned effect it is a bare
-// not-nullish check); `Predicate.isObject` is the test a struct with fields
+// not-nullish check); `P.isObject` is the test a struct with fields
 // applies (`typeof "object"`, not `null`, not an array).
 // The keys are grouped under a `Composite` on `Schema.Unknown`'s AST, not on
 // the struct's: a formatter reads a `message` annotation on a check's issue as
@@ -188,7 +183,7 @@ const noMembers = (declared: ReadonlySet<PropertyKey>, cap: number) =>
   // oxlint-disable-next-line effect/require-filter-metadata -- see above: this check must stay anonymous in consumers' OpenAPI
   Schema.makeFilter<unknown>(
     (input, ast, options) => {
-      if (!Predicate.isObject(input)) return "Expected object";
+      if (!P.isObject(input)) return "Expected object";
       const undeclared: Array<PropertyKey> = [
         ...Arr.filter(Rec.keys(input), (key) => !declared.has(key)),
         ...Arr.filter(

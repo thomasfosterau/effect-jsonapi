@@ -44,7 +44,8 @@
  *
  * @since 0.16.0
  */
-import { Array as Arr, Effect } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
 import type * as ApiError from "./ApiError.js";
 import type * as Document from "./Document.js";
 import * as Handlers from "./Handlers.js";

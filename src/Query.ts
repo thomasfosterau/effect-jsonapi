@@ -47,17 +47,16 @@
  *
  * @since 0.1.0
  */
-import type { SchemaAST, Types } from "effect";
-import {
-  Array as Arr,
-  Effect,
-  Predicate,
-  Record as Rec,
-  Result,
-  Schema,
-  SchemaIssue,
-  SchemaTransformation,
-} from "effect";
+import type * as SchemaAST from "effect/SchemaAST";
+import type * as Types from "effect/Types";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as P from "effect/Predicate";
+import * as Rec from "effect/Record";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as ApiError from "./ApiError.js";
 import type { Ast, Node } from "./Filter.js";
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js";
@@ -1323,7 +1322,7 @@ const decodeFilterRecord = (
   options: SchemaAST.ParseOptions,
 ): Effect.Effect<Node, SchemaIssue.Issue> => {
   const decoded = decodeFilter(fields, input);
-  if (Predicate.isTagged(decoded, "Issues"))
+  if (P.isTagged(decoded, "Issues"))
     return Effect.fail(filterIssues(ast, input, decoded.issues, options));
   return Effect.fromResult(
     Result.try({

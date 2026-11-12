@@ -14,7 +14,9 @@
 // and the schema-only entry point resolves `effect` alone
 // (`test/entry-points.test.ts`). For the same reason nothing here imports
 // `Query`, which is HTTP-tier.
-import { Array as Arr, Option, Record as Rec } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import * as Rec from "effect/Record";
 import type {
   Any,
   IncludableTargets,

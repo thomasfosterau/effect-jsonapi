@@ -17,7 +17,7 @@
  *   PullRequest ──author────────────▶ User          `one`
  *   PullRequest ──reviewers─────────▶ User          `many`
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { Filter, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 export const User = Resource.make("users", {
   attributes: {

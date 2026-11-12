@@ -18,8 +18,8 @@
  * repeated-key list (`include[1]`) still reaches the annotation on the list's
  * element schema.
  */
-import type { Schema } from "effect";
-import type { SchemaIssue } from "effect";
+import type * as Schema from "effect/Schema";
+import type * as SchemaIssue from "effect/SchemaIssue";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import type { Family } from "./vocabulary.js";

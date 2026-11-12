@@ -7,7 +7,10 @@
  * consuming application's contract snapshot pins.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Exit, Option, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { HttpApi, OpenApi } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
 import * as FlatQuery from "./FlatQuery.js";

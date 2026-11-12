@@ -29,7 +29,7 @@
  *
  * @since 0.1.0
  */
-import type { Schema } from "effect";
+import type * as Schema from "effect/Schema";
 import * as ApiError from "./ApiError.js";
 import type { NonEmptyReadonlyArray } from "effect/Array";
 import type { HttpApiEndpoint } from "effect/http-api";

@@ -18,7 +18,9 @@
  *
  * @since 0.1.0
  */
-import { JsonPointer, Option, Schema } from "effect";
+import * as JsonPointer from "effect/JsonPointer";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 
 // ---------------------------------------------------------------------------
 // Meta

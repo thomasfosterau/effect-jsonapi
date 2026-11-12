@@ -1,5 +1,9 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Brand, Option, Result, Schema, SchemaIssue } from "effect";
+import * as Brand from "effect/Brand";
+import * as Option from "effect/Option";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
 import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js";
 import * as Filter from "./Filter.js";
 import * as Query from "./Query.js";

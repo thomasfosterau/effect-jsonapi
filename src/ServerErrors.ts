@@ -33,7 +33,12 @@
  * @since 0.16.0
  */
 import { pathToJsonPointer as toPointer } from "@thomasfosterau/effect-ext/Issues";
-import { Array as Arr, Effect, Match, Option, Predicate, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Match from "effect/Match";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import { HttpServerResponse } from "effect/http";
 import * as ApiError from "./ApiError.js";
@@ -336,13 +341,13 @@ const decodeValidationIssue = Schema.decodeUnknownOption(ValidationIssue);
 
 /** A Standard Schema path segment is either a property key or a `{ key }` object. */
 const pathSegment = (segment: string | number | { readonly key: unknown }): PropertyKey =>
-  Predicate.isObject(segment) ? String(segment.key) : segment;
+  P.isObject(segment) ? String(segment.key) : segment;
 
 const VALIDATION = { status: "400", code: "validation", title: "Validation failed" } as const;
 
 /** A decoded {@link ValidationIssue} as its error object. */
 const validationIssueToError = (issue: typeof ValidationIssue.Type): ErrorObject => {
-  if (Predicate.isString(issue)) return { ...VALIDATION, detail: issue };
+  if (P.isString(issue)) return { ...VALIDATION, detail: issue };
   const pointer = pathToJsonPointer([...ATTRIBUTES_PREFIX, ...(issue.path ?? []).map(pathSegment)]);
   return { ...VALIDATION, detail: issue.message, source: { pointer } };
 };
@@ -361,7 +366,7 @@ const isApiError = (
   const ctor: Partial<ApiErrorConstructor> | undefined = (
     error as { readonly constructor?: Partial<ApiErrorConstructor> }
   ).constructor;
-  return ctor !== undefined && Predicate.isNumber(ctor.status) && Schema.isSchema(ctor.wire);
+  return ctor !== undefined && P.isNumber(ctor.status) && Schema.isSchema(ctor.wire);
 };
 
 const apiErrorToJsonapi = (

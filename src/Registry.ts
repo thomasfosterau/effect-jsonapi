@@ -28,7 +28,14 @@
  * @since 0.16.0
  */
 import type * as Context from "effect/Context";
-import { Array as Arr, Effect, FileSystem, Layer, Option, Order, Path, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Order from "effect/Order";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import type { HttpServerResponse } from "effect/http";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
