@@ -1,4 +1,5 @@
-import { describe, expect, it, onTestFinished } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { describe, expect, onTestFinished } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -95,30 +96,38 @@ describe("Idempotency.canonical", () => {
 });
 
 describe("Idempotency.fingerprint", () => {
-  it("is a 64-character hex digest of the canonical string", async () => {
-    const print = await Effect.runPromise(
-      Idempotency.fingerprint({
+  it.effect("is a 64-character hex digest of the canonical string", () =>
+    Effect.gen(function* () {
+      const print = yield* Idempotency.fingerprint({
         method: "POST",
         url: "/articles",
         body: JSON.stringify(createBody),
-      }),
-    );
-    expect(print).toMatch(/^[0-9a-f]{64}$/);
-  });
+      });
+      expect(print).toMatch(/^[0-9a-f]{64}$/);
+    }),
+  );
 
-  it("agrees whenever the canonical strings agree", async () => {
-    const a = await Effect.runPromise(
-      Idempotency.fingerprint({ method: "POST", url: "/a", body: `{"x":1,"y":2}` }),
-    );
-    const b = await Effect.runPromise(
-      Idempotency.fingerprint({ method: "POST", url: "/a", body: `{"y":2,"x":1}` }),
-    );
-    const c = await Effect.runPromise(
-      Idempotency.fingerprint({ method: "POST", url: "/a", body: `{"y":3,"x":1}` }),
-    );
-    expect(a).toBe(b);
-    expect(a).not.toBe(c);
-  });
+  it.effect("agrees whenever the canonical strings agree", () =>
+    Effect.gen(function* () {
+      const a = yield* Idempotency.fingerprint({
+        method: "POST",
+        url: "/a",
+        body: `{"x":1,"y":2}`,
+      });
+      const b = yield* Idempotency.fingerprint({
+        method: "POST",
+        url: "/a",
+        body: `{"y":2,"x":1}`,
+      });
+      const c = yield* Idempotency.fingerprint({
+        method: "POST",
+        url: "/a",
+        body: `{"y":3,"x":1}`,
+      });
+      expect(a).toBe(b);
+      expect(a).not.toBe(c);
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -132,32 +141,38 @@ const attempt = (key: string, fingerprint: string): Idempotency.Attempt => ({
 });
 
 describe("Idempotency.memoryStore", () => {
-  it("claims a fresh key, then reports the in-progress claim", () => {
-    const store = Idempotency.memoryStore();
-    const first = Effect.runSync(store.claim(attempt("k", "fp")));
-    const second = Effect.runSync(store.claim(attempt("k", "fp")));
-    expect(first).toEqual({ _tag: "Claimed" });
-    expect(second).toEqual({ _tag: "InProgress", fingerprint: "fp" });
-  });
+  it.effect("claims a fresh key, then reports the in-progress claim", () =>
+    Effect.gen(function* () {
+      const store = Idempotency.memoryStore();
+      const first = yield* store.claim(attempt("k", "fp"));
+      const second = yield* store.claim(attempt("k", "fp"));
+      expect(first).toEqual({ _tag: "Claimed" });
+      expect(second).toEqual({ _tag: "InProgress", fingerprint: "fp" });
+    }),
+  );
 
-  it("reports a completed claim with the recorded response", () => {
-    const store = Idempotency.memoryStore();
-    const recorded = { status: 201, headers: { "content-type": MEDIA_TYPE }, body: "{}" };
-    Effect.runSync(store.claim(attempt("k", "fp")));
-    Effect.runSync(store.complete(attempt("k", "fp"), recorded));
-    expect(Effect.runSync(store.claim(attempt("k", "fp")))).toEqual({
-      _tag: "Completed",
-      fingerprint: "fp",
-      response: recorded,
-    });
-  });
+  it.effect("reports a completed claim with the recorded response", () =>
+    Effect.gen(function* () {
+      const store = Idempotency.memoryStore();
+      const recorded = { status: 201, headers: { "content-type": MEDIA_TYPE }, body: "{}" };
+      yield* store.claim(attempt("k", "fp"));
+      yield* store.complete(attempt("k", "fp"), recorded);
+      expect(yield* store.claim(attempt("k", "fp"))).toEqual({
+        _tag: "Completed",
+        fingerprint: "fp",
+        response: recorded,
+      });
+    }),
+  );
 
-  it("makes a released key claimable again", () => {
-    const store = Idempotency.memoryStore();
-    Effect.runSync(store.claim(attempt("k", "fp")));
-    Effect.runSync(store.release(attempt("k", "fp")));
-    expect(Effect.runSync(store.claim(attempt("k", "fp")))).toEqual({ _tag: "Claimed" });
-  });
+  it.effect("makes a released key claimable again", () =>
+    Effect.gen(function* () {
+      const store = Idempotency.memoryStore();
+      yield* store.claim(attempt("k", "fp"));
+      yield* store.release(attempt("k", "fp"));
+      expect(yield* store.claim(attempt("k", "fp"))).toEqual({ _tag: "Claimed" });
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -371,23 +386,25 @@ describe("Idempotency.layer", () => {
     expect((await request({ key: "k1", body: createBody })).status).toBe(422);
   });
 
-  it("records nothing for a request carrying no key", async () => {
-    let calls = 0;
-    const api = articlesApi(true);
-    const live = articlesLive(api, () =>
-      Effect.sync(() => {
-        calls += 1;
-        return { data: sample };
-      }),
-    );
-    const store = Idempotency.memoryStore();
-    const { dispose, request } = server({ api, live, store });
-    onTestFinished(() => dispose());
-    await request({ body: createBody });
-    await request({ body: createBody });
-    expect(calls).toBe(2);
-    expect(Effect.runSync(store.claim(attempt("k1", "fp")))).toEqual({ _tag: "Claimed" });
-  });
+  it.effect("records nothing for a request carrying no key", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const api = articlesApi(true);
+      const live = articlesLive(api, () =>
+        Effect.sync(() => {
+          calls += 1;
+          return { data: sample };
+        }),
+      );
+      const store = Idempotency.memoryStore();
+      const { dispose, request } = server({ api, live, store });
+      yield* Effect.addFinalizer(() => Effect.orDie(Effect.tryPromise(() => dispose())));
+      yield* Effect.tryPromise(() => request({ body: createBody }));
+      yield* Effect.tryPromise(() => request({ body: createBody }));
+      expect(calls).toBe(2);
+      expect(yield* store.claim(attempt("k1", "fp"))).toEqual({ _tag: "Claimed" });
+    }),
+  );
 
   it("releases the key when the handler fails, so the write may be attempted again", async () => {
     class TitleTaken extends ApiError.make<TitleTaken>()("TitleTaken", { status: 409 }) {}
@@ -498,20 +515,24 @@ describe("Idempotency.layer", () => {
     expect(second.replayed).toBe("true");
   });
 
-  it("leaves safe methods alone", async () => {
-    const api = HttpApi.make("blog").add(
-      Group.make(Article, Endpoint.get(Article).middleware(Idempotency.Middleware)),
-    );
-    const live = HttpApiBuilder.group(api as never, "articles", (handlers: any) =>
-      handlers.handle("get", () => Effect.succeed({ data: sample })),
-    ) as Layer.Layer<any, any, any>;
-    const store = Idempotency.memoryStore();
-    const { dispose, request } = server({ api, live, store });
-    onTestFinished(() => dispose());
-    const read = await request({ method: "GET", url: "http://localhost/articles/1", key: "k1" });
-    expect(read.status).toBe(200);
-    expect(Effect.runSync(store.claim(attempt("k1", "fp")))).toEqual({ _tag: "Claimed" });
-  });
+  it.effect("leaves safe methods alone", () =>
+    Effect.gen(function* () {
+      const api = HttpApi.make("blog").add(
+        Group.make(Article, Endpoint.get(Article).middleware(Idempotency.Middleware)),
+      );
+      const live = HttpApiBuilder.group(api as never, "articles", (handlers: any) =>
+        handlers.handle("get", () => Effect.succeed({ data: sample })),
+      ) as Layer.Layer<any, any, any>;
+      const store = Idempotency.memoryStore();
+      const { dispose, request } = server({ api, live, store });
+      yield* Effect.addFinalizer(() => Effect.orDie(Effect.tryPromise(() => dispose())));
+      const read = yield* Effect.tryPromise(() =>
+        request({ method: "GET", url: "http://localhost/articles/1", key: "k1" }),
+      );
+      expect(read.status).toBe(200);
+      expect(yield* store.claim(attempt("k1", "fp"))).toEqual({ _tag: "Claimed" });
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------

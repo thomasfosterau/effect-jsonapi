@@ -6,7 +6,8 @@
  * the transaction boundary each write opens, the `?include=` walk on `get`
  * and `list` through stand-in targets, and the §7.4 related handler.
  */
-import { assert, describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { assert, describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -234,80 +235,92 @@ const handlersFor = (ops: ReturnType<typeof makeOps>["ops"]) => {
   return { handlers, cacheStore, state, opened };
 };
 
-const failure = async <A, E>(effect: Effect.Effect<A, E>) => {
-  const exit = await Effect.runPromiseExit(effect);
-  if (Exit.isSuccess(exit)) return expect.fail("expected a failure");
-  const error = Cause.findErrorOption(exit.cause);
-  assert(Option.isSome(error), "expected a typed failure");
-  return error.value as { readonly _tag: string };
-};
+const failure = <A, E>(effect: Effect.Effect<A, E>) =>
+  Effect.gen(function* () {
+    const exit = yield* Effect.exit(effect);
+    if (Exit.isSuccess(exit)) return expect.fail("expected a failure");
+    const error = Cause.findErrorOption(exit.cause);
+    assert(Option.isSome(error), "expected a typed failure");
+    return error.value as { readonly _tag: string };
+  });
 
 /** Runs `effect` to its success, failing the test on any other exit. */
-const success = async <A, E>(effect: Effect.Effect<A, E>): Promise<A> => {
-  const exit = await Effect.runPromiseExit(effect);
-  if (Exit.isFailure(exit)) return expect.fail(`expected a success: ${Cause.pretty(exit.cause)}`);
-  return exit.value;
-};
+const success = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A> =>
+  Effect.gen(function* () {
+    const exit = yield* Effect.exit(effect);
+    if (Exit.isFailure(exit)) return expect.fail(`expected a success: ${Cause.pretty(exit.cause)}`);
+    return exit.value;
+  });
 
 describe("assertIdMatchesPath", () => {
-  it("passes a matching pair and fails Conflict on a mismatch", async () => {
-    await Effect.runPromise(ResourceHandlers.assertIdMatchesPath("a", "a"));
-    const error = await failure(ResourceHandlers.assertIdMatchesPath("a", "b"));
-    expect(error).toBeInstanceOf(ApiError.Conflict);
-    expect((error as ApiError.Conflict).detail).toBe('URL id "a" does not match payload id "b".');
-  });
+  it.effect("passes a matching pair and fails Conflict on a mismatch", () =>
+    Effect.gen(function* () {
+      yield* ResourceHandlers.assertIdMatchesPath("a", "a");
+      const error = yield* failure(ResourceHandlers.assertIdMatchesPath("a", "b"));
+      expect(error).toBeInstanceOf(ApiError.Conflict);
+      expect((error as ApiError.Conflict).detail).toBe('URL id "a" does not match payload id "b".');
+    }),
+  );
 });
 
 describe("update", () => {
-  it("answers 409 before touching the operation when the payload id differs from the route", async () => {
-    const { ops, calls } = seeded();
-    const { handlers, opened } = handlersFor(ops);
-    const error = await failure(
-      handlers
-        .update({ params: { id: ids(1) }, payload: { id: ids(2), name: "X" } })
-        .pipe(Effect.provide(as(Option.some(ADMIN)))),
-    );
-    expect(error).toBeInstanceOf(ApiError.Conflict);
-    expect(calls.update).toBe(0);
-    expect(opened()).toBe(0);
-  });
+  it.effect(
+    "answers 409 before touching the operation when the payload id differs from the route",
+    () =>
+      Effect.gen(function* () {
+        const { ops, calls } = seeded();
+        const { handlers, opened } = handlersFor(ops);
+        const error = yield* failure(
+          handlers
+            .update({ params: { id: ids(1) }, payload: { id: ids(2), name: "X" } })
+            .pipe(Effect.provide(as(Option.some(ADMIN)))),
+        );
+        expect(error).toBeInstanceOf(ApiError.Conflict);
+        expect(calls.update).toBe(0);
+        expect(opened()).toBe(0);
+      }),
+  );
 
-  it("runs the operation in a transaction, re-reads, writes through and answers the document", async () => {
-    const { ops, calls } = seeded();
-    const { handlers, cacheStore, opened } = handlersFor(ops);
-    const document = await Effect.runPromise(
-      handlers
-        .update({ params: { id: ids(1) }, payload: { id: ids(1), name: "Renamed" } })
-        .pipe(Effect.provide(as(Option.some(ADMIN)))),
-    );
-    expect(opened()).toBe(1);
-    expect(calls).toMatchObject({ update: 1, get: 1 });
-    expect(document.data.attributes.name).toBe("Renamed");
-    expect(document.data.meta).toEqual({ canEdit: true, canDelete: true });
-    expect(cacheStore.get(ids(1))?.attributes.name).toBe("Renamed");
-  });
+  it.effect(
+    "runs the operation in a transaction, re-reads, writes through and answers the document",
+    () =>
+      Effect.gen(function* () {
+        const { ops, calls } = seeded();
+        const { handlers, cacheStore, opened } = handlersFor(ops);
+        const document = yield* handlers
+          .update({ params: { id: ids(1) }, payload: { id: ids(1), name: "Renamed" } })
+          .pipe(Effect.provide(as(Option.some(ADMIN))));
+        expect(opened()).toBe(1);
+        expect(calls).toMatchObject({ update: 1, get: 1 });
+        expect(document.data.attributes.name).toBe("Renamed");
+        expect(document.data.meta).toEqual({ canEdit: true, canDelete: true });
+        expect(cacheStore.get(ids(1))?.attributes.name).toBe("Renamed");
+      }),
+  );
 });
 
 describe("create / delete", () => {
-  it("creates inside a transaction and caches the new resource; delete evicts it", async () => {
-    const { ops, calls, store } = seeded();
-    const { handlers, cacheStore, opened } = handlersFor(ops);
-    const layer = as(Option.some(ADMIN));
-    const created = await Effect.runPromise(
-      handlers.create({ payload: { name: "Delta" } }).pipe(Effect.provide(layer)),
-    );
-    expect(created.data.attributes.name).toBe("Delta");
-    expect(cacheStore.has(created.data.id)).toBe(true);
-    expect(opened()).toBe(1);
-    const removed = await Effect.runPromise(
-      handlers.delete({ params: { id: created.data.id } }).pipe(Effect.provide(layer)),
-    );
-    expect(removed).toBeUndefined();
-    expect(cacheStore.has(created.data.id)).toBe(false);
-    expect(store.has(created.data.id)).toBe(false);
-    expect(calls).toMatchObject({ create: 1, delete: 1 });
-    expect(opened()).toBe(2);
-  });
+  it.effect("creates inside a transaction and caches the new resource; delete evicts it", () =>
+    Effect.gen(function* () {
+      const { ops, calls, store } = seeded();
+      const { handlers, cacheStore, opened } = handlersFor(ops);
+      const layer = as(Option.some(ADMIN));
+      const created = yield* handlers
+        .create({ payload: { name: "Delta" } })
+        .pipe(Effect.provide(layer));
+      expect(created.data.attributes.name).toBe("Delta");
+      expect(cacheStore.has(created.data.id)).toBe(true);
+      expect(opened()).toBe(1);
+      const removed = yield* handlers
+        .delete({ params: { id: created.data.id } })
+        .pipe(Effect.provide(layer));
+      expect(removed).toBeUndefined();
+      expect(cacheStore.has(created.data.id)).toBe(false);
+      expect(store.has(created.data.id)).toBe(false);
+      expect(calls).toMatchObject({ create: 1, delete: 1 });
+      expect(opened()).toBe(2);
+    }),
+  );
 });
 
 /**
@@ -410,153 +423,170 @@ describe("a write whose re-read fails", () => {
   // cache step: with the re-read pending (it never answers), an external
   // interrupt still lets the eviction that follows run to completion, though
   // the eviction itself is asynchronous.
-  it.each(["create", "update"] as const)(
+  // These tests run on the live clock (`it.live`): the cache's eviction sleeps,
+  // which `it.effect`'s TestClock would never advance.
+  it.live.each(["create", "update"] as const)(
     "evicts in full when the %s is interrupted while its re-read is pending",
-    async (kind) => {
-      const rereading = Deferred.makeUnsafe<void>();
+    (kind) =>
+      Effect.gen(function* () {
+        const rereading = Deferred.makeUnsafe<void>();
+        const evicting = Deferred.makeUnsafe<void>();
+        const { ops } = hidingOps(() =>
+          Effect.andThen(Deferred.succeed(rereading, undefined), Effect.never),
+        );
+        const { handlers, cacheStore } = build(ops, { evicting });
+        // A stale entry under the id the create is about to write.
+        cacheStore.set(ids(4), person(ids(4), "Stale"));
+        const written = kind === "create" ? ids(4) : ids(1);
+        const write =
+          kind === "create"
+            ? handlers.create({ payload: { name: "Delta" } })
+            : handlers.update(renameFirst);
+        yield* success(
+          Effect.gen(function* () {
+            const fiber = yield* Effect.forkChild(write.pipe(Effect.provide(admin)));
+            yield* Deferred.await(rereading);
+            yield* Fiber.interrupt(fiber);
+          }),
+        );
+        expect(Deferred.isDoneUnsafe(evicting)).toBe(true);
+        expect(cacheStore.has(written)).toBe(false);
+      }),
+  );
+
+  it.live("evicts in full when a delete is interrupted during its eviction", () =>
+    Effect.gen(function* () {
       const evicting = Deferred.makeUnsafe<void>();
-      const { ops } = hidingOps(() =>
-        Effect.andThen(Deferred.succeed(rereading, undefined), Effect.never),
-      );
+      const { ops, store } = hidingOps();
       const { handlers, cacheStore } = build(ops, { evicting });
-      // A stale entry under the id the create is about to write.
-      cacheStore.set(ids(4), person(ids(4), "Stale"));
-      const written = kind === "create" ? ids(4) : ids(1);
-      const write =
-        kind === "create"
-          ? handlers.create({ payload: { name: "Delta" } })
-          : handlers.update(renameFirst);
-      await success(
+      yield* success(
         Effect.gen(function* () {
-          const fiber = yield* Effect.forkChild(write.pipe(Effect.provide(admin)));
-          yield* Deferred.await(rereading);
+          const fiber = yield* Effect.forkChild(
+            handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin)),
+          );
+          yield* Deferred.await(evicting);
           yield* Fiber.interrupt(fiber);
         }),
       );
-      expect(Deferred.isDoneUnsafe(evicting)).toBe(true);
-      expect(cacheStore.has(written)).toBe(false);
-    },
+      expect(store.has(ids(2))).toBe(false);
+      expect(cacheStore.has(ids(2))).toBe(false);
+    }),
   );
-
-  it("evicts in full when a delete is interrupted during its eviction", async () => {
-    const evicting = Deferred.makeUnsafe<void>();
-    const { ops, store } = hidingOps();
-    const { handlers, cacheStore } = build(ops, { evicting });
-    await success(
-      Effect.gen(function* () {
-        const fiber = yield* Effect.forkChild(
-          handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin)),
-        );
-        yield* Deferred.await(evicting);
-        yield* Fiber.interrupt(fiber);
-      }),
-    );
-    expect(store.has(ids(2))).toBe(false);
-    expect(cacheStore.has(ids(2))).toBe(false);
-  });
 
   // The operation ran, then the commit failed: the write may have committed
   // (a lost acknowledgement), so a plain failure evicts too, not only an
   // interruption.
-  it("evicts when the transaction fails after the operation succeeded", async () => {
-    const failingCommit: ResourceHandlers.Transact<Transaction, CommitFailed, never> = (effect) =>
-      Effect.andThen(
-        Effect.provideService(effect, Transaction, { depth: 1 }),
-        Effect.fail(new CommitFailed()),
+  it.effect("evicts when the transaction fails after the operation succeeded", () =>
+    Effect.gen(function* () {
+      const failingCommit: ResourceHandlers.Transact<Transaction, CommitFailed, never> = (effect) =>
+        Effect.andThen(
+          Effect.provideService(effect, Transaction, { depth: 1 }),
+          Effect.fail(new CommitFailed()),
+        );
+      const { ops, calls } = hidingOps();
+      const { handlers, cacheStore } = build(ops, { transact: failingCommit });
+      expect(
+        yield* failure(handlers.update(renameFirst).pipe(Effect.provide(admin))),
+      ).toBeInstanceOf(CommitFailed);
+      expect(cacheStore.has(ids(1))).toBe(false);
+      expect(
+        yield* failure(handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin))),
+      ).toBeInstanceOf(CommitFailed);
+      expect(cacheStore.has(ids(2))).toBe(false);
+      expect(calls).toMatchObject({ update: 1, delete: 1, get: 0 });
+    }),
+  );
+
+  it.effect(
+    "evicts the cached entry when the writer can no longer read the row, and fails as the re-read did",
+    () =>
+      Effect.gen(function* () {
+        const { ops, store } = hidingOps();
+        const { handlers, cacheStore } = build(ops);
+        const error = yield* failure(handlers.update(renameFirst).pipe(Effect.provide(admin)));
+        expect(error._tag).toBe("NotFound");
+        expect(store.get(ids(1))?.attributes.name).toBe("Private");
+        expect(cacheStore.has(ids(1))).toBe(false);
+        expect(cacheStore.has(ids(2))).toBe(true);
+      }),
+  );
+
+  it.effect("evicts on any re-read failure, and propagates its cause unchanged", () =>
+    Effect.gen(function* () {
+      const failing = hidingOps(() => new StoreDown());
+      const failed = build(failing.ops);
+      const exit = yield* Effect.exit(
+        failed.handlers.update(renameFirst).pipe(Effect.provide(admin)),
       );
-    const { ops, calls } = hidingOps();
-    const { handlers, cacheStore } = build(ops, { transact: failingCommit });
-    expect(await failure(handlers.update(renameFirst).pipe(Effect.provide(admin)))).toBeInstanceOf(
-      CommitFailed,
-    );
-    expect(cacheStore.has(ids(1))).toBe(false);
-    expect(
-      await failure(handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin))),
-    ).toBeInstanceOf(CommitFailed);
-    expect(cacheStore.has(ids(2))).toBe(false);
-    expect(calls).toMatchObject({ update: 1, delete: 1, get: 0 });
-  });
-
-  it("evicts the cached entry when the writer can no longer read the row, and fails as the re-read did", async () => {
-    const { ops, store } = hidingOps();
-    const { handlers, cacheStore } = build(ops);
-    const error = await failure(handlers.update(renameFirst).pipe(Effect.provide(admin)));
-    expect(error._tag).toBe("NotFound");
-    expect(store.get(ids(1))?.attributes.name).toBe("Private");
-    expect(cacheStore.has(ids(1))).toBe(false);
-    expect(cacheStore.has(ids(2))).toBe(true);
-  });
-
-  it("evicts on any re-read failure, and propagates its cause unchanged", async () => {
-    const failing = hidingOps(() => new StoreDown());
-    const failed = build(failing.ops);
-    const exit = await Effect.runPromiseExit(
-      failed.handlers.update(renameFirst).pipe(Effect.provide(admin)),
-    );
-    expect(Exit.isFailure(exit) && Cause.findErrorOption(exit.cause)).toEqual(
-      Option.some(new StoreDown()),
-    );
-    expect(failed.cacheStore.has(ids(1))).toBe(false);
-  });
+      expect(Exit.isFailure(exit) && Cause.findErrorOption(exit.cause)).toEqual(
+        Option.some(new StoreDown()),
+      );
+      expect(failed.cacheStore.has(ids(1))).toBe(false);
+    }),
+  );
 
   // A cause carrying a defect (or an interruption) beside the failure is never
   // a hidden write, whatever the rule says of the failure.
-  it.each([
+  it.effect.each([
     ["a defect", Cause.die("boom")],
     ["an interruption", Cause.interrupt()],
-  ])("never answers a re-read failure carrying %s as hidden", async (_, extra) => {
-    const breaking = hidingOps((id) =>
-      Effect.failCause(
-        Cause.combine(Cause.fail(new ServerErrors.NotFound({ resource: "people", id })), extra),
-      ),
-    );
-    const broke = build(breaking.ops, { hiddenWrite: { type: "people", when: () => true } });
-    const exit = await Effect.runPromiseExit(
-      broke.handlers.update(renameFirst).pipe(Effect.provide(admin)),
-    );
-    expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(2);
-    expect(broke.cacheStore.has(ids(1))).toBe(false);
-  });
+  ] as const)("never answers a re-read failure carrying %s as hidden", ([_, extra]) =>
+    Effect.gen(function* () {
+      const breaking = hidingOps((id) =>
+        Effect.failCause(
+          Cause.combine(Cause.fail(new ServerErrors.NotFound({ resource: "people", id })), extra),
+        ),
+      );
+      const broke = build(breaking.ops, { hiddenWrite: { type: "people", when: () => true } });
+      const exit = yield* Effect.exit(
+        broke.handlers.update(renameFirst).pipe(Effect.provide(admin)),
+      );
+      expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(2);
+      expect(broke.cacheStore.has(ids(1))).toBe(false);
+    }),
+  );
 
-  it("evicts when the transaction is interrupted after the operation succeeded", async () => {
-    // The commit point is inside the boundary: the operation ran, then the
-    // boundary is interrupted before the handler's cache step.
-    const interrupting: ResourceHandlers.Transact<Transaction, never, never> = (effect) =>
-      Effect.andThen(Effect.provideService(effect, Transaction, { depth: 1 }), Effect.interrupt);
-    const { ops, calls } = hidingOps();
-    const { handlers, cacheStore } = build(ops, { transact: interrupting });
-    const update = await Effect.runPromiseExit(
-      handlers.update(renameFirst).pipe(Effect.provide(admin)),
-    );
-    expect(Exit.isFailure(update) && Cause.hasInterruptsOnly(update.cause)).toBe(true);
-    expect(cacheStore.has(ids(1))).toBe(false);
+  it.effect("evicts when the transaction is interrupted after the operation succeeded", () =>
+    Effect.gen(function* () {
+      // The commit point is inside the boundary: the operation ran, then the
+      // boundary is interrupted before the handler's cache step.
+      const interrupting: ResourceHandlers.Transact<Transaction, never, never> = (effect) =>
+        Effect.andThen(Effect.provideService(effect, Transaction, { depth: 1 }), Effect.interrupt);
+      const { ops, calls } = hidingOps();
+      const { handlers, cacheStore } = build(ops, { transact: interrupting });
+      const update = yield* Effect.exit(handlers.update(renameFirst).pipe(Effect.provide(admin)));
+      expect(Exit.isFailure(update) && Cause.hasInterruptsOnly(update.cause)).toBe(true);
+      expect(cacheStore.has(ids(1))).toBe(false);
 
-    const remove = await Effect.runPromiseExit(
-      handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin)),
-    );
-    expect(Exit.isFailure(remove)).toBe(true);
-    expect(cacheStore.has(ids(2))).toBe(false);
-    expect(calls).toMatchObject({ update: 1, delete: 1, get: 0 });
-  });
+      const remove = yield* Effect.exit(
+        handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin)),
+      );
+      expect(Exit.isFailure(remove)).toBe(true);
+      expect(cacheStore.has(ids(2))).toBe(false);
+      expect(calls).toMatchObject({ update: 1, delete: 1, get: 0 });
+    }),
+  );
 
-  it("never evicts for a write the operation refuses", async () => {
-    const { ops } = hidingOps();
-    const refusing = {
-      ...ops,
-      update: (input: { readonly id: string }) =>
-        Effect.fail(new ServerErrors.NotFound({ resource: "people", id: input.id })),
-      delete: (id: string) => Effect.fail(new ServerErrors.NotFound({ resource: "people", id })),
-    };
-    const { handlers, cacheStore } = build(refusing);
-    expect(await failure(handlers.update(renameFirst).pipe(Effect.provide(admin)))).toBeInstanceOf(
-      ServerErrors.NotFound,
-    );
-    expect(
-      await failure(handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin))),
-    ).toBeInstanceOf(ServerErrors.NotFound);
-    expect(cacheStore.get(ids(1))?.attributes.name).toBe("Public");
-    expect(cacheStore.get(ids(2))?.attributes.name).toBe("Public");
-  });
+  it.effect("never evicts for a write the operation refuses", () =>
+    Effect.gen(function* () {
+      const { ops } = hidingOps();
+      const refusing = {
+        ...ops,
+        update: (input: { readonly id: string }) =>
+          Effect.fail(new ServerErrors.NotFound({ resource: "people", id: input.id })),
+        delete: (id: string) => Effect.fail(new ServerErrors.NotFound({ resource: "people", id })),
+      };
+      const { handlers, cacheStore } = build(refusing);
+      expect(
+        yield* failure(handlers.update(renameFirst).pipe(Effect.provide(admin))),
+      ).toBeInstanceOf(ServerErrors.NotFound);
+      expect(
+        yield* failure(handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin))),
+      ).toBeInstanceOf(ServerErrors.NotFound);
+      expect(cacheStore.get(ids(1))?.attributes.name).toBe("Public");
+      expect(cacheStore.get(ids(2))?.attributes.name).toBe("Public");
+    }),
+  );
 
   describe("with a hiddenWrite rule", () => {
     const hiddenWrite = {
@@ -564,96 +594,112 @@ describe("a write whose re-read fails", () => {
       when: (error: ServerErrors.NotFound | StoreDown) => error instanceof ServerErrors.NotFound,
     } as const;
 
-    it("answers a hidden update with the committed identifier and version, after evicting", async () => {
-      const { ops } = hidingOps();
-      const { handlers, cacheStore } = build(ops, { hiddenWrite });
-      const document = await success(handlers.update(renameFirst).pipe(Effect.provide(admin)));
-      expect(document).toEqual({
-        data: { type: "people", id: ids(1), meta: { version: 7 } },
-        jsonapi: { version: "1.1" },
-      });
-      expect(cacheStore.has(ids(1))).toBe(false);
-    });
+    it.effect(
+      "answers a hidden update with the committed identifier and version, after evicting",
+      () =>
+        Effect.gen(function* () {
+          const { ops } = hidingOps();
+          const { handlers, cacheStore } = build(ops, { hiddenWrite });
+          const document = yield* success(handlers.update(renameFirst).pipe(Effect.provide(admin)));
+          expect(document).toEqual({
+            data: { type: "people", id: ids(1), meta: { version: 7 } },
+            jsonapi: { version: "1.1" },
+          });
+          expect(cacheStore.has(ids(1))).toBe(false);
+        }),
+    );
 
-    it("answers a hidden create the same way, and omits meta when the op reports no version", async () => {
-      const { ops } = hidingOps();
-      const created = await success(
-        build(ops, { hiddenWrite })
-          .handlers.create({ payload: { name: "Delta" } })
-          .pipe(Effect.provide(admin)),
-      );
-      expect(created).toEqual({
-        data: { type: "people", id: ids(4), meta: { version: 1 } },
-        jsonapi: { version: "1.1" },
-      });
-      const versionless = {
-        ...ops,
-        create: (input: { readonly name: string }) =>
-          Effect.map(ops.create(input), ({ id }) => ({ id })),
-      };
-      const bare = await success(
-        build(versionless, { hiddenWrite })
-          .handlers.create({ payload: { name: "Echo" } })
-          .pipe(Effect.provide(admin)),
-      );
-      expect(bare.data).toEqual({ type: "people", id: ids(5) });
-    });
+    it.effect(
+      "answers a hidden create the same way, and omits meta when the op reports no version",
+      () =>
+        Effect.gen(function* () {
+          const { ops } = hidingOps();
+          const created = yield* success(
+            build(ops, { hiddenWrite })
+              .handlers.create({ payload: { name: "Delta" } })
+              .pipe(Effect.provide(admin)),
+          );
+          expect(created).toEqual({
+            data: { type: "people", id: ids(4), meta: { version: 1 } },
+            jsonapi: { version: "1.1" },
+          });
+          const versionless = {
+            ...ops,
+            create: (input: { readonly name: string }) =>
+              Effect.map(ops.create(input), ({ id }) => ({ id })),
+          };
+          const bare = yield* success(
+            build(versionless, { hiddenWrite })
+              .handlers.create({ payload: { name: "Echo" } })
+              .pipe(Effect.provide(admin)),
+          );
+          expect(bare.data).toEqual({ type: "people", id: ids(5) });
+        }),
+    );
 
     // Only the re-read is asked: a write the operation itself refuses never
     // committed, so it fails as refused, whatever the rule would say.
-    it("fails a create / update the operation refuses, even with a rule that names everything", async () => {
-      const { ops } = hidingOps();
-      const refused = (id: string) => new ServerErrors.NotFound({ resource: "people", id });
-      const refusing = {
-        ...ops,
-        create: (_input: { readonly name: string }) => Effect.fail(refused(ids(4))),
-        update: (input: UpdateInput) => Effect.fail(refused(input.id)),
-      };
-      const { handlers, cacheStore } = build(refusing, {
-        hiddenWrite: { type: "people", when: () => true },
-      });
-      // `failure` fails the test on a success, so no committed document went out.
-      expect(
-        await failure(handlers.create({ payload: { name: "Delta" } }).pipe(Effect.provide(admin))),
-      ).toEqual(refused(ids(4)));
-      expect(await failure(handlers.update(renameFirst).pipe(Effect.provide(admin)))).toEqual(
-        refused(ids(1)),
-      );
-      expect(cacheStore.get(ids(1))?.attributes.name).toBe("Public");
-    });
+    it.effect(
+      "fails a create / update the operation refuses, even with a rule that names everything",
+      () =>
+        Effect.gen(function* () {
+          const { ops } = hidingOps();
+          const refused = (id: string) => new ServerErrors.NotFound({ resource: "people", id });
+          const refusing = {
+            ...ops,
+            create: (_input: { readonly name: string }) => Effect.fail(refused(ids(4))),
+            update: (input: UpdateInput) => Effect.fail(refused(input.id)),
+          };
+          const { handlers, cacheStore } = build(refusing, {
+            hiddenWrite: { type: "people", when: () => true },
+          });
+          // `failure` fails the test on a success, so no committed document went out.
+          expect(
+            yield* failure(
+              handlers.create({ payload: { name: "Delta" } }).pipe(Effect.provide(admin)),
+            ),
+          ).toEqual(refused(ids(4)));
+          expect(yield* failure(handlers.update(renameFirst).pipe(Effect.provide(admin)))).toEqual(
+            refused(ids(1)),
+          );
+          expect(cacheStore.get(ids(1))?.attributes.name).toBe("Public");
+        }),
+    );
 
-    it("fails with the whole cause when the rule names only some of its failures", async () => {
-      const { ops } = hidingOps((id) =>
-        Effect.failCause(
-          Cause.combine(
-            Cause.fail(new ServerErrors.NotFound({ resource: "people", id })),
-            Cause.fail(new StoreDown()),
+    it.effect("fails with the whole cause when the rule names only some of its failures", () =>
+      Effect.gen(function* () {
+        const { ops } = hidingOps((id) =>
+          Effect.failCause(
+            Cause.combine(
+              Cause.fail(new ServerErrors.NotFound({ resource: "people", id })),
+              Cause.fail(new StoreDown()),
+            ),
           ),
-        ),
-      );
-      const { handlers, cacheStore } = build(ops, { hiddenWrite });
-      const exit = await Effect.runPromiseExit(
-        handlers.update(renameFirst).pipe(Effect.provide(admin)),
-      );
-      expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(2);
-      expect(cacheStore.has(ids(1))).toBe(false);
-    });
+        );
+        const { handlers, cacheStore } = build(ops, { hiddenWrite });
+        const exit = yield* Effect.exit(handlers.update(renameFirst).pipe(Effect.provide(admin)));
+        expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(2);
+        expect(cacheStore.has(ids(1))).toBe(false);
+      }),
+    );
 
-    it("fails with the empty cause, rather than hiding it, when the re-read fails with no reason", async () => {
-      const { ops } = hidingOps(() => Effect.failCause(Cause.empty));
-      const { handlers, cacheStore } = build(ops, {
-        hiddenWrite: { type: "people", when: () => true },
-      });
-      const exit = await Effect.runPromiseExit(
-        handlers.update(renameFirst).pipe(Effect.provide(admin)),
-      );
-      expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(0);
-      expect(cacheStore.has(ids(1))).toBe(false);
-    });
+    it.effect(
+      "fails with the empty cause, rather than hiding it, when the re-read fails with no reason",
+      () =>
+        Effect.gen(function* () {
+          const { ops } = hidingOps(() => Effect.failCause(Cause.empty));
+          const { handlers, cacheStore } = build(ops, {
+            hiddenWrite: { type: "people", when: () => true },
+          });
+          const exit = yield* Effect.exit(handlers.update(renameFirst).pipe(Effect.provide(admin)));
+          expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(0);
+          expect(cacheStore.has(ids(1))).toBe(false);
+        }),
+    );
 
     // `version` is `unknown`: what reaches the wire is a string or a finite
     // number as is, a bigint as its decimal string, and nothing else.
-    it.each([
+    it.effect.each([
       ["a bigint", 12n, { version: "12" }],
       ["a string", "v3", { version: "v3" }],
       ["NaN", Number.NaN, undefined],
@@ -662,161 +708,170 @@ describe("a write whose re-read fails", () => {
       ["an object", { revision: 3 }, undefined],
     ])(
       "echoes a version that is %s as meta.version only when it has a wire form",
-      async (_, version, meta) => {
-        const { ops } = hidingOps();
-        const versioned = {
-          ...ops,
-          create: (input: { readonly name: string }) =>
-            Effect.map(ops.create(input), ({ id }) => ({ id, version })),
-        };
-        const created = await success(
-          build(versioned, { hiddenWrite })
-            .handlers.create({ payload: { name: "Delta" } })
-            .pipe(Effect.provide(admin)),
-        );
-        expect(created.data).toEqual(
-          meta === undefined
-            ? { type: "people", id: ids(4) }
-            : { type: "people", id: ids(4), meta },
-        );
-      },
+      ([_, version, meta]) =>
+        Effect.gen(function* () {
+          const { ops } = hidingOps();
+          const versioned = {
+            ...ops,
+            create: (input: { readonly name: string }) =>
+              Effect.map(ops.create(input), ({ id }) => ({ id, version })),
+          };
+          const created = yield* success(
+            build(versioned, { hiddenWrite })
+              .handlers.create({ payload: { name: "Delta" } })
+              .pipe(Effect.provide(admin)),
+          );
+          expect(created.data).toEqual(
+            meta === undefined
+              ? { type: "people", id: ids(4) }
+              : { type: "people", id: ids(4), meta },
+          );
+        }),
     );
 
-    it("still fails with a re-read error the rule does not name", async () => {
-      const { ops } = hidingOps(() => new StoreDown());
-      const { handlers, cacheStore } = build(ops, { hiddenWrite });
-      expect(
-        await failure(handlers.update(renameFirst).pipe(Effect.provide(admin))),
-      ).toBeInstanceOf(StoreDown);
-      expect(cacheStore.has(ids(1))).toBe(false);
-    });
+    it.effect("still fails with a re-read error the rule does not name", () =>
+      Effect.gen(function* () {
+        const { ops } = hidingOps(() => new StoreDown());
+        const { handlers, cacheStore } = build(ops, { hiddenWrite });
+        expect(
+          yield* failure(handlers.update(renameFirst).pipe(Effect.provide(admin))),
+        ).toBeInstanceOf(StoreDown);
+        expect(cacheStore.has(ids(1))).toBe(false);
+      }),
+    );
 
-    it("answers the full document, and writes it through, when the writer can still read the row", async () => {
-      const { ops, hidden } = hidingOps();
-      const visible = {
-        ...ops,
-        update: (input: UpdateInput) =>
-          Effect.tap(ops.update(input), () => Effect.sync(() => void hidden.splice(0))),
-      };
-      const { handlers, cacheStore } = build(visible, { hiddenWrite });
-      const document = await success(handlers.update(renameFirst).pipe(Effect.provide(admin)));
-      expect(document.data).toMatchObject({ id: ids(1), attributes: { name: "Private" } });
-      expect(cacheStore.get(ids(1))?.attributes.name).toBe("Private");
-    });
+    it.effect(
+      "answers the full document, and writes it through, when the writer can still read the row",
+      () =>
+        Effect.gen(function* () {
+          const { ops, hidden } = hidingOps();
+          const visible = {
+            ...ops,
+            update: (input: UpdateInput) =>
+              Effect.tap(ops.update(input), () => Effect.sync(() => void hidden.splice(0))),
+          };
+          const { handlers, cacheStore } = build(visible, { hiddenWrite });
+          const document = yield* success(handlers.update(renameFirst).pipe(Effect.provide(admin)));
+          expect(document.data).toMatchObject({ id: ids(1), attributes: { name: "Private" } });
+          expect(cacheStore.get(ids(1))?.attributes.name).toBe("Private");
+        }),
+    );
   });
 });
 
 describe("get", () => {
-  it("serves a non-admin from the cache when the entry is there, and populates it on a miss", async () => {
-    const { ops, calls } = seeded();
-    const { handlers, cacheStore } = handlersFor(ops);
-    const layer = as(Option.some(USER));
-    const first = await Effect.runPromise(
-      handlers.get({ params: { id: ids(2) } }).pipe(Effect.provide(layer)),
-    );
-    expect(first.data.attributes.name).toBe("Beta");
-    expect(first.data.meta).toEqual({ canEdit: false, canDelete: false });
-    expect(calls.get).toBe(1);
-    expect(cacheStore.has(ids(2))).toBe(true);
-    const second = await Effect.runPromise(
-      handlers.get({ params: { id: ids(2) } }).pipe(Effect.provide(layer)),
-    );
-    expect(second.data.id).toBe(ids(2));
-    expect(calls.get).toBe(1);
-  });
+  it.effect(
+    "serves a non-admin from the cache when the entry is there, and populates it on a miss",
+    () =>
+      Effect.gen(function* () {
+        const { ops, calls } = seeded();
+        const { handlers, cacheStore } = handlersFor(ops);
+        const layer = as(Option.some(USER));
+        const first = yield* handlers.get({ params: { id: ids(2) } }).pipe(Effect.provide(layer));
+        expect(first.data.attributes.name).toBe("Beta");
+        expect(first.data.meta).toEqual({ canEdit: false, canDelete: false });
+        expect(calls.get).toBe(1);
+        expect(cacheStore.has(ids(2))).toBe(true);
+        const second = yield* handlers.get({ params: { id: ids(2) } }).pipe(Effect.provide(layer));
+        expect(second.data.id).toBe(ids(2));
+        expect(calls.get).toBe(1);
+      }),
+  );
 
-  it("bypasses the cache for an admin (freshness) and degrades a cache fault to the operation", async () => {
-    const { ops, calls } = seeded();
-    const { handlers, cacheStore, state } = handlersFor(ops);
-    cacheStore.set(ids(1), person(ids(1), "Stale"));
-    const admin = await Effect.runPromise(
-      handlers.get({ params: { id: ids(1) } }).pipe(Effect.provide(as(Option.some(ADMIN)))),
-    );
-    expect(admin.data.attributes.name).toBe("Alpha");
-    expect(calls.get).toBe(1);
-    state.getFails = true;
-    const anon = await Effect.runPromise(
-      handlers.get({ params: { id: ids(1) } }).pipe(Effect.provide(as(Option.none()))),
-    );
-    expect(anon.data.attributes.name).toBe("Alpha");
-    expect(calls.get).toBe(2);
-  });
+  it.effect(
+    "bypasses the cache for an admin (freshness) and degrades a cache fault to the operation",
+    () =>
+      Effect.gen(function* () {
+        const { ops, calls } = seeded();
+        const { handlers, cacheStore, state } = handlersFor(ops);
+        cacheStore.set(ids(1), person(ids(1), "Stale"));
+        const admin = yield* handlers
+          .get({ params: { id: ids(1) } })
+          .pipe(Effect.provide(as(Option.some(ADMIN))));
+        expect(admin.data.attributes.name).toBe("Alpha");
+        expect(calls.get).toBe(1);
+        state.getFails = true;
+        const anon = yield* handlers
+          .get({ params: { id: ids(1) } })
+          .pipe(Effect.provide(as(Option.none())));
+        expect(anon.data.attributes.name).toBe("Alpha");
+        expect(calls.get).toBe(2);
+      }),
+  );
 
-  it("answers NotFound for an unknown id", async () => {
-    const { ops } = seeded();
-    const { handlers } = handlersFor(ops);
-    const error = await failure(
-      handlers.get({ params: { id: ids(9) } }).pipe(Effect.provide(as(Option.some(USER)))),
-    );
-    expect(error._tag).toBe("NotFound");
-  });
+  it.effect("answers NotFound for an unknown id", () =>
+    Effect.gen(function* () {
+      const { ops } = seeded();
+      const { handlers } = handlersFor(ops);
+      const error = yield* failure(
+        handlers.get({ params: { id: ids(9) } }).pipe(Effect.provide(as(Option.some(USER)))),
+      );
+      expect(error._tag).toBe("NotFound");
+    }),
+  );
 
-  it("resolves `?include=` through the target registry, and refuses an unlisted path", async () => {
-    const { ops } = seeded();
-    const { handlers } = handlersFor(ops);
-    targetCalls.length = 0;
-    const document = await Effect.runPromise(
-      handlers
+  it.effect("resolves `?include=` through the target registry, and refuses an unlisted path", () =>
+    Effect.gen(function* () {
+      const { ops } = seeded();
+      const { handlers } = handlersFor(ops);
+      targetCalls.length = 0;
+      const document = yield* handlers
         .get({ params: { id: ids(1) }, query: { include: ["birthPlace"] } })
-        .pipe(Effect.provide(as(Option.some(USER)))),
-    );
-    expect(document.included?.map((r) => `${r.type}:${r.id}`)).toEqual([`places:${PLACE}`]);
-    expect(targetCalls).toEqual([[PLACE]]);
-    const error = await failure(
-      handlers
-        .get({ params: { id: ids(1) }, query: { include: ["nope"] } })
-        .pipe(Effect.provide(as(Option.some(USER)))),
-    );
-    expect(error).toBeInstanceOf(ApiError.UnsupportedIncludePath);
-  });
+        .pipe(Effect.provide(as(Option.some(USER))));
+      expect(document.included?.map((r) => `${r.type}:${r.id}`)).toEqual([`places:${PLACE}`]);
+      expect(targetCalls).toEqual([[PLACE]]);
+      const error = yield* failure(
+        handlers
+          .get({ params: { id: ids(1) }, query: { include: ["nope"] } })
+          .pipe(Effect.provide(as(Option.some(USER)))),
+      );
+      expect(error).toBeInstanceOf(ApiError.UnsupportedIncludePath);
+    }),
+  );
 });
 
 describe("list", () => {
-  it("emits the page's pagination links and total, and stamps capabilities per viewer", async () => {
-    const { ops } = seeded();
-    const { handlers } = handlersFor(ops);
-    const document = await Effect.runPromise(
-      handlers
+  it.effect("emits the page's pagination links and total, and stamps capabilities per viewer", () =>
+    Effect.gen(function* () {
+      const { ops } = seeded();
+      const { handlers } = handlersFor(ops);
+      const document = yield* handlers
         .list({ query: { limit: 1, offset: 1 } })
-        .pipe(Effect.provide(as(Option.some(ADMIN)))),
-    );
-    expect(document.meta).toEqual({ totalCount: 3 });
-    expect(document.data.map((r) => r.attributes.name)).toEqual(["Beta"]);
-    expect(document.links).toEqual({
-      self: "https://example.test/people?page[offset]=1&page[limit]=1",
-      first: "https://example.test/people?page[offset]=0&page[limit]=1",
-      prev: "https://example.test/people?page[offset]=0&page[limit]=1",
-      next: "https://example.test/people?page[offset]=2&page[limit]=1",
-      last: "https://example.test/people?page[offset]=2&page[limit]=1",
-    });
-    expect(document.data[0]?.meta).toEqual({ canEdit: true, canDelete: true });
-    const anon = await Effect.runPromise(
-      handlers.list({ query: {} }).pipe(Effect.provide(as(Option.none()))),
-    );
-    expect(anon.data).toHaveLength(3);
-    expect(anon.data[0]?.meta).toEqual({ canEdit: false, canDelete: false });
-    // One page holds everything: the spec's "no such page" is a `null` link.
-    expect(anon.links).toMatchObject({ next: null, prev: null });
-  });
+        .pipe(Effect.provide(as(Option.some(ADMIN))));
+      expect(document.meta).toEqual({ totalCount: 3 });
+      expect(document.data.map((r) => r.attributes.name)).toEqual(["Beta"]);
+      expect(document.links).toEqual({
+        self: "https://example.test/people?page[offset]=1&page[limit]=1",
+        first: "https://example.test/people?page[offset]=0&page[limit]=1",
+        prev: "https://example.test/people?page[offset]=0&page[limit]=1",
+        next: "https://example.test/people?page[offset]=2&page[limit]=1",
+        last: "https://example.test/people?page[offset]=2&page[limit]=1",
+      });
+      expect(document.data[0]?.meta).toEqual({ canEdit: true, canDelete: true });
+      const anon = yield* handlers.list({ query: {} }).pipe(Effect.provide(as(Option.none())));
+      expect(anon.data).toHaveLength(3);
+      expect(anon.data[0]?.meta).toEqual({ canEdit: false, canDelete: false });
+      // One page holds everything: the spec's "no such page" is a `null` link.
+      expect(anon.links).toMatchObject({ next: null, prev: null });
+    }),
+  );
 
-  it("resolves a page's include walk in one batch per target type, deduplicated", async () => {
-    const { ops } = seeded();
-    const { handlers } = handlersFor(ops);
-    targetCalls.length = 0;
-    const document = await Effect.runPromise(
-      handlers
+  it.effect("resolves a page's include walk in one batch per target type, deduplicated", () =>
+    Effect.gen(function* () {
+      const { ops } = seeded();
+      const { handlers } = handlersFor(ops);
+      targetCalls.length = 0;
+      const document = yield* handlers
         .list({ query: { include: ["birthPlace"] } })
-        .pipe(Effect.provide(as(Option.some(USER)))),
-    );
-    // Three people share one birthplace: one loader call, one id, one member.
-    expect(targetCalls).toEqual([[PLACE]]);
-    expect(document.included?.map((r) => r.id)).toEqual([PLACE]);
-    expect(document.included?.[0]?.meta).toEqual({ canEdit: false, canDelete: false });
-    const plain = await Effect.runPromise(
-      handlers.list({ query: {} }).pipe(Effect.provide(as(Option.some(USER)))),
-    );
-    expect(plain).not.toHaveProperty("included");
-  });
+        .pipe(Effect.provide(as(Option.some(USER))));
+      // Three people share one birthplace: one loader call, one id, one member.
+      expect(targetCalls).toEqual([[PLACE]]);
+      expect(document.included?.map((r) => r.id)).toEqual([PLACE]);
+      expect(document.included?.[0]?.meta).toEqual({ canEdit: false, canDelete: false });
+      const plain = yield* handlers.list({ query: {} }).pipe(Effect.provide(as(Option.some(USER))));
+      expect(plain).not.toHaveProperty("included");
+    }),
+  );
 
   /**
    * One test per axis the links have to carry, each asserting the parameter
@@ -825,57 +880,71 @@ describe("list", () => {
    */
   describe("carries the request's whole query into every link", () => {
     const LINK_NAMES = ["self", "first", "prev", "next", "last"] as const;
-    const linksFor = async (query: ListInput) => {
-      const { ops } = seeded();
-      const { handlers } = handlersFor(ops);
-      const document = await Effect.runPromise(
-        handlers.list({ query }).pipe(Effect.provide(as(Option.some(USER)))),
-      );
-      return LINK_NAMES.map((name) => {
-        const link = document.links[name];
-        if (!P.isString(link)) throw new Error(`the \`${name}\` link is missing`);
-        return link;
+    const linksFor = (query: ListInput) =>
+      Effect.gen(function* () {
+        const { ops } = seeded();
+        const { handlers } = handlersFor(ops);
+        const document = yield* handlers
+          .list({ query })
+          .pipe(Effect.provide(as(Option.some(USER))));
+        return yield* Effect.forEach(
+          LINK_NAMES,
+          (name) => {
+            const link = document.links[name];
+            return P.isString(link)
+              ? Effect.succeed(link)
+              : Effect.die(`the \`${name}\` link is missing`);
+          },
+          { concurrency: 1 },
+        );
       });
-    };
 
-    it("carries `?include=` and a `filter[…]` member into all five links", async () => {
-      for (const link of await linksFor({ limit: 1, offset: 1, include: ["birthPlace"] }))
-        expect(link).toContain("include=birthPlace");
-      for (const link of await linksFor({ limit: 1, offset: 1, q: "a" }))
-        expect(link).toContain("filter[q]=a");
-    });
+    it.effect("carries `?include=` and a `filter[…]` member into all five links", () =>
+      Effect.gen(function* () {
+        const included = yield* linksFor({ limit: 1, offset: 1, include: ["birthPlace"] });
+        for (const link of included) expect(link).toContain("include=birthPlace");
+        const filtered = yield* linksFor({ limit: 1, offset: 1, q: "a" });
+        for (const link of filtered) expect(link).toContain("filter[q]=a");
+      }),
+    );
 
-    it("replaces the request's own `page[*]` cursor rather than appending, canonically ordered", async () => {
-      const [self, , , next] = await linksFor({
-        limit: 1,
-        offset: 1,
-        q: "a",
-        include: ["birthPlace"],
-      });
-      expect(next).toBe(
-        "https://example.test/people?include=birthPlace&filter[q]=a&page[offset]=2&page[limit]=1",
-      );
-      expect(next?.match(/page\[offset\]=/g)).toHaveLength(1);
-      expect(self).toContain("page[offset]=1");
-    });
+    it.effect(
+      "replaces the request's own `page[*]` cursor rather than appending, canonically ordered",
+      () =>
+        Effect.gen(function* () {
+          const [self, , , next] = yield* linksFor({
+            limit: 1,
+            offset: 1,
+            q: "a",
+            include: ["birthPlace"],
+          });
+          expect(next).toBe(
+            "https://example.test/people?include=birthPlace&filter[q]=a&page[offset]=2&page[limit]=1",
+          );
+          expect(next?.match(/page\[offset\]=/g)).toHaveLength(1);
+          expect(self).toContain("page[offset]=1");
+        }),
+    );
   });
 });
 
 describe("readOnly", () => {
-  it("exposes exactly `list` and `get`, with no cache or viewer wired", async () => {
-    const { ops, calls } = seeded();
-    const handlers = ResourceHandlers.readOnly({
-      ops,
-      segment: "people",
-      listQuery: peopleListQuery,
-      linkBase: Effect.succeed("https://example.test"),
-    });
-    expect(Arr.sort(Object.keys(handlers), Order.String)).toEqual(["get", "list"]);
-    const document = await Effect.runPromise(handlers.get({ params: { id: ids(1) } }));
-    expect(document.data.id).toBe(ids(1));
-    expect(document.data).not.toHaveProperty("meta");
-    expect(calls.get).toBe(1);
-  });
+  it.effect("exposes exactly `list` and `get`, with no cache or viewer wired", () =>
+    Effect.gen(function* () {
+      const { ops, calls } = seeded();
+      const handlers = ResourceHandlers.readOnly({
+        ops,
+        segment: "people",
+        listQuery: peopleListQuery,
+        linkBase: Effect.succeed("https://example.test"),
+      });
+      expect(Arr.sort(Object.keys(handlers), Order.String)).toEqual(["get", "list"]);
+      const document = yield* handlers.get({ params: { id: ids(1) } });
+      expect(document.data.id).toBe(ids(1));
+      expect(document.data).not.toHaveProperty("meta");
+      expect(calls.get).toBe(1);
+    }),
+  );
 });
 
 describe("related", () => {
@@ -915,102 +984,117 @@ describe("related", () => {
     linkBase: Effect.succeed("https://example.test"),
   };
 
-  it("answers a to-many as a paginated collection of only the page's refs, dropping unresolved ones", async () => {
-    calls.length = 0;
-    const handler = ResourceHandlers.related({ ...config, key: "candidates", cardinality: "many" });
-    const document = (await Effect.runPromise(
-      handler({ params: { id: "c1" }, query: { limit: 2, offset: 0 } }),
-    )) as Assemble.CollectionDocument<Assemble.ResourceLike>;
-    expect(calls).toEqual([["k1", "k2"]]);
-    expect(document.data.map((r) => r.id)).toEqual(["k1"]);
-    expect(document.meta.totalCount).toBe(3);
-    expect(document.links.self).toBe(
-      "https://example.test/contests/c1/candidates?page[offset]=0&page[limit]=2",
-    );
-  });
+  it.effect(
+    "answers a to-many as a paginated collection of only the page's refs, dropping unresolved ones",
+    () =>
+      Effect.gen(function* () {
+        calls.length = 0;
+        const handler = ResourceHandlers.related({
+          ...config,
+          key: "candidates",
+          cardinality: "many",
+        });
+        const document = (yield* handler({
+          params: { id: "c1" },
+          query: { limit: 2, offset: 0 },
+        })) as Assemble.CollectionDocument<Assemble.ResourceLike>;
+        expect(calls).toEqual([["k1", "k2"]]);
+        expect(document.data.map((r) => r.id)).toEqual(["k1"]);
+        expect(document.meta.totalCount).toBe(3);
+        expect(document.links.self).toBe(
+          "https://example.test/contests/c1/candidates?page[offset]=0&page[limit]=2",
+        );
+      }),
+  );
 
-  it.each(["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"])(
+  it.effect.each(["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"])(
     "drops a ref typed %s, an Object.prototype member, as it does any type with no target",
-    async (type) => {
-      const one = ResourceHandlers.related({
-        ...config,
-        loadParent: (_id: string) =>
-          Effect.succeed({
-            type: "contests",
-            id: "c1",
-            attributes: {},
-            relationships: { election: { data: { type, id: "e1" } } },
-          }),
-        key: "election",
-        cardinality: "one",
-      });
-      // oxlint-disable-next-line effect/effect-run-in-body -- the test is the runtime boundary, as for every handler test in this file
-      expect(await Effect.runPromise(one({ params: { id: "c1" } }))).toEqual({
+    (type) =>
+      Effect.gen(function* () {
+        const one = ResourceHandlers.related({
+          ...config,
+          loadParent: (_id: string) =>
+            Effect.succeed({
+              type: "contests",
+              id: "c1",
+              attributes: {},
+              relationships: { election: { data: { type, id: "e1" } } },
+            }),
+          key: "election",
+          cardinality: "one",
+        });
+        expect(yield* one({ params: { id: "c1" } })).toEqual({
+          data: null,
+          jsonapi: { version: "1.1" },
+        });
+      }),
+  );
+
+  it.effect("answers a to-one as the related resource, or `data: null` for empty linkage", () =>
+    Effect.gen(function* () {
+      const one = ResourceHandlers.related({ ...config, key: "election", cardinality: "one" });
+      const document = (yield* one({
+        params: { id: "c1" },
+      })) as Assemble.ResourceDocument<Assemble.ResourceLike>;
+      expect(document.data).toMatchObject({ type: "elections", id: "e1" });
+      const empty = ResourceHandlers.related({ ...config, key: "polity", cardinality: "one" });
+      expect(yield* empty({ params: { id: "c1" } })).toEqual({
         data: null,
         jsonapi: { version: "1.1" },
       });
-    },
+    }),
   );
 
-  it("answers a to-one as the related resource, or `data: null` for empty linkage", async () => {
-    const one = ResourceHandlers.related({ ...config, key: "election", cardinality: "one" });
-    const document = (await Effect.runPromise(
-      one({ params: { id: "c1" } }),
-    )) as Assemble.ResourceDocument<Assemble.ResourceLike>;
-    expect(document.data).toMatchObject({ type: "elections", id: "e1" });
-    const empty = ResourceHandlers.related({ ...config, key: "polity", cardinality: "one" });
-    expect(await Effect.runPromise(empty({ params: { id: "c1" } }))).toEqual({
-      data: null,
-      jsonapi: { version: "1.1" },
-    });
-  });
+  it.effect(
+    "answers an empty to-one with `included: []` when the request carried `include` (#232)",
+    () =>
+      Effect.gen(function* () {
+        // §Fetching Includes: a request carrying `include` gets the `included` key,
+        // even when there is no related resource to walk from.
+        const empty = ResourceHandlers.related({
+          ...config,
+          key: "polity",
+          cardinality: "one",
+          includable: ["country", "country.capital.mayor"],
+        });
+        const [withPath, threeHops, bareInclude, withoutInclude] = yield* Effect.all(
+          [
+            empty({ params: { id: "c1" }, query: { include: ["country"] } }),
+            // A path at the default depth limit (3 hops) is accepted.
+            empty({ params: { id: "c1" }, query: { include: ["country.capital.mayor"] } }),
+            // `?include=` (no paths) is still a request that carried `include`.
+            empty({ params: { id: "c1" }, query: { include: [] } }),
+            empty({ params: { id: "c1" }, query: {} }),
+          ],
+          { concurrency: 1 },
+        );
+        expect(withPath).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
+        expect(threeHops).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
+        expect(bareInclude).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
+        // Without `include` the key stays absent.
+        expect(withoutInclude).not.toHaveProperty("included");
+      }),
+  );
 
-  it("answers an empty to-one with `included: []` when the request carried `include` (#232)", async () => {
-    // §Fetching Includes: a request carrying `include` gets the `included` key,
-    // even when there is no related resource to walk from.
-    const empty = ResourceHandlers.related({
-      ...config,
-      key: "polity",
-      cardinality: "one",
-      includable: ["country", "country.capital.mayor"],
-    });
-    const [withPath, threeHops, bareInclude, withoutInclude] = await Effect.runPromise(
-      Effect.all(
-        [
-          empty({ params: { id: "c1" }, query: { include: ["country"] } }),
-          // A path at the default depth limit (3 hops) is accepted.
-          empty({ params: { id: "c1" }, query: { include: ["country.capital.mayor"] } }),
-          // `?include=` (no paths) is still a request that carried `include`.
-          empty({ params: { id: "c1" }, query: { include: [] } }),
-          empty({ params: { id: "c1" }, query: {} }),
-        ],
-        { concurrency: 1 },
-      ),
-    );
-    expect(withPath).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
-    expect(threeHops).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
-    expect(bareInclude).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
-    // Without `include` the key stays absent.
-    expect(withoutInclude).not.toHaveProperty("included");
-  });
-
-  it("validates an empty to-one's include paths, as it does a resolved one's", async () => {
-    const empty = ResourceHandlers.related({
-      ...config,
-      key: "polity",
-      cardinality: "one",
-      includable: ["country"],
-    });
-    expect(
-      await failure(empty({ params: { id: "c1" }, query: { include: ["nope"] } })),
-    ).toBeInstanceOf(ApiError.UnsupportedIncludePath);
-    expect(
-      await failure(empty({ params: { id: "c1" }, query: { include: ["a.b.c.d"] } })),
-    ).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
-    // With no `includable` configured, no path is includable.
-    const closed = ResourceHandlers.related({ ...config, key: "polity", cardinality: "one" });
-    expect(
-      await failure(closed({ params: { id: "c1" }, query: { include: ["country"] } })),
-    ).toBeInstanceOf(ApiError.UnsupportedIncludePath);
-  });
+  it.effect("validates an empty to-one's include paths, as it does a resolved one's", () =>
+    Effect.gen(function* () {
+      const empty = ResourceHandlers.related({
+        ...config,
+        key: "polity",
+        cardinality: "one",
+        includable: ["country"],
+      });
+      expect(
+        yield* failure(empty({ params: { id: "c1" }, query: { include: ["nope"] } })),
+      ).toBeInstanceOf(ApiError.UnsupportedIncludePath);
+      expect(
+        yield* failure(empty({ params: { id: "c1" }, query: { include: ["a.b.c.d"] } })),
+      ).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
+      // With no `includable` configured, no path is includable.
+      const closed = ResourceHandlers.related({ ...config, key: "polity", cardinality: "one" });
+      expect(
+        yield* failure(closed({ params: { id: "c1" }, query: { include: ["country"] } })),
+      ).toBeInstanceOf(ApiError.UnsupportedIncludePath);
+    }),
+  );
 });

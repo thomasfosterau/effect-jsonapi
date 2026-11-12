@@ -1,4 +1,5 @@
-import { assert, describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { assert, describe, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -193,34 +194,34 @@ const recordingClient = (
   });
 
 describe("Client.transform", () => {
-  it("stamps the negotiation headers on every request the client sends", async () => {
-    const sent: Array<HttpClientRequest.HttpClientRequest> = [];
-    await Effect.runPromise(
-      transform(recordingClient(sent, articleDocument, 200)).get("http://localhost/articles/1"),
-    );
-    expect(sent[0]?.headers["accept"]).toBe(MEDIA_TYPE);
-  });
+  it.effect("stamps the negotiation headers on every request the client sends", () =>
+    Effect.gen(function* () {
+      const sent: Array<HttpClientRequest.HttpClientRequest> = [];
+      yield* transform(recordingClient(sent, articleDocument, 200)).get(
+        "http://localhost/articles/1",
+      );
+      expect(sent[0]?.headers["accept"]).toBe(MEDIA_TYPE);
+    }),
+  );
 });
 
 describe("Client.make", () => {
-  it("derives a client whose reads carry Accept — which a plain HttpApiClient omits", async () => {
-    const bare: Array<HttpClientRequest.HttpClientRequest> = [];
-    const negotiated: Array<HttpClientRequest.HttpClientRequest> = [];
+  it.effect("derives a client whose reads carry Accept — which a plain HttpApiClient omits", () =>
+    Effect.gen(function* () {
+      const bare: Array<HttpClientRequest.HttpClientRequest> = [];
+      const negotiated: Array<HttpClientRequest.HttpClientRequest> = [];
 
-    const read = (client: { readonly articles: { readonly get: any } }) =>
-      client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
+      const read = (client: { readonly articles: { readonly get: any } }) =>
+        client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
 
-    await Effect.runPromise(
-      Effect.gen(function* () {
+      yield* Effect.gen(function* () {
         const client = yield* HttpApiClient.make(Api, { baseUrl: "http://localhost" });
         yield* read(client);
       }).pipe(
         Effect.provideService(HttpClient.HttpClient, recordingClient(bare, articleDocument, 200)),
-      ) as Effect.Effect<void>,
-    );
+      ) as Effect.Effect<void>;
 
-    await Effect.runPromise(
-      Effect.gen(function* () {
+      yield* Effect.gen(function* () {
         const client = yield* make(Api, { baseUrl: "http://localhost" });
         yield* read(client);
       }).pipe(
@@ -228,63 +229,63 @@ describe("Client.make", () => {
           HttpClient.HttpClient,
           recordingClient(negotiated, articleDocument, 200),
         ),
-      ) as Effect.Effect<void>,
-    );
+      ) as Effect.Effect<void>;
 
-    expect(bare[0]?.headers["accept"]).toBeUndefined();
-    expect(negotiated[0]?.headers["accept"]).toBe(MEDIA_TYPE);
-  });
+      expect(bare[0]?.headers["accept"]).toBeUndefined();
+      expect(negotiated[0]?.headers["accept"]).toBe(MEDIA_TYPE);
+    }),
+  );
 
-  it("labels a bodyless DELETE, which a plain HttpApiClient leaves unlabelled", async () => {
-    const bare: Array<HttpClientRequest.HttpClientRequest> = [];
-    const negotiated: Array<HttpClientRequest.HttpClientRequest> = [];
+  it.effect("labels a bodyless DELETE, which a plain HttpApiClient leaves unlabelled", () =>
+    Effect.gen(function* () {
+      const bare: Array<HttpClientRequest.HttpClientRequest> = [];
+      const negotiated: Array<HttpClientRequest.HttpClientRequest> = [];
 
-    const remove = (client: { readonly articles: { readonly delete: any } }) =>
-      client.articles.delete({ params: { id: Article.Id.make("1") } });
+      const remove = (client: { readonly articles: { readonly delete: any } }) =>
+        client.articles.delete({ params: { id: Article.Id.make("1") } });
 
-    await Effect.runPromise(
-      Effect.gen(function* () {
+      yield* Effect.gen(function* () {
         const client = yield* HttpApiClient.make(Api, { baseUrl: "http://localhost" });
         yield* remove(client);
       }).pipe(
         Effect.provideService(HttpClient.HttpClient, recordingClient(bare, "", 204)),
-      ) as Effect.Effect<void>,
-    );
+      ) as Effect.Effect<void>;
 
-    await Effect.runPromise(
-      Effect.gen(function* () {
+      yield* Effect.gen(function* () {
         const client = yield* make(Api, { baseUrl: "http://localhost" });
         yield* remove(client);
       }).pipe(
         Effect.provideService(HttpClient.HttpClient, recordingClient(negotiated, "", 204)),
-      ) as Effect.Effect<void>,
-    );
+      ) as Effect.Effect<void>;
 
-    expect(bare[0]?.headers["content-type"]).toBeUndefined();
-    expect(negotiated[0]?.headers["content-type"]).toBe(MEDIA_TYPE);
-  });
+      expect(bare[0]?.headers["content-type"]).toBeUndefined();
+      expect(negotiated[0]?.headers["content-type"]).toBe(MEDIA_TYPE);
+    }),
+  );
 
-  it("applies a caller's transformClient after the negotiation transform, so it can win", async () => {
-    const sent: Array<HttpClientRequest.HttpClientRequest> = [];
-    await Effect.runPromise(
+  it.effect(
+    "applies a caller's transformClient after the negotiation transform, so it can win",
+    () =>
       Effect.gen(function* () {
-        const client = yield* make(Api, {
-          baseUrl: "http://localhost",
-          transformClient: (client) =>
-            HttpClient.mapRequest(
-              client,
-              HttpClientRequest.setHeader("authorization", "Bearer token"),
-            ),
-        });
-        yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
-      }).pipe(
-        Effect.provideService(HttpClient.HttpClient, recordingClient(sent, articleDocument, 200)),
-      ) as Effect.Effect<void>,
-    );
+        const sent: Array<HttpClientRequest.HttpClientRequest> = [];
+        yield* Effect.gen(function* () {
+          const client = yield* make(Api, {
+            baseUrl: "http://localhost",
+            transformClient: (client) =>
+              HttpClient.mapRequest(
+                client,
+                HttpClientRequest.setHeader("authorization", "Bearer token"),
+              ),
+          });
+          yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
+        }).pipe(
+          Effect.provideService(HttpClient.HttpClient, recordingClient(sent, articleDocument, 200)),
+        ) as Effect.Effect<void>;
 
-    expect(sent[0]?.headers["authorization"]).toBe("Bearer token");
-    expect(sent[0]?.headers["accept"]).toBe(MEDIA_TYPE);
-  });
+        expect(sent[0]?.headers["authorization"]).toBe("Bearer token");
+        expect(sent[0]?.headers["accept"]).toBe(MEDIA_TYPE);
+      }),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -371,62 +372,70 @@ const clientError = (body: string | null, status: number): HttpClientError.HttpC
 };
 
 describe("Client.errorDocument", () => {
-  it("reads the document off a failed call", async () => {
-    const document = await Effect.runPromise(
-      errorDocument(clientError(JSON.stringify(notFound), 404)),
-    );
-    assert(Option.isSome(document));
-    expect(errorMessage(document.value)).toBe(ArticleNotFound.title);
-  });
+  it.effect("reads the document off a failed call", () =>
+    Effect.gen(function* () {
+      const document = yield* errorDocument(clientError(JSON.stringify(notFound), 404));
+      assert(Option.isSome(document));
+      expect(errorMessage(document.value)).toBe(ArticleNotFound.title);
+    }),
+  );
 
-  it("decodes through the same seam as a body handed in directly", async () => {
-    const body = JSON.stringify(toDocument(new Conflict({ detail: "Title taken" })));
-    const fromCause = await Effect.runPromise(errorDocument(clientError(body, 409)));
-    expect(fromCause).toStrictEqual(decodeErrorDocument(body));
-  });
+  it.effect("decodes through the same seam as a body handed in directly", () =>
+    Effect.gen(function* () {
+      const body = JSON.stringify(toDocument(new Conflict({ detail: "Title taken" })));
+      const fromCause = yield* errorDocument(clientError(body, 409));
+      expect(fromCause).toStrictEqual(decodeErrorDocument(body));
+    }),
+  );
 
-  it("degrades to none for a non-conforming response body", async () => {
-    const document = await Effect.runPromise(
-      errorDocument(clientError("<html>502 Bad Gateway</html>", 502)),
-    );
-    expect(Option.isNone(document)).toBe(true);
-  });
+  it.effect("degrades to none for a non-conforming response body", () =>
+    Effect.gen(function* () {
+      const document = yield* errorDocument(clientError("<html>502 Bad Gateway</html>", 502));
+      expect(Option.isNone(document)).toBe(true);
+    }),
+  );
 
-  it("degrades to none for a transport failure carrying no response", async () => {
-    const error = new HttpClientError.HttpClientError({
-      reason: new HttpClientError.TransportError({
-        request: HttpClientRequest.get("http://localhost/articles/1"),
-        description: "offline",
-      }),
-    });
-    expect(Option.isNone(await Effect.runPromise(errorDocument(error)))).toBe(true);
-  });
+  it.effect("degrades to none for a transport failure carrying no response", () =>
+    Effect.gen(function* () {
+      const error = new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({
+          request: HttpClientRequest.get("http://localhost/articles/1"),
+          description: "offline",
+        }),
+      });
+      expect(Option.isNone(yield* errorDocument(error))).toBe(true);
+    }),
+  );
 
-  it("degrades to none for a cause that is not an HttpClientError at all", async () => {
-    expect(Option.isNone(await Effect.runPromise(errorDocument(new Error("boom"))))).toBe(true);
-    expect(Option.isNone(await Effect.runPromise(errorDocument(undefined)))).toBe(true);
-    expect(Option.isNone(await Effect.runPromise(errorDocument("nope")))).toBe(true);
-  });
+  it.effect("degrades to none for a cause that is not an HttpClientError at all", () =>
+    Effect.gen(function* () {
+      expect(Option.isNone(yield* errorDocument(new Error("boom")))).toBe(true);
+      expect(Option.isNone(yield* errorDocument(undefined))).toBe(true);
+      expect(Option.isNone(yield* errorDocument("nope"))).toBe(true);
+    }),
+  );
 
-  it("degrades to none when the body cannot be read at all", async () => {
-    const request = HttpClientRequest.get("http://localhost/articles/1");
-    const broken = new Response(
-      new ReadableStream({
-        start(controller) {
-          controller.error(new Error("connection reset"));
-        },
-      }),
-      { status: 502 },
-    );
-    const error = new HttpClientError.HttpClientError({
-      reason: new HttpClientError.StatusCodeError({
-        request,
-        response: HttpClientResponse.fromWeb(request, broken),
-      }),
-    });
-    // The read fails; it does not throw out of the error path.
-    expect(Option.isNone(await Effect.runPromise(errorDocument(error)))).toBe(true);
-  });
+  it.effect("degrades to none when the body cannot be read at all", () =>
+    Effect.gen(function* () {
+      const request = HttpClientRequest.get("http://localhost/articles/1");
+      const broken = new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new Error("connection reset"));
+          },
+        }),
+        { status: 502 },
+      );
+      const error = new HttpClientError.HttpClientError({
+        reason: new HttpClientError.StatusCodeError({
+          request,
+          response: HttpClientResponse.fromWeb(request, broken),
+        }),
+      });
+      // The read fails; it does not throw out of the error path.
+      expect(Option.isNone(yield* errorDocument(error))).toBe(true);
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------
