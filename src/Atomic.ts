@@ -121,7 +121,7 @@ export const MEDIA_TYPE: string = ATOMIC_MEDIA_TYPE;
  * @since 0.1.0
  * @category constants
  */
-export const jsonapi: typeof JsonApiObject.Type = { version: "1.1", ext: [ATOMIC_EXTENSION_URI] };
+export const jsonapi: JsonApiObject = { version: "1.1", ext: [ATOMIC_EXTENSION_URI] };
 
 // ---------------------------------------------------------------------------
 // Operation refs (atomic-specific: with / without a `relationship` member)

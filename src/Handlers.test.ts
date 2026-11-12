@@ -1235,7 +1235,7 @@ describe("Handlers.DocumentValue / Document.Value", () => {
       jsonapi: { version: "1.1" },
     };
     expect(doc.jsonapi.version).toBe("1.1");
-    expectTypeOf<Handlers.JsonApiObjectValue>().toEqualTypeOf<typeof Document.JsonApiObject.Type>();
+    expectTypeOf<Handlers.JsonApiObjectValue>().toEqualTypeOf<Document.JsonApiObject>();
   });
 
   it("Handlers.data narrows jsonapi into the return type based on the option", () => {

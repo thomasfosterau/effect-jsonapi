@@ -162,7 +162,7 @@ export const REPLAY_HEADER = "idempotency-replayed";
  * @since 0.15.0
  * @category constants
  */
-export const jsonapi: typeof JsonApiObject.Type = { version: "1.1", profile: [PROFILE_URI] };
+export const jsonapi: JsonApiObject = { version: "1.1", profile: [PROFILE_URI] };
 
 // ---------------------------------------------------------------------------
 // The key

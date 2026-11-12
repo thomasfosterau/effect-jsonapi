@@ -36,7 +36,7 @@ describe("Url", () => {
   });
 
   it("has decoded type `URL | string`", () => {
-    expectTypeOf<typeof Document.Url.Type>().toEqualTypeOf<URL | string>();
+    expectTypeOf<Document.Url>().toEqualTypeOf<URL | string>();
     expectTypeOf<typeof Document.Url.Encoded>().toEqualTypeOf<string>();
   });
 });

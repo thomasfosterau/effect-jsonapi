@@ -45,7 +45,7 @@ const selfAsUrl: URL | undefined = Document.href(article.links?.self);
 
 // A present link (no `| undefined`) narrows to a bare `string`, not
 // `string | undefined` — the overload for a definite `Link` drops the guard.
-declare const presentLink: typeof Document.Link.Type;
+declare const presentLink: Document.Link;
 const presentHref: string = Document.href(presentLink);
 // @ts-expect-error -- a definite `Link` never yields `undefined`
 const presentHrefWiden: undefined = Document.href(presentLink);

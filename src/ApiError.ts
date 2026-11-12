@@ -192,8 +192,8 @@ export interface Config<Fields extends Schema.Struct.Fields> {
    * pointer depends on which field failed.
    */
   readonly source?:
-    | typeof ErrorSource.Type
-    | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => typeof ErrorSource.Type | undefined);
+    | ErrorSource
+    | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => ErrorSource | undefined);
 }
 
 const snakeCase = (tag: string): string =>
@@ -215,7 +215,7 @@ const makeWire = (
     readonly title: string | undefined;
     readonly fieldKeys: ReadonlyArray<string>;
     readonly detail: ((fields: any) => string | undefined) | undefined;
-    readonly source: ((fields: any) => typeof ErrorSource.Type | undefined) | undefined;
+    readonly source: ((fields: any) => ErrorSource | undefined) | undefined;
   },
 ) => {
   const cached = wireCache.get(klass);
@@ -350,7 +350,7 @@ export const make =
     const source = P.isFunction(config.source)
       ? config.source
       : config.source !== undefined
-        ? () => config.source as typeof ErrorSource.Type
+        ? () => config.source as ErrorSource
         : undefined;
 
     // The conditional `MissingSelfGeneric` branch only matters at the user's

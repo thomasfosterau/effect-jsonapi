@@ -67,7 +67,7 @@ import { definedMember } from "./internal/members.js";
  * @since 0.3.0
  * @category models
  */
-export type JsonApiObjectValue = typeof JsonApiObject.Type;
+export type JsonApiObjectValue = JsonApiObject;
 
 // ---------------------------------------------------------------------------
 // Identifiable resources (the runtime shape builders work with)
