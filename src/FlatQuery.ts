@@ -45,7 +45,7 @@ import * as Resource from "./Resource.js";
  * @since 0.16.0
  * @category schemas
  */
-export const PageOffset: Schema.Number = Bounded.PageOffset;
+export const PageOffset: Schema.Finite = Bounded.PageOffset;
 
 /**
  * The decoded type of a {@link PageOffset}: a non-negative integer.
@@ -63,7 +63,7 @@ export type PageOffset = typeof PageOffset.Type;
  * @since 0.16.0
  * @category schemas
  */
-export const pageLimit = (maxLimit: number): Schema.Number => Bounded.pageLimit(maxLimit);
+export const pageLimit = (maxLimit: number): Schema.Finite => Bounded.pageLimit(maxLimit);
 
 /**
  * Options of {@link pagination}.
@@ -91,8 +91,8 @@ export interface PaginationOptions {
  * @category models
  */
 export type DefaultedPagination = {
-  readonly offset: Schema.withDecodingDefaultKey<Schema.Number>;
-  readonly limit: Schema.withDecodingDefaultKey<Schema.Number>;
+  readonly offset: Schema.withDecodingDefaultKey<Schema.Finite>;
+  readonly limit: Schema.withDecodingDefaultKey<Schema.Finite>;
 };
 
 /**
@@ -102,8 +102,8 @@ export type DefaultedPagination = {
  * @category models
  */
 export type RequiredPagination = {
-  readonly offset: Schema.Number;
-  readonly limit: Schema.Number;
+  readonly offset: Schema.Finite;
+  readonly limit: Schema.Finite;
 };
 
 /**

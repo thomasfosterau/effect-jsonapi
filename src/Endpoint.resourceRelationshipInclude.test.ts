@@ -181,7 +181,7 @@ describe("`Endpoint.resource`'s `relationshipInclude` (#484)", () => {
   it("a `paginated` relationship legalises its own name, as a `many` does (#483)", () => {
     const endpoints = Endpoint.resource(Article, {
       relationshipInclude: true,
-      page: { offset: Schema.optionalKey(Schema.NumberFromString) },
+      page: { offset: Schema.optionalKey(Schema.FiniteFromString) },
     });
     const history = named(endpoints, "historyRelationship");
     expect(accepts(history, "history")).toBe(true);

@@ -87,7 +87,7 @@ describe("Resource.family (base form)", () => {
 
 describe("family as a relationship target", () => {
   const Edge = Resource("edges", {
-    attributes: { weight: Schema.Number },
+    attributes: { weight: Schema.Finite },
     relationships: { to: Relationship.one(() => AnyNode) },
   });
 

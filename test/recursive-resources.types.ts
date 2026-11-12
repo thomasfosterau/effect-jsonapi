@@ -367,7 +367,7 @@ const feedEndpoint = Endpoint.related(Feed, "posts");
 // ---------------------------------------------------------------------------
 
 const nodeAttributes = { label: Schema.NonEmptyString };
-const edgeAttributes = { weight: Schema.Number };
+const edgeAttributes = { weight: Schema.Finite };
 const graphAttributes = { name: Schema.NonEmptyString };
 
 // A three-resource cycle (node → edge → graph → node), a self-edge, and a

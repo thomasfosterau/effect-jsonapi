@@ -96,7 +96,7 @@ export const Employee = Resource.make("employees", {
 export const Product = Resource.make("products", {
   attributes: {
     name: Schema.NonEmptyString,
-    unitPrice: Schema.Number,
+    unitPrice: Schema.Finite,
     unitsInStock: Schema.Int,
     discontinued: Schema.Boolean,
   },
@@ -111,10 +111,10 @@ export const Product = Resource.make("products", {
 
 export const OrderItem = Resource.make("orderItems", {
   attributes: {
-    unitPrice: Schema.Number,
+    unitPrice: Schema.Finite,
     quantity: Schema.Int,
     // Discount as a fraction in [0, 1].
-    discount: Schema.Number,
+    discount: Schema.Finite,
   },
   relationships: {
     product: Relationship.one(() => Product),
@@ -127,7 +127,7 @@ export const Order = Resource.make("orders", {
     requiredDate: Schema.DateFromString,
     // Null until the order ships.
     shippedDate: Schema.optionalKey(Schema.DateFromString),
-    freight: Schema.Number,
+    freight: Schema.Finite,
     shipCity: Schema.optionalKey(Schema.String),
     shipCountry: Schema.NonEmptyString,
   },

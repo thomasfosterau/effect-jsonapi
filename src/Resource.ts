@@ -3902,7 +3902,7 @@ export const isFamily = (u: unknown): u is Family<string, ReadonlyArray<Any>, an
  *
  * // Use it as a relationship target — linkage decodes for any member.
  * const Edge = Resource.make("edges", {
- *   attributes: { weight: Schema.Number },
+ *   attributes: { weight: Schema.Finite },
  *   relationships: { to: Relationship.one(() => AnyNode) }
  * })
  *

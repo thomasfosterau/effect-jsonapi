@@ -433,7 +433,7 @@ describe("Relationship.one / optional `key` (#509)", () => {
 });
 
 describe("relationship `meta` (#513)", () => {
-  const Count = Schema.Struct({ totalCount: Schema.Number });
+  const Count = Schema.Struct({ totalCount: Schema.Finite });
   const Ballot = Resource("ballots", { attributes: { label: Schema.String } });
   const Contest = Resource("contests", {
     attributes: { name: Schema.String },
@@ -441,7 +441,7 @@ describe("relationship `meta` (#513)", () => {
       ballots: Relationship.many(() => Ballot, { meta: Count }),
       history: Relationship.paginated(() => Ballot, { meta: Count }),
       winner: Relationship.optional(() => Ballot, {
-        meta: Schema.Struct({ margin: Schema.Number }),
+        meta: Schema.Struct({ margin: Schema.Finite }),
       }),
       chair: Relationship.one(() => Ballot),
     },
@@ -491,7 +491,7 @@ describe("relationship `meta` (#513)", () => {
   });
 
   it("survives Resource.extend", () => {
-    const Runoff = extend(Contest, "runoffs", { attributes: { round: Schema.Number } });
+    const Runoff = extend(Contest, "runoffs", { attributes: { round: Schema.Finite } });
     expect(relationshipsOf(Runoff).ballots.meta).toBe(Count);
   });
 });

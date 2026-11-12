@@ -93,7 +93,7 @@ describe("Filter", () => {
         (typeof whole)[Filter.MarkerKey]["operators"]
       >().toEqualTypeOf<Filter.Operator>();
       // the literal type is the schema's own, minus null
-      const nullable = Schema.NullOr(Schema.Number).pipe(Filter.able(["isnull"]));
+      const nullable = Schema.NullOr(Schema.Finite).pipe(Filter.able(["isnull"]));
       expectTypeOf<(typeof nullable)[Filter.MarkerKey]["literal"]>().toEqualTypeOf<number>();
       expectTypeOf<Filter.OperatorsIn<true>>().toEqualTypeOf<Filter.Operator>();
       expectTypeOf<Filter.OperatorsIn<readonly ["lt", "lte"]>>().toEqualTypeOf<"lt" | "lte">();
@@ -110,7 +110,7 @@ describe("Filter", () => {
     });
 
     it("records an explicit literal codec, checked against the schema", () => {
-      const Point = Schema.Struct({ x: Schema.Number, y: Schema.Number });
+      const Point = Schema.Struct({ x: Schema.Finite, y: Schema.Finite });
       const PointFromString = Schema.String.pipe(
         Schema.decodeTo(Point, {
           decode: SchemaGetter.transform((s: string) => {
@@ -215,7 +215,7 @@ describe("Filter AST", () => {
     const Article = Resource("articles", {
       attributes: {
         status: attribute(Schema.String, { filter: true }),
-        age: attribute(Schema.Number, { filter: true }),
+        age: attribute(Schema.Finite, { filter: true }),
         when: attribute(Schema.DateFromString, { filter: ["eq", "in"] }),
       },
     });

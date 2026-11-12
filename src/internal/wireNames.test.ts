@@ -104,7 +104,7 @@ describe("wireProperties", () => {
   // An array-index name sorts first in an object, so the encoded struct's
   // order is not the decoded one's; the rename is read all the same.
   it("pairs a rename that reorders the struct", () => {
-    const distinct = Schema.Struct({ a: Schema.Number, b: Schema.FiniteFromString }).pipe(
+    const distinct = Schema.Struct({ a: Schema.Finite, b: Schema.FiniteFromString }).pipe(
       Schema.encodeKeys({ b: "0" }),
     );
     expect(settled(distinct)).toEqual([
@@ -262,7 +262,7 @@ describe("wireProperties", () => {
   it("pairs nothing two wire properties could both be", () => {
     const schema = Schema.Struct({ a: Schema.String, b: Schema.String }).pipe(
       Schema.decodeTo(
-        Schema.Struct({ x: Schema.String, y: Schema.Number }),
+        Schema.Struct({ x: Schema.String, y: Schema.Finite }),
         SchemaTransformation.transform({
           decode: ({ a, b }) => ({ x: a + b, y: a.length }),
           encode: ({ x }) => ({ a: x, b: "" }),

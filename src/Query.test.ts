@@ -373,7 +373,7 @@ describe("Query.schema", () => {
   });
 
   describe("definitions sharing a wire type share one fields[TYPE] vocabulary (#362)", () => {
-    const Photo = Resource("photos", { attributes: { width: Schema.Number } });
+    const Photo = Resource("photos", { attributes: { width: Schema.Finite } });
     const PhotoCard = Resource("photos", { attributes: { caption: Schema.String } });
     const coverFirst = Resource("g2", {
       attributes: { t: Schema.String },
