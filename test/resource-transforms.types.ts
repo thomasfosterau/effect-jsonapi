@@ -13,6 +13,7 @@
  * annotations are the assertions. Every binding is exported so an unused-local
  * error can never stand in for the assertion an `@ts-expect-error` expects.
  */
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Handlers, Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 
@@ -120,8 +121,8 @@ assertType<string>(none.data.attributes.title);
 // …and no relationship either (#494): `relationships` is omitted, as at runtime.
 // @ts-expect-error -- the empty set drops every relationship
 assertType<unknown>(none.data.relationships);
-// A type with no set at all (`undefined`) is untouched, as at runtime.
-const unset = Handlers.project(article, { articles: undefined });
+// A type with no set at all is untouched, as at runtime.
+const unset = Handlers.project(article, {});
 const unsetIdentity: Equals<typeof unset, typeof Article.Type> = true;
 
 // ---------------------------------------------------------------------------
@@ -163,7 +164,9 @@ const dynamicSameAttributes: Equals<
 
 const stamped = Handlers.data(article, {
   included: [related],
-  onResource: Handlers.withMeta((resource) => ({ href: `/${resource.type}/${resource.id}` })),
+  onResource: Handlers.withMeta((resource) =>
+    Option.some({ href: `/${resource.type}/${resource.id}` }),
+  ),
 });
 assertType<string | undefined>(stamped.data.meta?.href);
 // @ts-expect-error -- only the members the computation declares are there
@@ -175,7 +178,7 @@ const composed = Handlers.data(article, {
   included: [related],
   onResource: Handlers.compose(
     Handlers.project({ articles: ["title"] }),
-    Handlers.withMeta(() => ({ canEdit: true })),
+    Handlers.withMeta(() => Option.some({ canEdit: true })),
   ),
 });
 
@@ -212,13 +215,13 @@ const emptyIsNull: Equals<(typeof empty)["data"], null> = true;
 
 // A relationship document's identifiers go through the same pass.
 const linkage = Handlers.linkage([{ type: "comments" as const, id: "5" }], {
-  onResource: Handlers.withMeta(() => ({ canEdit: true })),
+  onResource: Handlers.withMeta(() => Option.some({ canEdit: true })),
 });
 assertType<boolean | undefined>(linkage.data[0].meta?.canEdit);
 assertType<"comments">(linkage.data[0].type);
 
 const emptyLinkage = Handlers.linkage(null, {
-  onResource: Handlers.withMeta(() => ({ canEdit: true })),
+  onResource: Handlers.withMeta(() => Option.some({ canEdit: true })),
 });
 const emptyLinkageIsNull: Equals<(typeof emptyLinkage)["data"], null> = true;
 

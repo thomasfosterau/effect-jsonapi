@@ -517,6 +517,20 @@ const loadOrder = (id: string): Effect.Effect<Order, OrderNotFound> => {
 // Include resolution & shared helpers
 // ---------------------------------------------------------------------------
 
+// `{ [key]: value }` when `value` is `Some`, and no member at all when it is
+// `None`: spread it to leave an absent option out, as
+// `exactOptionalPropertyTypes` requires (the `Option` form of the helper the
+// migration guide, #620, gives the apps to copy).
+type SomeMember<K extends string, A> = { readonly [Prop in K]?: A };
+const someMember = <const K extends string, A>(
+  key: K,
+  value: Option.Option<A>,
+): SomeMember<K, A> => {
+  const member: { [Prop in K]?: A } = {};
+  if (Option.isSome(value)) member[key] = value.value;
+  return member;
+};
+
 // `?include=` is resolved by `Handlers.resolveIncluded`, which walks every
 // requested path to its last segment — `employee.territories` on an order,
 // `product.supplier` on a line item — loading each level in one batch per type
@@ -770,9 +784,13 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
     .handle("get", ({ params, query }) =>
       Effect.gen(function* () {
         const product = yield* loadProduct(params.id);
-        const included = yield* Handlers.resolveIncluded(product, query.include, productTargets);
+        const included = yield* Handlers.resolveIncluded(
+          product,
+          Option.fromUndefinedOr(query.include),
+          productTargets,
+        );
         return Handlers.data(product, {
-          included,
+          ...someMember("included", included),
           self: `/products/${product.id}`,
           onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
@@ -816,10 +834,14 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
       sortBy(products, query.sort);
       const { limit, offset, page, total } = paginate(products, query.page);
 
-      return Handlers.resolveIncluded(page, query.include, productTargets).pipe(
+      return Handlers.resolveIncluded(
+        page,
+        Option.fromUndefinedOr(query.include),
+        productTargets,
+      ).pipe(
         Effect.map((included) =>
           Handlers.collection(page, {
-            included,
+            ...someMember("included", included),
             meta: { total },
             links: Handlers.offsetPaginationLinks("/products", { offset, limit }, total, {
               query: Query.canonicalPairs(ProductsQuery)(query),
@@ -947,9 +969,13 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
     .handle("get", ({ params, query }) =>
       Effect.gen(function* () {
         const employee = yield* loadEmployee(params.id);
-        const included = yield* Handlers.resolveIncluded(employee, query.include, employeeTargets);
+        const included = yield* Handlers.resolveIncluded(
+          employee,
+          Option.fromUndefinedOr(query.include),
+          employeeTargets,
+        );
         return Handlers.data(employee, {
-          included,
+          ...someMember("included", included),
           self: `/employees/${employee.id}`,
           jsonapi: Document.v1_1,
         });
@@ -964,10 +990,14 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
       }
       sortBy(employees, query.sort);
       const { limit, offset, page, total } = paginate(employees, query.page);
-      return Handlers.resolveIncluded(page, query.include, employeeTargets).pipe(
+      return Handlers.resolveIncluded(
+        page,
+        Option.fromUndefinedOr(query.include),
+        employeeTargets,
+      ).pipe(
         Effect.map((included) =>
           Handlers.collection(page, {
-            included,
+            ...someMember("included", included),
             meta: { total },
             links: Handlers.offsetPaginationLinks("/employees", { offset, limit }, total, {
               query: Query.canonicalPairs(EmployeesQuery)(query),
@@ -1064,9 +1094,13 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
     .handle("get", ({ params, query }) =>
       Effect.gen(function* () {
         const order = yield* loadOrder(params.id);
-        const included = yield* Handlers.resolveIncluded(order, query.include, orderTargets);
+        const included = yield* Handlers.resolveIncluded(
+          order,
+          Option.fromUndefinedOr(query.include),
+          orderTargets,
+        );
         return Handlers.data(order, {
-          included,
+          ...someMember("included", included),
           self: `/orders/${order.id}`,
           onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
@@ -1102,10 +1136,14 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
       sortBy(orders, query.sort);
       const { limit, offset, page, total } = paginate(orders, query.page);
 
-      return Handlers.resolveIncluded(page, query.include, orderTargets).pipe(
+      return Handlers.resolveIncluded(
+        page,
+        Option.fromUndefinedOr(query.include),
+        orderTargets,
+      ).pipe(
         Effect.map((included) =>
           Handlers.collection(page, {
-            included,
+            ...someMember("included", included),
             meta: { total },
             links: Handlers.offsetPaginationLinks("/orders", { offset, limit }, total, {
               query: Query.canonicalPairs(OrdersQuery)(query),
@@ -1168,9 +1206,13 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
         const all = itemsFor(order.id);
         const { limit, offset, page, total } = paginate(all, query.page);
         const path = Handlers.relatedLink("orders", order.id, "lineItems");
-        const included = yield* Handlers.resolveIncluded(page, query.include, orderItemTargets);
+        const included = yield* Handlers.resolveIncluded(
+          page,
+          Option.fromUndefinedOr(query.include),
+          orderItemTargets,
+        );
         return Handlers.collection(page, {
-          included,
+          ...someMember("included", included),
           meta: { total },
           links: Handlers.offsetPaginationLinks(path, { offset, limit }, total, {
             query: Query.canonicalPairs(OrderLineItemsQuery)(query),
@@ -1258,10 +1300,14 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
     // Only products have relationships, so the walk reaches nothing from the
     // customers and suppliers in the page; a supplier already in the results is
     // not repeated in `included`.
-    return Handlers.resolveIncluded(page, query.include, productTargets).pipe(
+    return Handlers.resolveIncluded(
+      page,
+      Option.fromUndefinedOr(query.include),
+      productTargets,
+    ).pipe(
       Effect.map((included) =>
         Handlers.collection(page, {
-          included,
+          ...someMember("included", included),
           meta: { total },
           links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total, {
             query: Query.canonicalPairs(SearchQuery)(query),

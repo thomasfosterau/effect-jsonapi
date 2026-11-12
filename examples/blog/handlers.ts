@@ -178,6 +178,17 @@ const requireComments = (
   return missing === undefined ? Effect.void : Effect.fail(new CommentNotFound({ id: missing.id }));
 };
 
+// `{ [key]: value }` when `value` is defined, and no member at all when it is
+// `undefined`: spread it to leave an absent option out, as
+// `exactOptionalPropertyTypes` requires (the helper the migration guide, #620,
+// gives the apps to copy).
+type DefinedMember<K extends string, A> = { readonly [Prop in K]?: Exclude<A, undefined> };
+const definedMember = <const K extends string, A>(key: K, value: A): DefinedMember<K, A> => {
+  const member: { [Prop in K]?: Exclude<A, undefined> } = {};
+  if (P.isNotUndefined(value)) member[key] = value;
+  return member;
+};
+
 // Resolve the resources referenced by the requested include paths.
 // Only `one` / `optional` / `many` relationships are includable; the paginated
 // `comments` relationship never appears here.
@@ -244,8 +255,10 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       loadArticle(params.id).pipe(
         Effect.map((article) =>
           Handlers.data(article, {
-            included:
+            ...definedMember(
+              "included",
               query.include === undefined ? undefined : resolveIncluded(article, query.include),
+            ),
             self: `/articles/${article.id}`,
             onResource: Handlers.project(query.fields),
             jsonapi: Document.v1_1,
@@ -280,10 +293,12 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
 
       return Effect.succeed(
         Handlers.collection(page, {
-          included:
+          ...definedMember(
+            "included",
             query.include === undefined
               ? undefined
               : page.flatMap((article) => resolveIncluded(article, query.include)),
+          ),
           meta: { total },
           links: Handlers.offsetPaginationLinks("/articles", { offset, limit }, total, {
             query: Query.canonicalPairs(ArticlesQuery)(query),
@@ -374,12 +389,14 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
           const { page, offset, limit, total } = articleCommentPage(article.id, query.page);
           const path = Handlers.relatedLink("articles", article.id, "comments");
           return Handlers.collection(page, {
-            included:
+            ...definedMember(
+              "included",
               query.include === undefined
                 ? undefined
                 : query.include.includes("author")
                   ? commentAuthors(page)
                   : [],
+            ),
             meta: { total },
             links: Handlers.offsetPaginationLinks(path, { offset, limit }, total, {
               query: Query.canonicalPairs(ArticleCommentsQuery)(query),
@@ -402,13 +419,15 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
               // the comments on *this page*, never the whole relationship —
               // `Handlers.linkage` checks full linkage from the page's
               // identifiers — and, for `comments.author`, their authors.
-              included:
+              ...definedMember(
+                "included",
                 include === undefined
                   ? undefined
                   : [
                       ...(Arr.isReadonlyArrayNonEmpty(include) ? page : []),
                       ...(include.includes("comments.author") ? commentAuthors(page) : []),
                     ],
+              ),
               self: Handlers.relationshipLink("articles", article.id, "comments"),
               related: Handlers.relatedLink("articles", article.id, "comments"),
               meta: { total },
@@ -426,7 +445,8 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             // `undefined` without `?include=` (no `included` member); with
             // `include=tags`, the tags the identifiers name. `Handlers.linkage`
             // checks full linkage from the identifiers themselves.
-            included:
+            ...definedMember(
+              "included",
               query.include === undefined
                 ? undefined
                 : tags.flatMap((identifier) => {
@@ -435,6 +455,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
                     );
                     return tag === undefined ? [] : [tag];
                   }),
+            ),
             // `?fields[tags]=…` narrows the `included` tags; projecting an
             // identifier is a no-op.
             onResource: Handlers.project(query.fields),
@@ -528,12 +549,14 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
 
     return Effect.succeed(
       Handlers.collection(page, {
-        included:
+        ...definedMember(
+          "included",
           query.include === undefined
             ? undefined
             : page.flatMap((result) =>
                 result.type === "articles" ? resolveIncluded(result, query.include) : [],
               ),
+        ),
         meta: { total },
         links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total, {
           query: Query.canonicalPairs(SearchQuery)(query),
@@ -585,9 +608,8 @@ const targetId = (
 ): string => {
   if (target.id !== undefined) return target.id;
   if (target.lid !== undefined) {
-    const id = lids.id(target.lid);
-    if (id !== undefined) return id;
-    throw new Lid.UnknownLidError(target.lid);
+    const lid = target.lid;
+    return Option.getOrThrowWith(lids.id(lid), () => new Lid.UnknownLidError(lid));
   }
   throw new InvalidOperation({ message: "operation does not identify a target resource" });
 };

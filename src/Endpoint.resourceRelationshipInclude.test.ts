@@ -22,6 +22,7 @@ import type { HttpApiEndpoint } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
 import * as Handlers from "./Handlers.js";
+import { someMember } from "./internal/members.js";
 import * as Include from "./Include.js";
 import * as Middleware from "./Middleware.js";
 import * as Relationship from "./Relationship.js";
@@ -361,13 +362,13 @@ describe("a `Group.resource` relationship endpoint serving `included` (#484, #48
       .handle("editorRelationship", ({ query }) =>
         Effect.succeed(
           Handlers.linkage(Person.ref(person.id), {
-            included:
-              query.include === undefined
-                ? undefined
-                : [
-                    ...(query.include.includes("editor") ? [person] : []),
-                    ...(query.include.includes("editor.employer") ? [company] : []),
-                  ],
+            ...someMember(
+              "included",
+              Option.map(Option.fromUndefinedOr(query.include), (include) => [
+                ...(include.includes("editor") ? [person] : []),
+                ...(include.includes("editor.employer") ? [company] : []),
+              ]),
+            ),
             onResource: Handlers.project(query.fields),
           }),
         ),

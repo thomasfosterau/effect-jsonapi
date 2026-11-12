@@ -36,6 +36,7 @@ import type * as Arr from "effect/Array";
 import type { HttpApiEndpoint } from "effect/http-api";
 import { HttpApiGroup } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
+import { definedMember } from "./internal/members.js";
 import type { DataDocument } from "./Document.js";
 import type * as Idempotency from "./Idempotency.js";
 import type { AnySurface } from "./Include.js";
@@ -283,7 +284,7 @@ export interface FlatReadOnlyOptions<
   /** The flat `List<X>` input (the page cursor plus the family's own filters). */
   readonly list: List;
   /** Fields of `list` re-keyed to `filter[…]` on the wire — see `Query.flatList`. */
-  readonly filters?: Filters | undefined;
+  readonly filters?: Filters;
   /**
    * The family's include surface (`Include.make`): its `included` union is
    * what the documents declare, its `paths` the whitelist the handlers
@@ -299,8 +300,7 @@ export interface FlatReadOnlyOptions<
    *
    * @since 0.20.0
    */
-  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes
-  readonly toManyMeta?: TM | undefined;
+  readonly toManyMeta?: TM;
 }
 
 /**
@@ -333,8 +333,7 @@ export interface FlatOptions<
    *
    * @since 0.17.0
    */
-  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes, as the sibling options do
-  readonly hiddenWrites?: Hidden | undefined;
+  readonly hiddenWrites?: Hidden;
 }
 
 const SHARED_FLAT_OPTIONS = {
@@ -361,18 +360,20 @@ const flatWire = <
 >(
   options: FlatReadOnlyOptions<R, List, Filters, Surface, TM>,
 ) => {
-  const included = options.include?.included;
-  const toManyMeta = options.toManyMeta;
+  const documentOptions = {
+    ...definedMember("included", options.include?.included),
+    ...definedMember("toManyMeta", options.toManyMeta),
+  };
   return {
-    document: Endpoint.ResourceDocument<R, SurfaceIncluded<Surface>, TM>(options.resource, {
-      included,
-      toManyMeta,
-    }),
-    collection: Endpoint.FlatCollectionDocument<R, SurfaceIncluded<Surface>, TM>(options.resource, {
-      included,
-      toManyMeta,
-    }),
-    listQuery: Query.flatList(options.list, { filters: options.filters }),
+    document: Endpoint.ResourceDocument<R, SurfaceIncluded<Surface>, TM>(
+      options.resource,
+      documentOptions,
+    ),
+    collection: Endpoint.FlatCollectionDocument<R, SurfaceIncluded<Surface>, TM>(
+      options.resource,
+      documentOptions,
+    ),
+    listQuery: Query.flatList(options.list, { ...definedMember("filters", options.filters) }),
   };
 };
 
@@ -522,8 +523,8 @@ export const flat = <
   const success = (
     options.hiddenWrites === true
       ? Endpoint.WriteDocument(options.resource, {
-          included: options.include?.included,
-          toManyMeta: options.toManyMeta,
+          ...definedMember("included", options.include?.included),
+          ...definedMember("toManyMeta", options.toManyMeta),
         })
       : document
   ) as Success;

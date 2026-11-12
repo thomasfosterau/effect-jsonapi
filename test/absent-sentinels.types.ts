@@ -339,7 +339,7 @@ export const namedId: Types.Equals<
   typeof Named.Id,
   Schema.Union<readonly [typeof Editor.Id, typeof Owner.Id]>
 > = true;
-export const namedMaxErrors: Types.Equals<typeof Named.maxUndeclaredMemberErrors, undefined> = true;
+export const namedMaxErrors: Types.Equals<typeof Named.maxUndeclaredMemberErrors, number> = true;
 export const anchoredId: Types.Equals<typeof Anchored.Id, typeof Node.Id> = true;
 export const anchoredRelationships: Types.Equals<
   typeof Anchored.relationships,

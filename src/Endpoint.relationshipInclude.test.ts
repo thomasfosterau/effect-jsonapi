@@ -27,6 +27,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
@@ -42,7 +43,7 @@ import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
 import { platformLayer } from "./Registry.js";
 import * as Resource from "./Resource.js";
-import { definedMember } from "./internal/members.js";
+import { definedMember, someMember } from "./internal/members.js";
 
 // The walk reads a document as JSON, so a typed one is checked as JSON first.
 const onWire = Schema.decodeUnknownSync(Schema.JsonObject);
@@ -439,13 +440,13 @@ describe("a compound relationship document served over HTTP (#439)", () => {
         }).pipe(
           Effect.as(
             Handlers.linkage([Comment.ref(comment.id)], {
-              included:
-                query.include === undefined
-                  ? undefined
-                  : [
-                      ...(Arr.isReadonlyArrayNonEmpty(query.include) ? [comment] : []),
-                      ...(query.include.includes("comments.author") ? [person] : []),
-                    ],
+              ...someMember(
+                "included",
+                Option.map(Option.fromUndefinedOr(query.include), (include) => [
+                  ...(Arr.isReadonlyArrayNonEmpty(include) ? [comment] : []),
+                  ...(include.includes("comments.author") ? [person] : []),
+                ]),
+              ),
               onResource: Handlers.project(query.fields),
             }),
           ),
@@ -726,13 +727,13 @@ describe("a paginated compound relationship document served over HTTP (#483)", (
           Handlers.linkage(
             page.map((comment) => Comment.ref(comment.id)),
             {
-              included:
-                include === undefined
-                  ? undefined
-                  : [
-                      ...(include.includes("comments") ? page : []),
-                      ...(include.includes("comments.author") ? [...page, person] : []),
-                    ],
+              ...someMember(
+                "included",
+                Option.map(Option.fromUndefinedOr(include), (include) => [
+                  ...(include.includes("comments") ? page : []),
+                  ...(include.includes("comments.author") ? [...page, person] : []),
+                ]),
+              ),
               onResource: Handlers.project(query.fields),
             },
           ),

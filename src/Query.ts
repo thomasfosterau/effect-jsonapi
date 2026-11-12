@@ -865,12 +865,12 @@ export interface FlatListOptions<S extends FlatListStruct> {
    * `filters: ["status"]` advertises `?filter[status]=` and decodes it back to
    * a flat `status`. Fields not named stay under their flat key.
    */
-  readonly filters?: ReadonlyArray<Extract<keyof S["fields"], string>> | undefined;
+  readonly filters?: ReadonlyArray<Extract<keyof S["fields"], string>>;
   /**
    * Whether to add the open `?include=` parameter ({@link includeListField}).
    * Defaults to `true`.
    */
-  readonly include?: boolean | undefined;
+  readonly include?: boolean;
 }
 
 /**
@@ -936,8 +936,8 @@ export const flatList = <
 >(
   list: S,
   options?: FlatListOptions<S> & {
-    readonly filters?: Filters | undefined;
-    readonly include?: IncludeField | undefined;
+    readonly filters?: Filters;
+    readonly include?: IncludeField;
   },
 ): FlatList<S, Filters, IncludeField> => {
   const filters = options?.filters ?? [];
@@ -1475,7 +1475,7 @@ export interface Options<Res extends Any> {
    * Both wire spellings are accepted — `?include=a,b` and `?include=a&include=b`
    * — and decode to the same set.
    */
-  readonly include?: IncludeOption<Res> | undefined;
+  readonly include?: IncludeOption<Res>;
   /**
    * Enable `?fields[TYPE]=` — sparse fieldsets for every type the response
    * can carry, and no other: this resource; its non-`paginated` direct
@@ -1506,7 +1506,7 @@ export interface Options<Res extends Any> {
    * or for a type whose resource has no field, is a 400 naming it, as is
    * every `fields[TYPE]` on an endpoint without this option (#261).
    */
-  readonly fields?: boolean | ReadonlyArray<string> | undefined;
+  readonly fields?: boolean | ReadonlyArray<string>;
   /**
    * Enable `?sort=` — `true` allows sorting on every attribute; pass an array
    * of attribute names to restrict the sortable set. Unknown fields produce a 400.
@@ -1514,7 +1514,7 @@ export interface Options<Res extends Any> {
    * Both wire spellings are accepted — `?sort=-createdAt,title` and
    * `?sort=-createdAt&sort=title` — and decode to the same list.
    */
-  readonly sort?: boolean | ReadonlyArray<AttributeKeys<Res>> | undefined;
+  readonly sort?: boolean | ReadonlyArray<AttributeKeys<Res>>;
   /**
    * Enable `?page[*]=` pagination. Pass one of the {@link Page} strategies or
    * custom `Schema.Struct.Fields` (each key becomes `page[<key>]`). Under the

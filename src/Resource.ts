@@ -435,9 +435,9 @@ type LiteralResource<R> = boolean extends R ? never : unknown;
 const declare = (
   schema: Schema.Top,
   options?: {
-    readonly filter?: FilterDeclaration | undefined;
-    readonly filterLiteral?: Schema.Codec<unknown, string> | undefined;
-    readonly sort?: boolean | undefined;
+    readonly filter?: FilterDeclaration;
+    readonly filterLiteral?: Schema.Codec<unknown, string>;
+    readonly sort?: boolean;
   },
 ): Schema.Top => {
   let declared = schema;
@@ -574,7 +574,7 @@ export const attribute = <
     readonly update?: Update;
     readonly clearable?: Clearable;
     readonly filter?: FilterDecl;
-    readonly filterLiteral?: Schema.Codec<Literal, string> | undefined;
+    readonly filterLiteral?: Schema.Codec<Literal, string>;
     readonly sort?: Sortable;
   },
 ): Attribute<
@@ -664,25 +664,33 @@ export const readOnlyAttribute = <
       FilterDecl
     > &
     NotAlready<S, Sort.MarkerKey, Sortable>,
-  options?: {
+  {
+    filterLiteral,
+    ...options
+  }: {
     readonly filter?: FilterDecl;
-    readonly filterLiteral?: Schema.Codec<Literal, string> | undefined;
+    readonly filterLiteral?: Schema.Codec<Literal, string>;
     readonly sort?: Sortable;
-  },
-): ReadOnlyAttribute<Declare<S, FilterDecl, Sortable, Literal>> =>
-  attribute(schema as Schema.Top, {
-    ...options,
-    filterLiteral: Option.getOrUndefined(
-      Option.map(
-        Option.fromUndefinedOr(options?.filterLiteral),
-        // SAFETY: the codec's `Literal` is the attribute's; `attribute` below
-        // is called over the erased schema, whose literal is `unknown`.
-        (literal) => literal as Schema.Codec<unknown, string>,
-      ),
-    ),
-    create: false,
-    update: false,
-  }) as ReadOnlyAttribute<Declare<S, FilterDecl, Sortable, Literal>>;
+  } = {},
+): ReadOnlyAttribute<Declare<S, FilterDecl, Sortable, Literal>> => {
+  // `attribute` is called over the erased schema, whose literal is `unknown`:
+  // the codec widens to it, so `Literal` is not inferred against `Schema.Top`.
+  const erased: Option.Option<Schema.Codec<unknown, string>> =
+    Option.fromUndefinedOr(filterLiteral);
+  const declared = Option.match(erased, {
+    onNone: () => attribute(schema as Schema.Top, { ...options, create: false, update: false }),
+    onSome: (literal) =>
+      attribute(schema as Schema.Top, {
+        ...options,
+        filterLiteral: literal,
+        create: false,
+        update: false,
+      }),
+  });
+  // SAFETY: `attribute` declared `schema` with these very options, so its
+  // read-only projection is the `Declare` of them.
+  return declared as ReadOnlyAttribute<Declare<S, FilterDecl, Sortable, Literal>>;
+};
 
 // The runtime shape of an attribute's descriptor, stored under
 // `AttributeDescriptorAnnotationId`. `schema` is the inner (declared) schema:
@@ -1411,7 +1419,7 @@ export interface Any extends Schema.Top {
    *
    * @since 0.15.0
    */
-  readonly declaredAttributes?: Schema.Struct.Fields | undefined;
+  readonly declaredAttributes?: Schema.Struct.Fields;
   /**
    * How many undeclared members each write body member reports at its own
    * pointer before one summary error (see {@link make}'s
@@ -1422,7 +1430,7 @@ export interface Any extends Schema.Top {
    *
    * @since 0.17.0
    */
-  readonly maxUndeclaredMemberErrors?: number | undefined;
+  readonly maxUndeclaredMemberErrors?: number;
 }
 
 /**
@@ -1498,8 +1506,8 @@ export type DeclaredAttributesOf<R extends Any> = R extends {
 
 /**
  * The per-attribute annotation bags of a resource definition: for each
- * attribute key, the annotations stamped on its schema (or `undefined` if it
- * carries none).
+ * attribute key, the annotations stamped on its schema; an attribute that
+ * carries none has no key.
  *
  * The annotation bag is the open Effect annotation record, so consumers stamp
  * their own metadata — a `dbColumn` mapping, a presentation hint — onto an
@@ -1510,7 +1518,7 @@ export type DeclaredAttributesOf<R extends Any> = R extends {
  * @category type-level
  */
 export type AttributeAnnotationsOf<R extends Any> = {
-  readonly [K in AttributeKeys<R>]: Schema.Annotations.Annotations | undefined;
+  readonly [K in AttributeKeys<R>]?: Schema.Annotations.Annotations;
 };
 
 // ---------------------------------------------------------------------------
@@ -1573,10 +1581,10 @@ export interface AttributeDescriptor<Key extends string = string> {
   readonly readOnly: boolean;
   /**
    * The annotations stamped on the attribute — the same bag
-   * {@link attributeAnnotations} reports for this key, or `undefined` when it
-   * carries none.
+   * {@link attributeAnnotations} reports for this key; absent when it carries
+   * none.
    */
-  readonly annotations: Schema.Annotations.Annotations | undefined;
+  readonly annotations?: Schema.Annotations.Annotations;
 }
 
 // A declared attribute schema, erased for the descriptor. `Schema.Struct.Fields`
@@ -1594,6 +1602,9 @@ const erase = (schema: Schema.Top): Schema.Codec<unknown, unknown> =>
 // on the resource object and an optional key at create.
 const describeAttribute = (key: string, field: Schema.Top): AttributeDescriptor => {
   const annotations = Schema.resolveAnnotations(field);
+  // `annotations` is a member only when the attribute carries some.
+  const described = (descriptor: AttributeDescriptor): AttributeDescriptor =>
+    annotations === undefined ? descriptor : { ...descriptor, annotations };
   const found = descriptorOf(field);
   if (Option.isNone(found)) {
     const schema = attributeSchemaOf(field);
@@ -1603,7 +1614,7 @@ const describeAttribute = (key: string, field: Schema.Top): AttributeDescriptor 
     // admits `null` exactly when its own schema does — the same default
     // `attribute` resolves `clearable` to.
     const nullable = isNullable(schema);
-    return {
+    return described({
       key,
       schema: erase(schema),
       resource: presence,
@@ -1612,11 +1623,10 @@ const describeAttribute = (key: string, field: Schema.Top): AttributeDescriptor 
       clearable: nullable,
       nullable,
       readOnly: false,
-      annotations,
-    };
+    });
   }
   const config = found.value;
-  return {
+  return described({
     key,
     schema: erase(config.schema),
     resource: config.resource === true ? "required" : config.resource,
@@ -1625,8 +1635,7 @@ const describeAttribute = (key: string, field: Schema.Top): AttributeDescriptor 
     clearable: config.clearable,
     nullable: isNullable(config.schema),
     readOnly: config.create === false && config.update === false,
-    annotations,
-  };
+  });
 };
 
 /**
@@ -2031,7 +2040,9 @@ export const declaredAttributes = <R extends Any>(resource: R): DeclaredAttribut
  */
 export const attributeAnnotations = <R extends Any>(resource: R): AttributeAnnotationsOf<R> => {
   const fields = resource.fields.attributes.fields as Record<string, Schema.Top>;
-  return R.map(fields, (field) => Schema.resolveAnnotations(field)) as AttributeAnnotationsOf<R>;
+  return R.getSomes(
+    R.map(fields, (field) => Option.fromUndefinedOr(Schema.resolveAnnotations(field))),
+  ) as AttributeAnnotationsOf<R>;
 };
 
 /**
@@ -3058,7 +3069,7 @@ export const make = <
      * Pipe it through `Filter.able` (last) to make `filter[id]` legal: see
      * {@link filterable}.
      */
-    readonly id?: IdSchema | undefined;
+    readonly id?: IdSchema;
     /**
      * The attribute schemas. No attribute may be named `type` or `id`, nor share
      * a name with a relationship (JSON:API 1.1 §Fields): a type error where the
@@ -3094,7 +3105,7 @@ export const make = <
      *
      * @since 0.17.0
      */
-    readonly maxUndeclaredMemberErrors?: number | undefined;
+    readonly maxUndeclaredMemberErrors?: number;
   },
 ): Resource<Type, Attributes, Rels, Meta, IdSchema> => {
   const maxUndeclaredMemberErrors = validateMaxUndeclaredMemberErrors(
@@ -3601,7 +3612,7 @@ export const extend = <
      *
      * @since 0.14.0
      */
-    readonly id?: IdSchema | undefined;
+    readonly id?: IdSchema;
     /**
      * Brand the *base's* id schema with this resource's type instead of minting
      * a fresh independent id, so the child id is a subtype of the base id.
@@ -3623,7 +3634,7 @@ export const extend = <
      *
      * @since 0.17.0
      */
-    readonly maxUndeclaredMemberErrors?: number | undefined;
+    readonly maxUndeclaredMemberErrors?: number;
   },
 ): Resource<
   Type,
@@ -3656,22 +3667,21 @@ export const extend = <
   // Checked here too, so a clash an extension introduces names the call that
   // introduced it.
   validateFieldNames(`Resource.extend("${type}")`, attributes, relationships);
-  return cast(
-    make(type, {
-      id,
-      attributes,
-      relationships,
-      meta: (options?.meta ?? base.fields.meta.schema) as Meta,
-      // Resource-level annotations are inherited like attributes and
-      // relationships are, the child's own keys winning.
-      annotations: { ...Schema.resolveAnnotations(base), ...options?.annotations },
-      // Validated here, so a bad value names the call that passed it.
-      maxUndeclaredMemberErrors: validateMaxUndeclaredMemberErrors(
-        `Resource.extend("${type}")`,
-        options?.maxUndeclaredMemberErrors ?? base.maxUndeclaredMemberErrors,
-      ),
-    }),
-  );
+  const declaration = {
+    attributes,
+    relationships,
+    meta: (options?.meta ?? base.fields.meta.schema) as Meta,
+    // Resource-level annotations are inherited like attributes and
+    // relationships are, the child's own keys winning.
+    annotations: { ...Schema.resolveAnnotations(base), ...options?.annotations },
+    // Validated here, so a bad value names the call that passed it.
+    maxUndeclaredMemberErrors: validateMaxUndeclaredMemberErrors(
+      `Resource.extend("${type}")`,
+      options?.maxUndeclaredMemberErrors ?? base.maxUndeclaredMemberErrors,
+    ),
+  };
+  // `id` is a member only when one was given or inherited.
+  return cast(id === undefined ? make(type, declaration) : make(type, { ...declaration, id }));
 };
 
 // ---------------------------------------------------------------------------
@@ -3811,12 +3821,12 @@ export interface Family<
     : Base["relationships"];
   /**
    * The base's `maxUndeclaredMemberErrors`, for a family anchored on a base;
-   * `undefined` on a name-only family, whose atomic operations use the default.
+   * the default (`12`) on a name-only family.
    *
    * @since 0.17.0
    */
   readonly maxUndeclaredMemberErrors: [Base] extends [never]
-    ? undefined
+    ? number
     : Base["maxUndeclaredMemberErrors"];
   /** The shared attributes: the base's, or the by-key intersection of the members'. */
   readonly fields: {
@@ -4001,8 +4011,9 @@ export function family(nameOrBase: string | Any, members: ReadonlyArray<Any>): A
       declaredAttributes: attributes.fields,
       // A base-anchored family writes through its base's attributes, so it
       // reports undeclared members under its base's cap; a name-only family
-      // carries none, and the atomic operations use the default.
-      maxUndeclaredMemberErrors: base?.maxUndeclaredMemberErrors,
+      // carries the default the atomic operations would otherwise apply.
+      maxUndeclaredMemberErrors:
+        base?.maxUndeclaredMemberErrors ?? defaultMaxUndeclaredMemberErrors,
       document: (opts?: { readonly included?: Schema.Top; readonly meta?: Schema.Top }) =>
         DataDocument(memberUnion, {
           included: opts?.included ?? includedUnion(),

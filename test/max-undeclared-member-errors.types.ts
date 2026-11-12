@@ -34,8 +34,10 @@ export const Open = Resource.make("open", {
   maxUndeclaredMemberErrors: Number.POSITIVE_INFINITY,
 });
 
-// An explicit `undefined`, as a caller forwarding its own optional option.
+// An explicit `undefined` is refused: a caller forwarding its own optional
+// option leaves the key out when it is absent.
 export const forwarded = (cap?: number) =>
+  // @ts-expect-error -- `maxUndeclaredMemberErrors` takes a number, not `undefined`
   Resource.make("forwarded", { attributes, maxUndeclaredMemberErrors: cap });
 
 // @ts-expect-error -- the cap is a number, not a numeric string
@@ -43,6 +45,7 @@ export const stringCap = Resource.make("strings", { attributes, maxUndeclaredMem
 
 export const Extended = Resource.extend(Capped, "extended", { maxUndeclaredMemberErrors: 4 });
 export const extendForwarded = (cap?: number) =>
+  // @ts-expect-error -- as on `make`: no explicit `undefined`
   Resource.extend(Capped, "extended", { maxUndeclaredMemberErrors: cap });
 export const extendString = Resource.extend(Capped, "extended", {
   // @ts-expect-error -- `extend` takes the same option, with the same type
@@ -55,11 +58,11 @@ export const extendString = Resource.extend(Capped, "extended", {
 
 export const resolved: Equals<typeof Capped.maxUndeclaredMemberErrors, number> = true;
 export const inherited: Equals<typeof Extended.maxUndeclaredMemberErrors, number> = true;
-export const onAny: Equals<Resource.Any["maxUndeclaredMemberErrors"], number | undefined> = true;
+// Optional on `Any`, and a number when present.
+export const onAny: Equals<Required<Resource.Any>["maxUndeclaredMemberErrors"], number> = true;
 // @ts-expect-error -- a definition's cap is resolved: never `undefined`
-export const neverUndefined: Equals<typeof Capped.maxUndeclaredMemberErrors, number | undefined> =
-  true;
+export const neverUndefined: typeof Capped.maxUndeclaredMemberErrors = undefined;
 export const Family = Resource.family(Capped, [Extended]);
 export const onFamily: Equals<typeof Family.maxUndeclaredMemberErrors, number> = true;
 export const Named = Resource.family("named", [Extended]);
-export const onNamedFamily: Equals<typeof Named.maxUndeclaredMemberErrors, undefined> = true;
+export const onNamedFamily: Equals<typeof Named.maxUndeclaredMemberErrors, number> = true;

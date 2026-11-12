@@ -94,8 +94,10 @@ describe("href", () => {
     expect(Document.href({ href: "/articles/1" })).toBe("/articles/1");
   });
 
-  it("passes undefined through", () => {
-    expect(Document.href(undefined)).toBeUndefined();
+  it("composes with an absent link through Option", () => {
+    expect(Option.map(Option.fromUndefinedOr(undefined), Document.href)).toStrictEqual(
+      Option.none(),
+    );
   });
 
   it("narrows a decoded TopLevelLinks member regardless of which arm it decoded to", () => {
@@ -103,8 +105,12 @@ describe("href", () => {
       self: "/articles?page[offset]=0",
       related: "https://example.com/articles",
     });
-    expect(Document.href(links.self)).toBe("/articles?page[offset]=0");
-    expect(Document.href(links.related)).toBe("https://example.com/articles");
+    expect(Option.map(Option.fromUndefinedOr(links.self), Document.href)).toStrictEqual(
+      Option.some("/articles?page[offset]=0"),
+    );
+    expect(Option.map(Option.fromUndefinedOr(links.related), Document.href)).toStrictEqual(
+      Option.some("https://example.com/articles"),
+    );
   });
 });
 

@@ -6,6 +6,7 @@
  * relationship document.
  */
 import * as HashSet from "effect/HashSet";
+import * as Option from "effect/Option";
 import { it } from "@effect/vitest";
 import * as Arr from "effect/Array";
 import * as DateTime from "effect/DateTime";
@@ -1302,7 +1303,7 @@ describe("helpers", () => {
 
   it("ownedCapabilities: the owner and a moderator may write, a stranger may not", () => {
     const owned = Assemble.ownedCapabilities({
-      viewerId: (viewer: User | null | undefined) => viewer?.id,
+      viewerId: (viewer: User | null | undefined) => Option.fromNullishOr(viewer?.id),
       canModerate: (viewer) => viewer?.role === "admin",
     });
     const garden: Assemble.ResourceLike = {

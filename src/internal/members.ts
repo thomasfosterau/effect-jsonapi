@@ -3,8 +3,11 @@
  *
  * @internal
  */
+import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
+import * as R from "effect/Record";
+import type { AnyResourceValue, MetaValue } from "../Handlers.js";
 
 /**
  * The object {@link definedMember} returns: `key` as an optional member that,
@@ -51,4 +54,22 @@ export const someMember = <const K extends string, A>(
   const member: { [Prop in K]?: A } = {};
   if (Option.isSome(value)) member[key] = value.value;
   return member;
+};
+
+/**
+ * `resource` with `computed` merged over its own `meta`. A merged `meta`
+ * with no member is dropped whole: to the spec an empty `meta` object is a
+ * present-but-empty meta, a different statement from having none. The one
+ * implementation behind `Handlers.withMeta` and the assembler's capability
+ * stamp, which calls it directly so a resource it does not stamp costs no
+ * `Option`.
+ *
+ * @internal
+ */
+export const stampMeta = (resource: AnyResourceValue, computed?: MetaValue): AnyResourceValue => {
+  const merged = { ...resource.meta, ...computed };
+  if (Arr.isReadonlyArrayNonEmpty(R.keys(merged))) return { ...resource, meta: merged };
+  if (resource.meta === undefined) return resource;
+  const { meta: _meta, ...rest } = resource;
+  return rest;
 };

@@ -69,8 +69,20 @@ const store = (
   };
 };
 
-const ids = (resources: ReadonlyArray<Handlers.ResourceValue> | undefined) =>
-  resources?.map((resource) => `${resource.type}:${resource.id}`);
+const ids = (resources: ReadonlyArray<Handlers.ResourceValue>) =>
+  resources.map((resource) => `${resource.type}:${resource.id}`);
+
+// The walk for a request that carried `include`: the paths are present, so
+// the result is always `Some`, unwrapped here.
+const resolveSome = <Targets extends Handlers.IncludeTargets>(
+  primary: Handlers.ResourceValue | null | ReadonlyArray<Handlers.ResourceValue>,
+  paths: ReadonlyArray<string>,
+  targets: Targets,
+  options?: Handlers.ResolveIncludedOptions,
+) =>
+  Handlers.resolveIncluded(primary, Option.some(paths), targets, options).pipe(
+    Effect.flatMap((included) => Effect.fromOption(included)),
+  );
 
 const one = (type: string, id: string) => ({ data: { type, id } });
 const many = (type: string, ...values: ReadonlyArray<string>) => ({
@@ -110,12 +122,12 @@ const graph: ReadonlyArray<Handlers.ResourceValue> = [
 ];
 
 describe("Handlers.resolveIncluded — nothing requested", () => {
-  it.effect("resolves to undefined when no `include` was requested, so the member is omitted", () =>
+  it.effect("resolves to None when no `include` was requested, so the member is omitted", () =>
     Effect.gen(function* () {
       const db = store(graph);
       expect(
-        yield* Handlers.resolveIncluded(article1, undefined, db.targets("people")),
-      ).toBeUndefined();
+        yield* Handlers.resolveIncluded(article1, Option.none(), db.targets("people")),
+      ).toStrictEqual(Option.none());
       // and nothing was loaded to find that out
       expect(db.calls).toEqual([]);
     }),
@@ -126,20 +138,20 @@ describe("Handlers.resolveIncluded — nothing requested", () => {
     () =>
       Effect.gen(function* () {
         const db = store(graph);
-        expect(yield* Handlers.resolveIncluded(article1, [], db.targets("people"))).toEqual([]);
+        expect(yield* resolveSome(article1, [], db.targets("people"))).toEqual([]);
         // nothing to walk, so nothing loaded
         expect(db.calls).toEqual([]);
       }),
   );
 
-  it.effect("resolves to [] — not undefined — when the walk ran and came back empty", () =>
+  it.effect("resolves to [] — not None — when the walk ran and came back empty", () =>
     Effect.gen(function* () {
       const db = store(graph);
       const empty: Handlers.ResourceValue = { type: "articles", id: "7" };
-      expect(yield* Handlers.resolveIncluded(empty, ["author"], db.targets("people"))).toEqual([]);
+      expect(yield* resolveSome(empty, ["author"], db.targets("people"))).toEqual([]);
       // an empty page is the same statement
-      expect(yield* Handlers.resolveIncluded([], ["author"], db.targets("people"))).toEqual([]);
-      expect(yield* Handlers.resolveIncluded(null, ["author"], db.targets("people"))).toEqual([]);
+      expect(yield* resolveSome([], ["author"], db.targets("people"))).toEqual([]);
+      expect(yield* resolveSome(null, ["author"], db.targets("people"))).toEqual([]);
     }),
   );
 });
@@ -148,7 +160,7 @@ describe("Handlers.resolveIncluded — single level", () => {
   it.effect("resolves a to-one path", () =>
     Effect.gen(function* () {
       const db = store(graph);
-      const included = yield* Handlers.resolveIncluded(article1, ["author"], db.targets("people"));
+      const included = yield* resolveSome(article1, ["author"], db.targets("people"));
       expect(ids(included)).toEqual(["people:9"]);
       expect(db.log()).toEqual(["people:9"]);
     }),
@@ -157,7 +169,7 @@ describe("Handlers.resolveIncluded — single level", () => {
   it.effect("resolves a to-many path, in linkage order", () =>
     Effect.gen(function* () {
       const db = store(graph);
-      const included = yield* Handlers.resolveIncluded(article1, ["tags"], db.targets("tags"));
+      const included = yield* resolveSome(article1, ["tags"], db.targets("tags"));
       expect(ids(included)).toEqual(["tags:1", "tags:2"]);
       // one call for both tags, not one per tag
       expect(db.log()).toEqual(["tags:1,2"]);
@@ -167,7 +179,7 @@ describe("Handlers.resolveIncluded — single level", () => {
   it.effect("resolves several paths as one level, one call per type", () =>
     Effect.gen(function* () {
       const db = store(graph);
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         article1,
         ["author", "tags", "comments"],
         db.targets("people", "tags", "comments"),
@@ -181,7 +193,7 @@ describe("Handlers.resolveIncluded — single level", () => {
     Effect.gen(function* () {
       // people is the slowest loader, but `author` is the first path.
       const db = store(graph, { delay: { people: 20, tags: 5 } });
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         article1,
         ["author", "tags", "comments"],
         db.targets("people", "tags", "comments"),
@@ -195,7 +207,7 @@ describe("Handlers.resolveIncluded — multi level", () => {
   it.effect("walks a dotted path one level at a time", () =>
     Effect.gen(function* () {
       const db = store(graph);
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         article1,
         ["comments.author"],
         db.targets("comments", "people"),
@@ -209,7 +221,7 @@ describe("Handlers.resolveIncluded — multi level", () => {
   it.effect("walks three levels with one call per type per level", () =>
     Effect.gen(function* () {
       const db = store(graph);
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         article1,
         ["comments.author.employer"],
         db.targets("comments", "people", "companies"),
@@ -229,7 +241,7 @@ describe("Handlers.resolveIncluded — multi level", () => {
   it.effect("charges nothing extra for a path that is another path's prefix", () =>
     Effect.gen(function* () {
       const db = store(graph);
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         article1,
         ["comments", "comments.author"],
         db.targets("comments", "people"),
@@ -242,11 +254,7 @@ describe("Handlers.resolveIncluded — multi level", () => {
   it.effect("charges nothing for a repeated path", () =>
     Effect.gen(function* () {
       const db = store(graph);
-      const included = yield* Handlers.resolveIncluded(
-        article1,
-        ["author", "author"],
-        db.targets("people"),
-      );
+      const included = yield* resolveSome(article1, ["author", "author"], db.targets("people"));
       expect(ids(included)).toEqual(["people:9"]);
       expect(db.log()).toEqual(["people:9"]);
     }),
@@ -278,7 +286,7 @@ describe("Handlers.resolveIncluded — batching is per level, not per resource",
   it.effect("issues one call per level over a whole page, whatever the page size", () =>
     Effect.gen(function* () {
       const db = store([...people, ...companies]);
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         page,
         ["author.employer"],
         db.targets("people", "companies"),
@@ -299,7 +307,7 @@ describe("Handlers.resolveIncluded — batching is per level, not per resource",
   it.effect("scales with distinct resources, not with references", () =>
     Effect.gen(function* () {
       const db = store([...people, ...companies]);
-      const small = yield* Handlers.resolveIncluded(
+      const small = yield* resolveSome(
         page.slice(0, 2),
         ["author.employer"],
         db.targets("people", "companies"),
@@ -339,11 +347,11 @@ describe("Handlers.resolveIncluded — batching is per level, not per resource",
       };
       const paths = ["author", "tags", "comments"];
 
-      yield* Handlers.resolveIncluded(primary, paths, targets, { concurrency: 1 });
+      yield* resolveSome(primary, paths, targets, { concurrency: 1 });
       expect(inFlight.peak).toBe(1);
 
       inFlight.peak = 0;
-      yield* Handlers.resolveIncluded(primary, paths, targets);
+      yield* resolveSome(primary, paths, targets);
       // the default is unbounded: the level's three types load together
       expect(inFlight.peak).toBe(3);
     }),
@@ -355,7 +363,7 @@ describe("Handlers.resolveIncluded — deduplication", () => {
     Effect.gen(function* () {
       // A diamond: people:9 is both the article's author and comments:5's author.
       const db = store(graph);
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         article1,
         ["author", "comments.author"],
         db.targets("people", "comments"),
@@ -374,11 +382,7 @@ describe("Handlers.resolveIncluded — deduplication", () => {
         id: "2",
         relationships: { author: one("people", "9") },
       };
-      const included = yield* Handlers.resolveIncluded(
-        [article1, other],
-        ["author"],
-        db.targets("people"),
-      );
+      const included = yield* resolveSome([article1, other], ["author"], db.targets("people"));
       expect(ids(included)).toEqual(["people:9"]);
       expect(db.log()).toEqual(["people:9"]);
     }),
@@ -390,7 +394,7 @@ describe("Handlers.resolveIncluded — deduplication", () => {
       // comment must not emit a second resource object for it (the spec's
       // one-object-per-(type, id) rule spans the whole document).
       const db = store(graph);
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         article1,
         ["comments.article"],
         db.targets("comments", "articles"),
@@ -409,7 +413,7 @@ describe("Handlers.resolveIncluded — deduplication", () => {
         id: "2",
         relationships: { comments: many("comments", "5") },
       };
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         [article1, other],
         ["comments.article"],
         db.targets("comments", "articles"),
@@ -442,7 +446,7 @@ describe("Handlers.resolveIncluded — cycles", () => {
   it.effect("terminates on a genuinely cyclic graph without duplicating anything", () =>
     Effect.gen(function* () {
       const db = store(cyclic);
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         primary,
         ["comments.article.comments.article"],
         db.targets("comments", "articles"),
@@ -464,7 +468,7 @@ describe("Handlers.resolveIncluded — cycles", () => {
         { type: "articles", id: "300", relationships: { comments: many("comments", "300") } },
       ];
       const db = store(selfReferential);
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         selfReferential[1],
         ["comments.article.comments.article.comments"],
         db.targets("comments", "articles"),
@@ -486,7 +490,7 @@ describe("Handlers.resolveIncluded — cycles", () => {
         id: "1",
         relationships: { latest: one("articles", "100") },
       };
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         person,
         ["latest.comments.article.comments"],
         db.targets("articles", "comments"),
@@ -509,7 +513,7 @@ describe("Handlers.resolveIncluded — depth cap", () => {
   it.effect("walks no further than `depth` hops", () =>
     Effect.gen(function* () {
       const db = store(graph);
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         article1,
         ["comments.author.employer"],
         db.targets("comments", "people", "companies"),
@@ -527,7 +531,7 @@ describe("Handlers.resolveIncluded — depth cap", () => {
     Effect.gen(function* () {
       const db = store(graph);
       const deep = ["comments.article.comments.article.comments.article.comments"];
-      yield* Handlers.resolveIncluded(article1, deep, db.targets("comments", "articles"), {
+      yield* resolveSome(article1, deep, db.targets("comments", "articles"), {
         depth: 1,
       });
       expect(db.log()).toEqual(["comments:5,12"]);
@@ -539,7 +543,7 @@ describe("Handlers.resolveIncluded — depth cap", () => {
       const db = store(graph);
       // The fourth hop *would* resolve — holdings:h1 exists and has a loader —
       // so reaching it is the failure this asserts against.
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         article1,
         ["comments.author.employer.holding"],
         db.targets("comments", "people", "companies", "holdings"),
@@ -554,7 +558,7 @@ describe("Handlers.resolveIncluded — depth cap", () => {
       expect(db.log()).toEqual(["comments:5,12", "people:9,2", "companies:acme"]);
 
       // …and four hops when the caller asks for four
-      const deeper = yield* Handlers.resolveIncluded(
+      const deeper = yield* resolveSome(
         article1,
         ["comments.author.employer.holding"],
         db.targets("comments", "people", "companies", "holdings"),
@@ -567,9 +571,9 @@ describe("Handlers.resolveIncluded — depth cap", () => {
   it.effect("resolves nothing at a depth below one", () =>
     Effect.gen(function* () {
       const db = store(graph);
-      expect(
-        yield* Handlers.resolveIncluded(article1, ["author"], db.targets("people"), { depth: 0 }),
-      ).toEqual([]);
+      expect(yield* resolveSome(article1, ["author"], db.targets("people"), { depth: 0 })).toEqual(
+        [],
+      );
       expect(db.calls).toEqual([]);
     }),
   );
@@ -579,11 +583,7 @@ describe("Handlers.resolveIncluded — unresolvable references", () => {
   it.effect("drops a reference whose type has no target", () =>
     Effect.gen(function* () {
       const db = store(graph);
-      const included = yield* Handlers.resolveIncluded(
-        article1,
-        ["author", "tags"],
-        db.targets("people"),
-      );
+      const included = yield* resolveSome(article1, ["author", "tags"], db.targets("people"));
       expect(ids(included)).toEqual(["people:9"]);
       expect(db.log()).toEqual(["people:9"]);
     }),
@@ -593,7 +593,7 @@ describe("Handlers.resolveIncluded — unresolvable references", () => {
     Effect.gen(function* () {
       // comments:12's author is people:2, which the store does not hold.
       const db = store(graph.filter((row) => !(row.type === "people" && row.id === "2")));
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         article1,
         ["comments.author"],
         db.targets("comments", "people"),
@@ -606,7 +606,7 @@ describe("Handlers.resolveIncluded — unresolvable references", () => {
   it.effect("drops a reference to a relationship the resource does not carry", () =>
     Effect.gen(function* () {
       const db = store(graph);
-      const included = yield* Handlers.resolveIncluded(article1, ["editor"], db.targets("people"));
+      const included = yield* resolveSome(article1, ["editor"], db.targets("people"));
       expect(included).toEqual([]);
       expect(db.calls).toEqual([]);
     }),
@@ -620,9 +620,9 @@ describe("Handlers.resolveIncluded — unresolvable references", () => {
         id: "3",
         relationships: { author: { data: null }, tags: { data: [] } },
       };
-      expect(
-        yield* Handlers.resolveIncluded(bare, ["author", "tags"], db.targets("people", "tags")),
-      ).toEqual([]);
+      expect(yield* resolveSome(bare, ["author", "tags"], db.targets("people", "tags"))).toEqual(
+        [],
+      );
       expect(db.calls).toEqual([]);
     }),
   );
@@ -635,9 +635,7 @@ describe("Handlers.resolveIncluded — unresolvable references", () => {
         id: "4",
         relationships: { comments: Handlers.paginatedRelationship("articles", "4", "comments") },
       };
-      expect(
-        yield* Handlers.resolveIncluded(paginated, ["comments"], db.targets("comments")),
-      ).toEqual([]);
+      expect(yield* resolveSome(paginated, ["comments"], db.targets("comments"))).toEqual([]);
       expect(db.calls).toEqual([]);
     }),
   );
@@ -653,7 +651,7 @@ describe("Handlers.resolveIncluded — unresolvable references", () => {
             { type: "people", id: "404" },
           ])) as Handlers.IncludeTarget,
       };
-      const included = yield* Handlers.resolveIncluded(article1, ["author"], targets);
+      const included = yield* resolveSome(article1, ["author"], targets);
       expect(ids(included)).toEqual(["people:9"]);
       expect(() => Handlers.data(article1, { included })).not.toThrow();
     }),
@@ -664,7 +662,7 @@ describe("Handlers.resolveIncluded — unresolvable references", () => {
       const targets = {
         people: (() => Effect.succeed([{ type: "tags", id: "9" }])) as Handlers.IncludeTarget,
       };
-      expect(yield* Handlers.resolveIncluded(article1, ["author"], targets)).toEqual([]);
+      expect(yield* resolveSome(article1, ["author"], targets)).toEqual([]);
     }),
   );
 });
@@ -682,9 +680,7 @@ describe("Handlers.resolveIncluded — loader faults", () => {
         Unavailable
       >,
     };
-    const exit = await Effect.runPromiseExit(
-      Handlers.resolveIncluded(article1, ["author"], targets),
-    );
+    const exit = await Effect.runPromiseExit(resolveSome(article1, ["author"], targets));
     expect(exit._tag).toBe("Failure");
   });
 
@@ -698,9 +694,7 @@ describe("Handlers.resolveIncluded — loader faults", () => {
         Unavailable
       >,
     };
-    const exit = await Effect.runPromiseExit(
-      Handlers.resolveIncluded(article1, ["comments.author"], targets),
-    );
+    const exit = await Effect.runPromiseExit(resolveSome(article1, ["comments.author"], targets));
     expect(exit._tag).toBe("Failure");
     expect(db.log()).toEqual(["comments:5,12"]);
   });
@@ -710,12 +704,17 @@ describe("Handlers.resolveIncluded — composing a document", () => {
   it.effect("feeds `Handlers.data`, whose linkage check passes by construction", () =>
     Effect.gen(function* () {
       const db = store(graph);
-      const document = yield* Handlers.resolveIncluded(
+      const document = yield* resolveSome(
         article1,
         ["author", "comments.author"],
         db.targets("people", "comments"),
       ).pipe(Effect.map((included) => Handlers.data(article1, { included, self: "/articles/1" })));
-      expect(ids(document.included)).toEqual(["people:9", "comments:5", "comments:12", "people:2"]);
+      expect(ids(document.included ?? [])).toEqual([
+        "people:9",
+        "comments:5",
+        "comments:12",
+        "people:2",
+      ]);
       expect(document.links).toEqual({ self: "/articles/1" });
     }),
   );
@@ -728,16 +727,12 @@ describe("Handlers.resolveIncluded — composing a document", () => {
         id: "2",
         relationships: { author: one("people", "2") },
       };
-      const document = yield* Handlers.resolveIncluded(
-        [article1, other],
-        ["author"],
-        db.targets("people"),
-      ).pipe(
+      const document = yield* resolveSome([article1, other], ["author"], db.targets("people")).pipe(
         Effect.map((included) =>
           Handlers.collection([article1, other], { included, self: "/articles" }),
         ),
       );
-      expect(ids(document.included)).toEqual(["people:9", "people:2"]);
+      expect(ids(document.included ?? [])).toEqual(["people:9", "people:2"]);
       expect(db.log()).toEqual(["people:9,2"]);
     }),
   );
@@ -747,7 +742,7 @@ describe("Handlers.resolveIncluded — composing a document", () => {
   it.effect("keeps the linkage check live: a transform that strips `relationships` is caught", () =>
     Effect.gen(function* () {
       const db = store(graph);
-      const included = yield* Handlers.resolveIncluded(
+      const included = yield* resolveSome(
         article1,
         ["comments.author"],
         db.targets("people", "comments"),
@@ -774,8 +769,8 @@ describe("Handlers.resolveIncluded — composing a document", () => {
         ids(
           Handlers.data(article1, {
             included,
-            onResource: Handlers.withMeta(() => ({ seen: true })),
-          }).included,
+            onResource: Handlers.withMeta(() => Option.some({ seen: true })),
+          }).included ?? [],
         ),
       ).toEqual(["comments:5", "comments:12", "people:9", "people:2"]);
     }),
@@ -786,9 +781,16 @@ describe("Handlers.resolveIncluded — composing a document", () => {
       const db = store(graph);
       const document = yield* Handlers.resolveIncluded(
         article1,
-        undefined,
+        Option.none(),
         db.targets("people"),
-      ).pipe(Effect.map((included) => Handlers.data(article1, { included })));
+      ).pipe(
+        Effect.map(
+          Option.match({
+            onNone: () => Handlers.data(article1),
+            onSome: (included) => Handlers.data(article1, { included }),
+          }),
+        ),
+      );
       expect(document).toEqual({ data: article1 });
       expect("included" in document).toBe(false);
     }),
@@ -800,11 +802,9 @@ describe("Handlers.resolveIncluded — composing a document", () => {
       // document with an `included` key, even an empty one. `[]` from the walk
       // reaches the wire as `included: []`, not as an omitted member.
       const db = store(graph);
-      const document = yield* Handlers.resolveIncluded(
-        article1,
-        ["editor"],
-        db.targets("people"),
-      ).pipe(Effect.map((included) => Handlers.data(article1, { included })));
+      const document = yield* resolveSome(article1, ["editor"], db.targets("people")).pipe(
+        Effect.map((included) => Handlers.data(article1, { included })),
+      );
       expect(document).toEqual({ data: article1, included: [] });
     }),
   );
@@ -852,16 +852,20 @@ describe("Handlers.resolveIncluded — types", () => {
 
   it.effect("resolves to the union of the targets' resource types", () =>
     Effect.gen(function* () {
-      const resolved = Handlers.resolveIncluded(article, ["author", "comments.author"], {
-        people: () => Effect.succeed([person]),
-        comments: () => Effect.succeed([comment]),
-      });
+      const resolved = Handlers.resolveIncluded(
+        article,
+        Option.some(["author", "comments.author"]),
+        {
+          people: () => Effect.succeed([person]),
+          comments: () => Effect.succeed([comment]),
+        },
+      );
 
       expectTypeOf(resolved).toEqualTypeOf<
-        Effect.Effect<ReadonlyArray<typeof Person.Type | typeof Comment.Type> | undefined>
+        Effect.Effect<Option.Option<ReadonlyArray<typeof Person.Type | typeof Comment.Type>>>
       >();
 
-      const included = yield* resolved;
+      const included = yield* Effect.fromOption(yield* resolved);
       expect(ids(included)).toEqual(["people:9", "comments:5"]);
       // …and it is exactly what the document builder wants
       expect(Handlers.data(article, { included }).included).toEqual(included);
@@ -869,7 +873,7 @@ describe("Handlers.resolveIncluded — types", () => {
   );
 
   it("unions the targets' error and service channels", () => {
-    const resolved = Handlers.resolveIncluded(article, ["author", "comments"], {
+    const resolved = Handlers.resolveIncluded(article, Option.some(["author", "comments"]), {
       people: (): Effect.Effect<ReadonlyArray<typeof Person.Type>, Unavailable> =>
         Effect.fail(new Unavailable()),
       comments: (): Effect.Effect<ReadonlyArray<typeof Comment.Type>, never, Vault> =>
@@ -877,7 +881,7 @@ describe("Handlers.resolveIncluded — types", () => {
     });
     expectTypeOf(resolved).toEqualTypeOf<
       Effect.Effect<
-        ReadonlyArray<typeof Person.Type | typeof Comment.Type> | undefined,
+        Option.Option<ReadonlyArray<typeof Person.Type | typeof Comment.Type>>,
         Unavailable,
         Vault
       >

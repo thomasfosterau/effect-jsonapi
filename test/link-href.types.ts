@@ -15,6 +15,7 @@
  * unused-local error can never stand in for the assertion an
  * `@ts-expect-error` expects.
  */
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Document, Resource } from "@thomasfosterau/effect-jsonapi";
 
@@ -37,18 +38,27 @@ const rawSelf: string | undefined = article.links?.self;
 // The fix: `Document.href` gets a wire string without redeclaring `Article`
 // ---------------------------------------------------------------------------
 
-const self: string | undefined = Document.href(article.links?.self);
+const self: Option.Option<string> = Option.map(
+  Option.fromUndefinedOr(article.links?.self),
+  Document.href,
+);
 
 // `href` genuinely narrows to `string` — it never leaves the result as a `URL`.
-// @ts-expect-error -- `Document.href` returns `string | undefined`, never `URL`
-const selfAsUrl: URL | undefined = Document.href(article.links?.self);
+// @ts-expect-error -- `Document.href` returns `string`, never `URL`
+const selfAsUrl: Option.Option<URL> = Option.map(
+  Option.fromUndefinedOr(article.links?.self),
+  Document.href,
+);
 
-// A present link (no `| undefined`) narrows to a bare `string`, not
-// `string | undefined` — the overload for a definite `Link` drops the guard.
+// A present link narrows to a bare `string`.
 declare const presentLink: Document.Link;
 const presentHref: string = Document.href(presentLink);
 // @ts-expect-error -- a definite `Link` never yields `undefined`
 const presentHrefWiden: undefined = Document.href(presentLink);
+
+// An absent link is not a `Link`: it goes through `Option` instead.
+// @ts-expect-error -- `href` no longer accepts `undefined`
+Document.href(article.links?.self);
 
 // `href` only accepts what a `Link` can be — not arbitrary input.
 // @ts-expect-error -- `42` is not a `Link`

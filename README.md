@@ -1292,7 +1292,7 @@ JSON:API v1.1 specifies no idempotency mechanism. The header name and the three 
 
 ```ts
 import { Handlers } from "@thomasfosterau/effect-jsonapi"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 
 const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
@@ -1303,10 +1303,13 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       loadArticle(params.id).pipe(
         Effect.flatMap((article) =>
           // walks `?include=` one level at a time, batched per type
-          Handlers.resolveIncluded(article, query.include, targets).pipe(
-            Effect.map((included) =>
-              Handlers.data(article, { included, self: `/articles/${article.id}` })
-            )
+          // `None` when the request carried no `?include=`: leave the member out
+          Handlers.resolveIncluded(article, Option.fromUndefinedOr(query.include), targets).pipe(
+            Effect.map(Option.match({
+              onNone: () => Handlers.data(article, { self: `/articles/${article.id}` }),
+              onSome: (included) =>
+                Handlers.data(article, { included, self: `/articles/${article.id}` })
+            }))
           )
         )
       ))
@@ -1329,7 +1332,7 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
 )
 ```
 
-The document builders (`Handlers.data` / `Handlers.collection`) enforce the compound-document rules at runtime: `included` is **deduplicated** by `(type, id)` — against itself and against the primary `data`, so a resource that is both a hit and an include target is emitted once, as primary data — and checked for **full linkage** (every included resource must be reachable from the primary data through resource linkage), with the spec's one exemption: a relationship a sparse fieldset excludes still counts as the linkage it would otherwise carry ([§Compound Documents](https://jsonapi.org/format/1.1/#document-compound-documents), [#494](https://github.com/thomasfosterau/effect-jsonapi/issues/494); see [the per-resource transform pass](#the-per-resource-transform-pass-onresource)). The builders check the value they return; encoding through the endpoint's schema then drops any relationship the resource does not declare, so `Middleware.SchemaErrorsLive` checks full linkage again on the document as encoded and answers a violation with a JSON:API 500 (#250). Any `included` array is emitted, even an empty one or one the dedupe empties — a response to a request carrying `include` MUST have an `included` key, "even if that `included` key holds an empty array" ([§Fetching Includes](https://jsonapi.org/format/1.1/#fetching-includes)) — so pass an array whenever the request carried `include`, and `undefined` when it did not, which omits the member. Their `onResource` option applies per-resource processing — sparse fieldsets, computed `meta` — uniformly across the whole document ([below](#the-per-resource-transform-pass-onresource)).
+The document builders (`Handlers.data` / `Handlers.collection`) enforce the compound-document rules at runtime: `included` is **deduplicated** by `(type, id)` — against itself and against the primary `data`, so a resource that is both a hit and an include target is emitted once, as primary data — and checked for **full linkage** (every included resource must be reachable from the primary data through resource linkage), with the spec's one exemption: a relationship a sparse fieldset excludes still counts as the linkage it would otherwise carry ([§Compound Documents](https://jsonapi.org/format/1.1/#document-compound-documents), [#494](https://github.com/thomasfosterau/effect-jsonapi/issues/494); see [the per-resource transform pass](#the-per-resource-transform-pass-onresource)). The builders check the value they return; encoding through the endpoint's schema then drops any relationship the resource does not declare, so `Middleware.SchemaErrorsLive` checks full linkage again on the document as encoded and answers a violation with a JSON:API 500 (#250). Any `included` array is emitted, even an empty one or one the dedupe empties — a response to a request carrying `include` MUST have an `included` key, "even if that `included` key holds an empty array" ([§Fetching Includes](https://jsonapi.org/format/1.1/#fetching-includes)) — so pass an array whenever the request carried `include`, and leave the option out when it did not, which omits the member. Their `onResource` option applies per-resource processing — sparse fieldsets, computed `meta` — uniformly across the whole document ([below](#the-per-resource-transform-pass-onresource)).
 
 ### Resolving `included` — one batch per level
 
@@ -1344,8 +1347,11 @@ const targets = {
   comments: (ids: ReadonlyArray<string>) => db.comments.byIds(ids),
 };
 
-Handlers.resolveIncluded(page, query.include, targets, { concurrency: 4, depth: 2 });
-// → Effect<ReadonlyArray<Person | Tag | Comment> | undefined, …>
+Handlers.resolveIncluded(page, Option.fromUndefinedOr(query.include), targets, {
+  concurrency: 4,
+  depth: 2,
+});
+// → Effect<Option<ReadonlyArray<Person | Tag | Comment>>, …>
 ```
 
 What it guarantees, and why each one matters:
@@ -1358,7 +1364,7 @@ What it guarantees, and why each one matters:
 | **Cycles terminate** | A graph that loops (`articles → comments → articles`) revisits resources the document already holds, which are never re-loaded |
 | **Depth-capped** | `depth` (default `3`, the deepest path `Query.Include` legalises) bounds the number of hops. §7.1 leaves the bound implementation-defined and each hop is another round of loader calls, so this is a denial-of-service boundary, not just an ergonomic one |
 | **Unresolvable refs dropped** | A type with no target, an id the batch didn't return, a row this viewer may not see: all normal outcomes, simply absent from `included`. A loader's own failure propagates and fails the document |
-| **`undefined` when unasked** | So the builders omit the member. `[]` is the different statement "your walk resolved to nothing" (a bare `?include=`, an empty path list, answers it too), which they emit as `included: []` |
+| **`Option.none()` when unasked** | So the caller omits the member. `[]` is the different statement "your walk resolved to nothing" (a bare `?include=`, an empty path list, answers it too), which they emit as `included: []` |
 
 Because every resource is reached _through_ a document resource's linkage, full linkage holds by construction **for the array the resolver returns**: handed unchanged to `Handlers.data` / `Handlers.collection` with the same primary data, the builders' check is a guard over the resolver's own output rather than a live constraint. It is live again when anything between the walk and the document changes linkage, because the check runs on the resources the document actually emits:
 
@@ -1506,7 +1512,7 @@ Handlers.data(article, {
   self: `/articles/${article.id}`,
   onResource: Handlers.compose(
     Handlers.project(query.fields), // ?fields[articles]=title
-    Handlers.withMeta((r) => permissions(viewer, r)), // { canEdit, canDelete }
+    Handlers.withMeta((r) => Option.some(permissions(viewer, r))), // { canEdit, canDelete }
   ),
 });
 ```
@@ -1518,7 +1524,7 @@ The same option is on `Handlers.collection`, on `Handlers.linkage` (where it rea
 | Transform | What it does |
 | --- | --- |
 | `Handlers.project(fields)` | Sparse fieldsets: narrows `attributes` and `relationships` to the names requested for the resource's type. |
-| `Handlers.withMeta(compute)` | Merges computed `meta` over the resource's own. |
+| `Handlers.withMeta(compute)` | Merges computed `meta` over the resource's own; `compute` returns an `Option`, `Option.none()` for a resource it has nothing to say about. |
 | `Handlers.compose(first, second)` | One pass doing both. |
 | `Handlers.transform<Lambda>(f)` | Anything else, with its type-level effect declared. |
 
