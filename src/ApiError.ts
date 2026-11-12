@@ -29,6 +29,7 @@
  *
  * @since 0.1.0
  */
+import * as R from "effect/Record";
 import type * as Cause from "effect/Cause";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
@@ -281,7 +282,7 @@ const makeWire = (
                         ? []
                         : [[key, fields[key]] as const],
                     ),
-                    { onEmpty: () => undefined, onNonEmpty: Object.fromEntries },
+                    { onEmpty: () => undefined, onNonEmpty: R.fromEntries },
                   ),
                 ),
               },
@@ -341,7 +342,7 @@ export const make =
     config: Config<Fields>,
   ): ApiErrorClass<Self, Tag, Fields> => {
     const fields = (config.fields ?? {}) as Fields;
-    const fieldKeys = Object.keys(fields);
+    const fieldKeys = R.keys(fields);
     const code = config.code ?? snakeCase(tag);
     const detail = P.isFunction(config.detail)
       ? config.detail

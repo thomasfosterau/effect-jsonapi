@@ -100,6 +100,10 @@
  *
  * @since 0.1.0
  */
+import * as HashMap from "effect/HashMap";
+import * as HashSet from "effect/HashSet";
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -268,7 +272,7 @@ export interface NegotiationOptions extends ServerNegotiationOptions {}
 export const mediaType = (options?: NegotiationOptions): string =>
   mediaTypeWith(options?.extensions);
 
-const MUTATING_METHODS: ReadonlySet<string> = new Set(["POST", "PATCH", "PUT", "DELETE"]);
+const MUTATING_METHODS: HashSet.HashSet<string> = HashSet.make("POST", "PATCH", "PUT", "DELETE");
 
 /**
  * Whether a request method mutates state, and therefore carries a
@@ -297,7 +301,7 @@ const MUTATING_METHODS: ReadonlySet<string> = new Set(["POST", "PATCH", "PUT", "
  * @category guards
  */
 export const isMutatingMethod = (method: string): boolean =>
-  MUTATING_METHODS.has(method.toUpperCase());
+  HashSet.has(MUTATING_METHODS, method.toUpperCase());
 
 // A `Content-Type` the transform may relabel: an absent one, one already at the
 // JSON:API media type (possibly with different `ext` parameters), or the
@@ -941,7 +945,7 @@ export type LooseInput<T> = { readonly [K in keyof T]?: T[K] | undefined };
 export const stripUndefined = <T extends object>(
   input: T,
 ): { readonly [K in keyof T]: Exclude<T[K], undefined> } =>
-  Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as {
+  R.fromEntries(R.toEntries(input).filter(([, value]) => value !== undefined)) as {
     readonly [K in keyof T]: Exclude<T[K], undefined>;
   };
 
@@ -986,7 +990,7 @@ export const decodeInput =
  * @since 0.16.0
  * @category models
  */
-export type IncludedIndex = ReadonlyMap<string, IncludedResource>;
+export type IncludedIndex = HashMap.HashMap<string, IncludedResource>;
 
 const refKey = (ref: { readonly type: string; readonly id: string }): string =>
   `${ref.type}:${ref.id}`;
@@ -1000,7 +1004,10 @@ const refKey = (ref: { readonly type: string; readonly id: string }): string =>
  */
 export const indexIncluded = (
   included: ReadonlyArray<IncludedResource> | undefined,
-): IncludedIndex => new Map((included ?? []).map((resource) => [refKey(resource), resource]));
+): IncludedIndex =>
+  HashMap.fromIterable(
+    Arr.map(included ?? [], (resource) => [refKey(resource), resource] as const),
+  );
 
 /**
  * The minimum shape a resource value exposes for its linkage to be read: a
@@ -1033,8 +1040,7 @@ const lookup = (
   index: IncludedIndex,
 ): ReadonlyArray<IncludedResource> =>
   refs.flatMap((ref) => {
-    const found = index.get(refKey(ref));
-    return found === undefined ? [] : [found];
+    return Arr.fromOption(HashMap.get(index, refKey(ref)));
   });
 
 /**
@@ -1131,12 +1137,12 @@ export const walk = <R extends Any, const P extends IncludePathsTo<R, 3>>(
 ): ReadonlyArray<PathTarget<R, P>["Type"]> => {
   const roots: ReadonlyArray<LinkedResource | undefined> = [data];
   const level = Arr.reduce(path.split("."), roots, (parents, segment) => {
-    const seen = new Set<string>();
+    const seen = MutableHashSet.empty<string>();
     return parents.flatMap((parent) =>
       lookup(refsOf(parent, segment), index).filter((found) => {
         const key = refKey(found);
-        if (seen.has(key)) return false;
-        seen.add(key);
+        if (MutableHashSet.has(seen, key)) return false;
+        MutableHashSet.add(seen, key);
         return true;
       }),
     );
@@ -1337,7 +1343,7 @@ export const pageHref = (
 export type PageFilters = { readonly [key: string]: string | undefined };
 
 const appliedFilters = (filters: PageFilters): Array<[string, string]> =>
-  Object.entries(filters).flatMap(([key, value]): Array<[string, string]> =>
+  R.toEntries(filters).flatMap(([key, value]): Array<[string, string]> =>
     value === undefined || value === "" ? [] : [[key, value]],
   );
 
@@ -1490,18 +1496,16 @@ export const pageWindow = (cursor: PageCursor, total: number, siblings = 1): Pag
   const offset = Math.max(0, cursor.offset);
   const pageCount = Math.max(1, Math.ceil(Math.max(0, total) / limit));
   const current = Math.min(pageCount, Math.floor(offset / limit) + 1);
-  const wanted = [
-    ...new Set(
-      Arr.sort(
-        [
-          1,
-          pageCount,
-          ...Array.from({ length: siblings * 2 + 1 }, (_, i) => current - siblings + i),
-        ].filter((n) => n >= 1 && n <= pageCount),
-        Order.Number,
-      ),
+  const wanted = Arr.dedupe(
+    Arr.sort(
+      [
+        1,
+        pageCount,
+        ...Array.from({ length: siblings * 2 + 1 }, (_, i) => current - siblings + i),
+      ].filter((n) => n >= 1 && n <= pageCount),
+      Order.Number,
     ),
-  ];
+  );
   const items = wanted.flatMap((n, i): ReadonlyArray<PageWindowItem> => {
     const entry: PageWindowItem = {
       kind: "page",

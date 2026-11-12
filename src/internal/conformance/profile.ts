@@ -26,6 +26,7 @@
  * @since 0.15.0
  * @internal
  */
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -145,7 +146,7 @@ const learnField = (
     );
     return Option.getOrUndefined(
       Option.flatMap(attributes, (members) =>
-        Arr.findFirst(Object.entries(members), ([, value]) => accepts(value)).pipe(
+        Arr.findFirst(R.toEntries(members), ([, value]) => accepts(value)).pipe(
           Option.map(([field, value]) => ({ field, value })),
         ),
       ),
@@ -708,7 +709,7 @@ const learnFamilies = (ctx: Context, endpoint: Discovered, path: string) =>
     if (Option.isNone(resource)) return out;
     const first = resource.value;
     const attributes = first["attributes"];
-    const attributeKeys = isJsonObject(attributes) ? Object.keys(attributes) : [];
+    const attributeKeys = isJsonObject(attributes) ? R.keys<string, Schema.Json>(attributes) : [];
     const type = first["type"];
     if (
       Predicate.isString(type) &&
@@ -724,7 +725,7 @@ const learnFamilies = (ctx: Context, endpoint: Discovered, path: string) =>
     if (endpoint.queryKeys.includes("include") && isJsonObject(relationships)) {
       // Only relationships carrying inline linkage are includable; a paginated
       // relationship is links-only and `?include=` of it is a legitimate 400.
-      const includable = Object.keys(relationships).filter((name) => {
+      const includable = R.keys<string, Schema.Json>(relationships).filter((name) => {
         const relationship = relationships[name];
         return isJsonObject(relationship) && "data" in relationship;
       });

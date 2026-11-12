@@ -14,6 +14,8 @@
  * @since 0.15.0
  * @internal
  */
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
@@ -433,7 +435,7 @@ const includableOf = (body: Body): ReadonlyArray<string> =>
     onSome: (first) => {
       const relationships = first["relationships"];
       if (!isJsonObject(relationships)) return [];
-      return Object.keys(relationships).filter((name) => {
+      return Rec.keys<string, Schema.Json>(relationships).filter((name) => {
         const relationship = relationships[name];
         return isJsonObject(relationship) && "data" in relationship;
       });
@@ -568,7 +570,7 @@ const topLevelMembers: RuleImpl = {
               finding(topLevelMembers.rule, {
                 detail: `${where} answered a document with none of \`data\`, \`errors\`, \`meta\``,
                 expected: "at least one of `data`, `errors`, `meta`",
-                observed: `top-level members: ${Object.keys(body).join(", ") || "(none)"}`,
+                observed: `top-level members: ${Rec.keys<string, Schema.Json>(body).join(", ") || "(none)"}`,
                 probe: observation.probe,
               }),
             ];
@@ -593,7 +595,7 @@ const dataAndErrorsExclusive: RuleImpl = {
               finding(dataAndErrorsExclusive.rule, {
                 detail: `${where} answered a document carrying both \`data\` and \`errors\``,
                 expected: "one of `data` / `errors`, never both",
-                observed: `top-level members: ${Object.keys(body).join(", ")}`,
+                observed: `top-level members: ${Rec.keys<string, Schema.Json>(body).join(", ")}`,
                 probe: observation.probe,
               }),
             ]
@@ -619,7 +621,7 @@ const includedRequiresData: RuleImpl = {
               finding(includedRequiresData.rule, {
                 detail: `${where} answered \`included\` with no top-level \`data\``,
                 expected: "`included` only alongside `data`",
-                observed: `top-level members: ${Object.keys(body).join(", ")}`,
+                observed: `top-level members: ${Rec.keys<string, Schema.Json>(body).join(", ")}`,
                 probe: observation.probe,
               }),
             ]
@@ -676,13 +678,13 @@ const noDuplicateResources: RuleImpl = {
       inapplicable: "no endpoint returned a document carrying more than one resource object",
       check: (body, observation, where) => {
         const resources = resourceObjectsOf(Option.some(body));
-        const seen = new Map<string, string>();
+        const seen = MutableHashMap.empty<string, string>();
         const duplicates: Array<string> = [];
         Arr.forEach(resources, ({ pointer, resource }) => {
           const key = identity(resource);
           if (key === undefined) return;
-          const first = seen.get(key);
-          if (first === undefined) seen.set(key, pointer);
+          const first = Option.getOrUndefined(MutableHashMap.get(seen, key));
+          if (first === undefined) MutableHashMap.set(seen, key, pointer);
           else duplicates.push(`${resourceLabel(resource)} at ${first} and ${pointer}`);
         });
         return Arr.isReadonlyArrayEmpty(duplicates)
@@ -1017,7 +1019,7 @@ const errorSourceDiscrimination: RuleImpl = {
       }
       const findings: Array<Finding> = [];
       Arr.forEach(sources, ({ observation, source }) => {
-        Arr.forEach(Object.keys(source), (key) => {
+        Arr.forEach(Rec.keys<string, Schema.Json>(source), (key) => {
           if (key !== "pointer" && key !== "parameter" && key !== "header") {
             findings.push(
               finding(errorSourceDiscrimination.rule, {
@@ -1115,8 +1117,8 @@ const fieldNamesOf = (resource: Readonly<Record<string, unknown>>): ReadonlyArra
   const attributes = resource["attributes"];
   const relationships = resource["relationships"];
   return [
-    ...(isRecord(attributes) ? Object.keys(attributes) : []),
-    ...(isRecord(relationships) ? Object.keys(relationships) : []),
+    ...(isRecord(attributes) ? Rec.keys(attributes) : []),
+    ...(isRecord(relationships) ? Rec.keys(relationships) : []),
   ];
 };
 
@@ -1125,12 +1127,16 @@ const fieldNamesOf = (resource: Readonly<Record<string, unknown>>): ReadonlyArra
  * types that actually appear in the slot under test can decide a projection
  * rule; anything else would be a pass over an empty set.
  */
-const fieldsByType = (body: Body, where: Slot): Map<string, ReadonlyArray<string>> => {
-  const byType = new Map<string, ReadonlyArray<string>>();
+const fieldsByType = (
+  body: Body,
+  where: Slot,
+): MutableHashMap.MutableHashMap<string, ReadonlyArray<string>> => {
+  const byType = MutableHashMap.empty<string, ReadonlyArray<string>>();
   Arr.forEach(resourcesOf(body), ({ pointer, resource }) => {
     if (!inSlot(pointer, where)) return;
     const type = resource["type"];
-    if (P.isString(type) && !byType.has(type)) byType.set(type, fieldNamesOf(resource));
+    if (P.isString(type) && !MutableHashMap.has(byType, type))
+      MutableHashMap.set(byType, type, fieldNamesOf(resource));
   });
   return byType;
 };
@@ -1217,7 +1223,7 @@ const sparseFieldsets = (where: Slot): RuleImpl => {
               fieldsOf(endpoint.queryKeys),
               (type) =>
                 Effect.gen(function* () {
-                  const fields = byType.get(type);
+                  const fields = Option.getOrUndefined(MutableHashMap.get(byType, type));
                   if (fields === undefined || fields.length < 2) return;
                   const requested = fields[0];
                   const url = withQuery(base, [[`fields[${type}]`, requested]]);
@@ -1276,7 +1282,7 @@ const sparseFieldsetsEmpty: RuleImpl = {
           // set honoured or ignored.
           const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
           tally.probes += 1;
-          const types = new Set(
+          const types = MutableHashSet.fromIterable(
             resourcesOf(baseline.body).flatMap(({ resource }) => {
               const type = resource["type"];
               return P.isString(type) && Arr.isReadonlyArrayNonEmpty(fieldNamesOf(resource))
@@ -1285,7 +1291,7 @@ const sparseFieldsetsEmpty: RuleImpl = {
             }),
           );
           yield* Effect.forEach(
-            fieldsOf(endpoint.queryKeys).filter((type) => types.has(type)),
+            fieldsOf(endpoint.queryKeys).filter((type) => MutableHashSet.has(types, type)),
             (type) =>
               Effect.gen(function* () {
                 const observation = yield* ctx.request({

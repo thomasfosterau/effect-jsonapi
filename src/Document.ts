@@ -18,6 +18,7 @@
  *
  * @since 0.1.0
  */
+import * as R from "effect/Record";
 import * as JsonPointer from "effect/JsonPointer";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -1081,9 +1082,7 @@ const wireLinkBlock = (links: Schema.Top): Schema.Top => {
   if (!isStructLike(inner)) return links;
   return rewrap(
     Schema.Struct(
-      Object.fromEntries(
-        Object.entries(inner.fields).map(([key, field]) => [key, wireLinkField(field)]),
-      ),
+      R.fromEntries(R.toEntries(inner.fields).map(([key, field]) => [key, wireLinkField(field)])),
     ),
   );
 };
@@ -1226,8 +1225,8 @@ export const wire = <S extends Schema.Top, TM extends Schema.Top = never>(
     if (isStructLike(inner)) {
       fields["relationships"] = rewrap(
         Schema.Struct(
-          Object.fromEntries(
-            Object.entries(inner.fields).map(([key, field]) => [
+          R.fromEntries(
+            R.toEntries(inner.fields).map(([key, field]) => [
               key,
               wireRelationship(field, toManyMeta),
             ]),

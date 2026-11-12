@@ -14,6 +14,7 @@
  */
 // The bare `effect` barrel: the schema-only entry point reaches this module,
 // and `test/entry-points.test.ts` pins `effect` as its only external.
+import * as MutableHashSet from "effect/MutableHashSet";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -94,16 +95,18 @@ const moreUndeclared = (count: number): string =>
 // named component (`noMembers`, `noMembers_1`, …) in every consumer's OpenAPI
 // document and renders a `null` member as "Expected <identifier>", and a title
 // or description would be copied into that document too.
-const noMembers = (declared: ReadonlySet<PropertyKey>, cap: number) =>
+const noMembers = (declared: MutableHashSet.MutableHashSet<PropertyKey>, cap: number) =>
   // oxlint-disable-next-line effect/require-filter-metadata -- see above: this check must stay anonymous in consumers' OpenAPI
   Schema.makeFilter<unknown>(
     (input, ast, options) => {
       if (!P.isObject(input)) return "Expected object";
       const undeclared: Array<PropertyKey> = [
-        ...Arr.filter(Rec.keys(input), (key) => !declared.has(key)),
+        ...Arr.filter(Rec.keys(input), (key) => !MutableHashSet.has(declared, key)),
         ...Arr.filter(
           Object.getOwnPropertySymbols(input),
-          (key) => !declared.has(key) && Object.prototype.propertyIsEnumerable.call(input, key),
+          (key) =>
+            !MutableHashSet.has(declared, key) &&
+            Object.prototype.propertyIsEnumerable.call(input, key),
         ),
       ];
       if (!Arr.isReadonlyArrayNonEmpty(undeclared)) return true;
@@ -130,7 +133,7 @@ const noMembers = (declared: ReadonlySet<PropertyKey>, cap: number) =>
     },
     {
       toJsonSchema: () =>
-        declared.size === 0 ? { type: "object", additionalProperties: false } : {},
+        MutableHashSet.size(declared) === 0 ? { type: "object", additionalProperties: false } : {},
     },
   );
 
@@ -196,10 +199,11 @@ export const closedStruct = <const Fields extends Schema.Struct.Fields>(
     ? Schema.Struct<Fields>(fields).annotate(nullAsObject)
     : Schema.Struct(fields);
   const { ast } = struct;
-  // A native `Set`, not a `HashSet`: the lookup runs per key, twice per parse
-  // of every write body, and `HashSet.has` made a 10-field decode ~45% slower.
-  // oxlint-disable-next-line effect/avoid-native-object-helpers -- hot-path lookup, see above
-  const checks = [noMembers(new Set(Reflect.ownKeys(fields)), cap)] as const;
+  // A `MutableHashSet`, not a `HashSet`: the lookup runs per key, twice per
+  // parse of every write body, and `HashSet.has` made a 10-field decode ~45%
+  // slower. A mutable set keeps its keys in a native `Map`, which a string or
+  // symbol key is looked up in directly.
+  const checks = [noMembers(MutableHashSet.fromIterable(Reflect.ownKeys(fields)), cap)] as const;
   return struct.rebuild(
     new SchemaAST.Objects(
       ast.propertySignatures,

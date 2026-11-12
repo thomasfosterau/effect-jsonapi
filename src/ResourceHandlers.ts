@@ -35,6 +35,7 @@
  *
  * @since 0.16.0
  */
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -931,31 +932,34 @@ const loadRefs = <Targets extends Handlers.IncludeTargets>(
   Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>
 > => {
-  const byType = new Map<string, Array<string>>();
+  const byType = MutableHashMap.empty<string, Array<string>>();
   Arr.forEach(refs, (ref) => {
     // An own entry only, as `Handlers` loads: a ref typed `constructor` or
     // `toString` names no target, not an `Object.prototype` member.
     if (!Object.hasOwn(targets, ref.type)) return;
-    const ids = byType.get(ref.type) ?? [];
+    const ids = Option.getOrElse(MutableHashMap.get(byType, ref.type), (): Array<string> => []);
     if (!ids.includes(ref.id)) ids.push(ref.id);
-    byType.set(ref.type, ids);
+    MutableHashMap.set(byType, ref.type, ids);
   });
   return Effect.forEach(
-    [...byType],
+    Arr.fromIterable(byType),
     ([type, ids]) => (targets[type] as Handlers.IncludeTarget)(ids),
     { concurrency },
   ).pipe(
     Effect.map((batches) => {
-      const loaded = new Map<string, Assemble.ResourceLike>();
+      const loaded = MutableHashMap.empty<string, Assemble.ResourceLike>();
       Arr.forEach(batches, (batch) => {
         Arr.forEach(batch, (resource) => {
-          loaded.set(`${resource.type}\0${resource.id}`, resource as Assemble.ResourceLike);
+          MutableHashMap.set(
+            loaded,
+            `${resource.type}\0${resource.id}`,
+            resource as Assemble.ResourceLike,
+          );
         });
       });
       // In linkage order, dropping a ref that didn't resolve.
       return refs.flatMap((ref) => {
-        const resource = loaded.get(`${ref.type}\0${ref.id}`);
-        return resource === undefined ? [] : [resource];
+        return Arr.fromOption(MutableHashMap.get(loaded, `${ref.type}\0${ref.id}`));
       });
     }),
   );

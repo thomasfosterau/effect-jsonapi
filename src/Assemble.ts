@@ -45,6 +45,7 @@
  *
  * @since 0.16.0
  */
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as HashSet from "effect/HashSet";
@@ -675,8 +676,8 @@ export const stringifyLinks = <R extends ResourceLike>(resource: R): WireResourc
       "relationships",
       relationships === undefined
         ? undefined
-        : Object.fromEntries(
-            Object.entries(relationships).map(([key, value]) => [
+        : R.fromEntries(
+            R.toEntries(relationships).map(([key, value]) => [
               key,
               // SAFETY: a relationship value is read only for its `links`
               // member; any other value (a bare identifier, an identifier
@@ -718,11 +719,11 @@ const toWireValue = <A>(value: A): WireValue => {
   if (Array.isArray(value)) {
     return value.map((entry) => (entry === undefined ? null : toWireValue(entry)));
   }
-  if (P.isObjectOrArray(value)) {
+  if (P.isObject(value)) {
     const toJson = P.hasProperty(value, "toJSON") ? value.toJSON : undefined;
     if (P.isFunction(toJson)) return toWireValue(toJson.call(value));
     const out: { [key: string]: WireValue } = {};
-    Arr.forEach(Object.entries(value), ([key, entry]) => {
+    Arr.forEach(R.toEntries(value), ([key, entry]) => {
       // An own `__proto__` member (as `JSON.parse` gives) stays a member.
       if (entry !== undefined) assign(out, key, toWireValue(entry));
     });

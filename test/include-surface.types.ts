@@ -28,6 +28,8 @@
  * is exported so an unused-local error can never stand in for the error an
  * `@ts-expect-error` expects.
  */
+import * as Option from "effect/Option";
+import * as HashMap from "effect/HashMap";
 import * as Schema from "effect/Schema";
 import type { HttpApiEndpoint } from "effect/http-api";
 import { Endpoint, Include, Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
@@ -471,5 +473,5 @@ export const cyclicSelfEdge = Include.make(CyclicArticle, { editor: CyclicArticl
 export const validate = (candidate: string): Paths | undefined =>
   declared.has(candidate) ? candidate : undefined;
 
-export const target = declared.targets.get("comments.author");
-assertType<typeof Person | typeof Comment | undefined>(target);
+export const target = HashMap.get(declared.targets, "comments.author");
+assertType<Option.Option<typeof Person | typeof Comment>>(target);

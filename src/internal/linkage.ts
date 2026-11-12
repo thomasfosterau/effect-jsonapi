@@ -16,6 +16,7 @@
  *
  * @internal
  */
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as HashMap from "effect/HashMap";
 import * as HashSet from "effect/HashSet";
@@ -156,7 +157,7 @@ export const linkageOf = (resource: Readonly<Record<string, unknown>>): Readonly
     const key = identity(value);
     if (key !== undefined) out.push(key);
   };
-  Arr.forEach(Object.keys(relationships), (name) => {
+  Arr.forEach(R.keys(relationships), (name) => {
     const relationship = relationships[name];
     if (!isRecord(relationship)) return;
     const data = relationship["data"];

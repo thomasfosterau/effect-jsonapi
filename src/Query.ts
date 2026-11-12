@@ -589,8 +589,6 @@ export const bracketPageKeys = <S extends OffsetPageStruct>(schema: S): BracketP
 const toResources = <R extends Any>(resource: R | ReadonlyArray<R>): ReadonlyArray<R> =>
   Array.isArray(resource) ? (resource as ReadonlyArray<R>) : [resource as R];
 
-const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)];
-
 /**
  * Constrains the `include` paths an endpoint advertises.
  *
@@ -1787,7 +1785,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
     const fieldsetFields = Rec.map(
       Arr.groupBy(fieldsetTargets, (target) => target.type),
       (targets, type) =>
-        Schema.optionalKey(fieldsetOf(type, dedupe(targets.flatMap((t) => fieldKeys(t))))),
+        Schema.optionalKey(fieldsetOf(type, Arr.dedupe(targets.flatMap((t) => fieldKeys(t))))),
     );
     Object.assign(
       flatFields,
@@ -1805,7 +1803,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
   ) {
     const sortable =
       options.sort === true
-        ? dedupe(resources.flatMap((r) => attributeKeys(r)))
+        ? Arr.dedupe(resources.flatMap((r) => attributeKeys(r)))
         : (options.sort as ReadonlyArray<string>);
     nestedFields.sort = Schema.optionalKey(Sort(sortable));
     flatFields.sort = Schema.optionalKey(Repeatable);
@@ -1813,7 +1811,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
 
   if (options.page !== undefined) {
     nestedFields.page = Schema.optionalKey(Schema.Struct(options.page));
-    Arr.forEach(Object.keys(options.page), (key) => {
+    Arr.forEach(Rec.keys(options.page), (key) => {
       flatFields[`page[${key}]`] = Schema.optionalKey(Schema.String);
     });
   }
@@ -1845,7 +1843,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
     flatFields.filter = Schema.optionalKey(FilterWireValue);
   } else if (P.isObjectOrArray(options.filter)) {
     nestedFields.filter = Schema.optionalKey(Schema.Struct(options.filter));
-    Arr.forEach(Object.keys(options.filter), (key) => {
+    Arr.forEach(Rec.keys(options.filter), (key) => {
       flatFields[`filter[${key}]`] = Schema.optionalKey(Schema.String);
     });
   }

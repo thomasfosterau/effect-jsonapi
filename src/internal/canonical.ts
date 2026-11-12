@@ -6,6 +6,7 @@
  *
  * @internal
  */
+import * as R from "effect/Record";
 import * as P from "effect/Predicate";
 import type * as Schema from "effect/Schema";
 import * as Arr from "effect/Array";
@@ -111,7 +112,7 @@ export const orderPairs = (
   declared: ReadonlyArray<string> = [],
 ): ReadonlyArray<Pair> => {
   const families: Array<Array<Pair>> = [[], [], [], [], [], []];
-  Arr.forEach(Object.entries(flat), ([key, value]) => {
+  Arr.forEach(R.toEntries(flat), ([key, value]) => {
     families[rank(key)].push(...pairsOf(key, Option.fromUndefinedOr(value)));
   });
   const [include, fields, filter, sort, page, other] = families as [
