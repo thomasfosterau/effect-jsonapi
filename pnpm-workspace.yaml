@@ -77,18 +77,19 @@ catalog:
   # The pure Schema helpers (`TriState`, `Issues`, `Ids`, `Bounded`) that used
   # to live in src/internal/schemaExt.ts and src/FlatQuery.ts (#552). A runtime
   # `dependency`, not a peer: only its Schema subpaths are imported (never
-  # `/Negotiate`, whose optional peer on this package would be a cycle), they
-  # resolve only `effect` (its `^4.0.0` peer, which ours `^4.1.0` satisfies), and no type of
-  # theirs reaches this package's declarations, so a consumer never needs to
-  # see the same copy. First-party, so `minimumReleaseAgeExclude` admits a
-  # fresh release. Its optional peer on this package is resolved in this
-  # workspace's own install by a nested copy of the *published*
-  # effect-jsonapi under node_modules/@thomasfosterau/effect-ext/ (overrides
-  # cannot drop a peer edge). Nothing loads it: the subpaths imported here
-  # never import this package. A consumer's install is unaffected. The floor
-  # is 0.2.0 (#555): `ServerErrors.schemaIssueToErrors` walks with its
-  # `Issues.leaves` / `Issues.message`, which 0.1.0 lacks.
-  "@thomasfosterau/effect-ext": ^0.2.0
+  # `/Negotiate`), they resolve only `effect` (its `^4.0.0` peer, which ours
+  # `^4.1.0` satisfies), and no type of theirs reaches this package's
+  # declarations, so a consumer never needs to see the same copy.
+  # First-party, so `minimumReleaseAgeExclude` admits a fresh release. The
+  # floor is 0.2.0 (#555): `ServerErrors.schemaIssueToErrors` walks with its
+  # `Issues.leaves` / `Issues.message`, which 0.1.0 lacks. 0.3.0 is accepted
+  # too: the subpaths used here (`Bounded`, `Ids`, `Issues`, `TriState`) are
+  # unchanged apart from `TriState.suppliedValue` / `read` / `toNullOr`
+  # spelling their parameter `field?: Option<A>`, which every 0.2 call
+  # satisfies. 0.3.0 also drops its optional peer on this package, so this
+  # workspace no longer installs a nested copy of the published effect-jsonapi
+  # under it (#577).
+  "@thomasfosterau/effect-ext": ^0.2.0 || ^0.3.0
   "@types/node": ^26.4.1
   # `vp run test:coverage`'s provider. Must equal the vitest that vite-plus
   # bundles (see `vitest` below); vite-plus refuses to run coverage on a
