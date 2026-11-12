@@ -358,11 +358,7 @@ export const layer = <R>(
         options?.middleware ?? Middleware.layerHostNegotiated,
       ),
     ),
-  ) as unknown as Layer.Layer<
-    never,
-    never,
-    HttpRouter.HttpRouter | HttpRouter.Request<"Requires", R>
-  >;
+  );
 };
 
 /**
@@ -426,5 +422,5 @@ export const webHandler = <R = never>(
   const web = HttpRouter.toWebHandler(layer(api, families, options), {
     disableLogger: options?.disableLogger ?? true,
   });
-  return web as unknown as WebHandler<R>;
+  return web;
 };

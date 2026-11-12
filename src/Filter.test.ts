@@ -104,7 +104,7 @@ describe("Filter", () => {
         Schema.decodeTo(Point, {
           decode: SchemaGetter.transform((s: string) => {
             const [x, y] = s.split(":").map(Number);
-            return { x: x!, y: y! };
+            return { x: x, y: y };
           }),
           encode: SchemaGetter.transform((p: typeof Point.Type) => `${p.x}:${p.y}`),
         }),

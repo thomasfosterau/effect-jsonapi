@@ -2113,7 +2113,7 @@ describe("Resource.annotate / Resource.annotations", () => {
     // identity: the descriptor resolves to the annotated definition itself
     expect(Post.relationships.author.ref()).toBe(Author);
     expect(directTargets(Post)).toEqual([Author]);
-    expect(annotations(directTargets(Post)[0]!)[Table]).toBe("authors");
+    expect(annotations(directTargets(Post)[0])[Table]).toBe("authors");
 
     // linkage decodes against the annotated target's identifier
     const decoded = Schema.decodeUnknownSync(Post)({
@@ -2249,15 +2249,15 @@ describe("Resource.attributeDescriptors", () => {
 
   it("hands over the attribute's own schema and annotation bag", () => {
     // the declared schema, with any key-optionality wrapper removed …
-    expect(Schema.decodeUnknownSync(byKey.caption!.schema)("c")).toBe("c");
-    expect(Schema.decodeUnknownSync(byKey.summary!.schema)(null)).toBeNull();
+    expect(Schema.decodeUnknownSync(byKey.caption.schema)("c")).toBe("c");
+    expect(Schema.decodeUnknownSync(byKey.summary.schema)(null)).toBeNull();
     expect(
-      Schema.decodeUnknownSync(byKey.createdAt!.schema)("2024-01-02T03:04:05.000Z"),
+      Schema.decodeUnknownSync(byKey.createdAt.schema)("2024-01-02T03:04:05.000Z"),
     ).toBeInstanceOf(Date);
     // … and the same annotation bag `attributeAnnotations` reports
-    expect(byKey.bio!.annotations?.dbColumn).toBe("biography");
-    expect(byKey.bio!.annotations).toBe(attributeAnnotations(Thing).bio);
-    expect(byKey.title!.annotations).toBe(attributeAnnotations(Thing).title);
+    expect(byKey.bio.annotations?.dbColumn).toBe("biography");
+    expect(byKey.bio.annotations).toBe(attributeAnnotations(Thing).bio);
+    expect(byKey.title.annotations).toBe(attributeAnnotations(Thing).title);
   });
 
   it("reports a family's resource-object attributes", () => {

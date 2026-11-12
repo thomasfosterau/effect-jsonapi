@@ -127,7 +127,7 @@ const unescape = (
   const items: Array<string> = [];
   let current = "";
   for (let i = 0; i < raw.length; i++) {
-    const c = raw[i]!;
+    const c = raw[i];
     if (c === "\\") {
       const next = raw[i + 1];
       if (next !== "," && next !== "\\") {
@@ -166,7 +166,7 @@ const FILTER_KEY = /^filter((?:\[[^[\]]*\])+)$/;
 export const keySegments = (key: string): ReadonlyArray<string> | undefined => {
   const match = FILTER_KEY.exec(key);
   if (match === null) return undefined;
-  return [...match[1]!.matchAll(/\[([^[\]]*)\]/g)].map((m) => m[1]!);
+  return [...match[1].matchAll(/\[([^[\]]*)\]/g)].map((m) => m[1]);
 };
 
 /**
@@ -337,7 +337,7 @@ export const decodeFilter = (
     if (segments.length === 1) {
       const node = condition(
         { field: key, operator: key, value: key },
-        segments[0]!,
+        segments[0],
         undefined,
         raw,
       );
@@ -345,8 +345,8 @@ export const decodeFilter = (
     } else if (segments.length === 2) {
       const node = condition(
         { field: key, operator: key, value: key },
-        segments[0]!,
-        segments[1]!,
+        segments[0],
+        segments[1],
         raw,
       );
       if (node !== undefined) roots.push(node);
@@ -497,7 +497,7 @@ export const decodeFilter = (
         );
         return { _tag: "And", members: [] };
       }
-      return { _tag: "Not", member: members[0]! };
+      return { _tag: "Not", member: members[0] };
     }
     return { _tag: conjunction === "AND" ? "And" : "Or", members };
   };
@@ -512,7 +512,7 @@ export const decodeFilter = (
       issues: [new SchemaIssue.InvalidValue({ message: "Expected at least one filter[...] key" })],
     };
   }
-  return { _tag: "Node", node: roots.length === 1 ? roots[0]! : { _tag: "And", members: roots } };
+  return { _tag: "Node", node: roots.length === 1 ? roots[0] : { _tag: "And", members: roots } };
 };
 
 // ---------------------------------------------------------------------------
@@ -569,7 +569,7 @@ const compareNodes = (a: Prepared, b: Prepared): number => {
     if (byConjunction !== 0) return byConjunction;
     const n = Math.min(a.members.length, b.members.length);
     for (let i = 0; i < n; i++) {
-      const c = compareNodes(a.members[i]!, b.members[i]!);
+      const c = compareNodes(a.members[i], b.members[i]);
       if (c !== 0) return c;
     }
     return a.members.length - b.members.length;
@@ -589,7 +589,7 @@ export const orderOf = <A>(compare: (a: A, b: A) => number): Order.Order<A> =>
 
 const sortedUnique = <A>(items: ReadonlyArray<A>, compare: (a: A, b: A) => number): Array<A> => {
   const sorted = Arr.sort(items, orderOf(compare));
-  return sorted.filter((item, index) => index === 0 || compare(sorted[index - 1]!, item) !== 0);
+  return sorted.filter((item, index) => index === 0 || compare(sorted[index - 1], item) !== 0);
 };
 
 /**
@@ -696,7 +696,7 @@ const shorthand = (root: Prepared): ReadonlyArray<readonly [string, string]> | u
     conditions = [root];
   } else if (root.conjunction === "AND" && root.members.length >= 2) {
     if (!root.members.every((member) => member.kind === "condition")) return undefined;
-    conditions = root.members as ReadonlyArray<PreparedCondition>;
+    conditions = root.members;
   } else {
     return undefined;
   }

@@ -106,8 +106,8 @@ describe("filter profile §6.2 — comparison domains", () => {
     ];
     for (let i = 0; i < instants.length; i++) {
       for (let j = 0; j < instants.length; j++) {
-        const chronological = Date.parse(instants[i]!) < Date.parse(instants[j]!);
-        expect(evaluate(Filter.lt("createdAt", instants[j]!), { createdAt: instants[i]! })).toBe(
+        const chronological = Date.parse(instants[i]) < Date.parse(instants[j]);
+        expect(evaluate(Filter.lt("createdAt", instants[j]), { createdAt: instants[i] })).toBe(
           truth(chronological),
         );
       }

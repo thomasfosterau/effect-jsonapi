@@ -110,7 +110,7 @@ export const anotherKey: Key = "fileName";
 export const undeclaredKey: Key = "notDeclared";
 export const keysAreDeclared: Equals<Key, "fileName" | "caption" | "file"> = true;
 
-const descriptor = descriptors[0]!;
+const descriptor = descriptors[0];
 assertType<Resource.AttributePresence>(descriptor.resource);
 assertType<Resource.AttributePresence>(descriptor.create);
 assertType<"optional" | false>(descriptor.update);

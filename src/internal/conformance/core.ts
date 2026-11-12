@@ -575,9 +575,9 @@ export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Disco
     Record<string, { readonly endpoints: Readonly<Record<string, HttpApiEndpoint.Top>> }>
   >;
   for (const group of Object.keys(groups)) {
-    const endpoints = groups[group]!.endpoints;
+    const endpoints = groups[group].endpoints;
     for (const name of Object.keys(endpoints)) {
-      const endpoint = endpoints[name]!;
+      const endpoint = endpoints[name];
       const segments = endpoint.path.split("/").filter((segment) => segment !== "");
       const query = wireKeys(endpoint.query);
       let responseMediaType: string | undefined;

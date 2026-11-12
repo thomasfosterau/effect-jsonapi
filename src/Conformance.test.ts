@@ -356,7 +356,7 @@ const conformantServe = (request: {
       .map((part) => part.trim().toLowerCase());
     const out: Array<string> = [];
     for (const part of parts) {
-      const name = part.split("=")[0]!.trim();
+      const name = part.split("=")[0].trim();
       if (name === "q") break;
       out.push(name);
     }
@@ -367,7 +367,7 @@ const conformantServe = (request: {
     return match === null ? 1 : Number(match[1]);
   };
 
-  if (contentType !== "" && contentType.split(";")[0]!.trim() === MEDIA_TYPE) {
+  if (contentType !== "" && contentType.split(";")[0].trim() === MEDIA_TYPE) {
     if (mediaTypeParameters(contentType).some((name) => name !== "ext" && name !== "profile")) {
       return {
         status: 415,
@@ -377,9 +377,9 @@ const conformantServe = (request: {
   }
   if (accept !== "") {
     const entries = accept.split(",").map((entry) => entry.trim());
-    const jsonApi = entries.filter((entry) => entry.split(";")[0]!.trim() === MEDIA_TYPE);
+    const jsonApi = entries.filter((entry) => entry.split(";")[0].trim() === MEDIA_TYPE);
     const wildcard = entries.some((entry) => {
-      const base = entry.split(";")[0]!.trim();
+      const base = entry.split(";")[0].trim();
       return base === "*/*" || base === "application/*";
     });
     if (Arr.isReadonlyArrayNonEmpty(jsonApi) || !wildcard) {
@@ -501,7 +501,7 @@ describe("Conformance: the catalogue", () => {
 // ---------------------------------------------------------------------------
 
 describe("Conformance: the report", () => {
-  const rule = Conformance.rules[0]!;
+  const rule = Conformance.rules[0];
 
   it("prints passes, failures, skips and the coverage gaps", () => {
     const text = Conformance.format({
@@ -512,11 +512,11 @@ describe("Conformance: the report", () => {
         { _tag: "Passed", rule, probes: 2, note: undefined },
         {
           _tag: "Failed",
-          rule: Conformance.rules[1]!,
+          rule: Conformance.rules[1],
           probes: 1,
           findings: [
             {
-              rule: Conformance.rules[1]!,
+              rule: Conformance.rules[1],
               detail: "the thing went wrong",
               expected: "a 415",
               observed: "a 200",
@@ -529,7 +529,7 @@ describe("Conformance: the report", () => {
             },
           ],
         },
-        { _tag: "Skipped", rule: Conformance.rules[2]!, reason: "no write endpoint in this api" },
+        { _tag: "Skipped", rule: Conformance.rules[2], reason: "no write endpoint in this api" },
       ],
       gaps: Conformance.gaps,
     });
@@ -544,7 +544,7 @@ describe("Conformance: the report", () => {
     expect(text).toContain("NOT COVERED BY THIS KIT");
     expect(text).toContain("SUMMARY");
     // The citation is what makes it a report rather than a diff.
-    expect(text).toContain(Conformance.rules[1]!.reference);
+    expect(text).toContain(Conformance.rules[1].reference);
   });
 
   it("marks only the first line of a finding that spans lines as a finding", () => {
@@ -633,7 +633,7 @@ describe("Conformance: the report", () => {
       transport: "in-process",
       outcomes: [
         { _tag: "Passed", rule, probes: 3, note: undefined },
-        { _tag: "Skipped", rule: Conformance.rules[1]!, reason: "nope" },
+        { _tag: "Skipped", rule: Conformance.rules[1], reason: "nope" },
       ],
       gaps: [],
     });
@@ -1167,7 +1167,7 @@ const withData = (
 ): Canned => {
   const body = canned.body;
   if (typeof body !== "object" || body === null || !("data" in body)) return canned;
-  return { ...canned, body: change(body as Record<string, unknown>) };
+  return { ...canned, body: change(body) };
 };
 
 describe("Conformance: detects a deliberately broken server", () => {
@@ -1497,7 +1497,7 @@ describe("Conformance: detects a deliberately broken server", () => {
       request.path.includes("fields[articles]")
         ? conformantServe({
             ...request,
-            path: request.path.split("&fields")[0]!.split("?fields")[0]!,
+            path: request.path.split("&fields")[0].split("?fields")[0],
           })
         : canned,
   );
@@ -1543,7 +1543,7 @@ describe("Conformance: detects a deliberately broken server", () => {
     "spec/query/unknown-query-parameter",
     (canned, request) =>
       request.path.includes("unknown=")
-        ? conformantServe({ ...request, path: request.path.split("?")[0]! })
+        ? conformantServe({ ...request, path: request.path.split("?")[0] })
         : canned,
   );
 
@@ -1570,7 +1570,7 @@ describe("Conformance: detects a deliberately broken server", () => {
     "spec/query/unsupported-include-path",
     (canned, request) =>
       request.path.includes("include=notARelationshipPath")
-        ? conformantServe({ ...request, path: request.path.split("?")[0]! })
+        ? conformantServe({ ...request, path: request.path.split("?")[0] })
         : canned,
   );
 
@@ -2816,25 +2816,25 @@ describe("Conformance: the filter grammar profile", () => {
       if (!key.startsWith("filter")) continue;
       // §2: a repeated `filter[…]` key is a 400.
       if (raw.getAll(key).length > 1) return reject(key);
-      const segments = [...key.matchAll(/\[([^\]]*)\]/g)].map((match) => match[1]!);
+      const segments = [...key.matchAll(/\[([^\]]*)\]/g)].map((match) => match[1]);
       const value = raw.get(key)!;
 
       // Group form: filter[id][condition][member].
       if (segments.length === 3 && segments[1] === "condition") {
-        const entry = conditions.get(segments[0]!) ?? {};
+        const entry = conditions.get(segments[0]) ?? {};
         if (segments[2] === "path" || segments[2] === "operator" || segments[2] === "value") {
           entry[segments[2]] = value;
-          conditions.set(segments[0]!, entry);
+          conditions.set(segments[0], entry);
           continue;
         }
         return reject(key);
       }
       // Shorthand: filter[field] or filter[field][op]. Anything deeper is a 400.
       if (segments.length > 2 || Arr.isReadonlyArrayEmpty(segments)) return reject(key);
-      const field = segments[0]!;
+      const field = segments[0];
       const operators = Option.getOrUndefined(HashMap.get(declared, field));
       if (operators === undefined) return reject(key);
-      const operator = segments.length === 2 ? segments[1]! : "eq";
+      const operator = segments.length === 2 ? segments[1] : "eq";
       if (!operators.includes(operator)) return reject(key);
       conditions.set(key, { path: field, operator, value });
     }
@@ -10307,13 +10307,11 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     return (request: CannedRequest): Canned => {
       if (request.method === "POST" && request.path === "/posts") return onCreate(request);
       const match = /^\/posts\/([^/?]+)(?:\/relationships\/(author|tags))?$/.exec(request.path);
-      const post = match === null ? undefined : posts.get(decodeURIComponent(match[1]!));
+      const post = match === null ? undefined : posts.get(decodeURIComponent(match[1]));
       if (match === null || post === undefined) return refused(404);
       const name = match[2] as "author" | "tags" | undefined;
       if (name !== undefined) return onRelationship(request, post, name);
-      return request.method === "GET"
-        ? { body: { data: resource(match[1]!, post) } }
-        : refused(405);
+      return request.method === "GET" ? { body: { data: resource(match[1], post) } } : refused(405);
     };
   };
 

@@ -56,18 +56,16 @@ export interface Repeatable extends Schema.decodeTo<
   Schema.Union<readonly [Schema.String, Schema.$Array<Schema.String>]>
 > {}
 
-export const Repeatable: Repeatable = Schema.Union([
-  Schema.String,
-  Schema.Array(Schema.String),
-]).pipe(
-  Schema.decodeTo(
-    Schema.String,
-    SchemaTransformation.transform<string, string | ReadonlyArray<string>>({
-      decode: (value) => (Array.isArray(value) ? value.join(",") : (value as string)),
-      encode: (value) => value,
-    }),
-  ),
-) as Repeatable;
+export const Repeatable: Repeatable = ((): Repeatable =>
+  Schema.Union([Schema.String, Schema.Array(Schema.String)]).pipe(
+    Schema.decodeTo(
+      Schema.String,
+      SchemaTransformation.transform<string, string | ReadonlyArray<string>>({
+        decode: (value) => (Array.isArray(value) ? value.join(",") : (value as string)),
+        encode: (value) => value,
+      }),
+    ),
+  ))();
 
 /**
  * Composes {@link Repeatable} under a comma-list item codec — the result of
@@ -84,7 +82,7 @@ export const Repeatable: Repeatable = Schema.Union([
  * value — so they compose `Repeatable` under their item codec here instead.
  */
 export const repeatable = <S extends Schema.Top>(item: S): Schema.decodeTo<S, Repeatable> =>
-  Repeatable.pipe(Schema.decodeTo(item)) as Schema.decodeTo<S, Repeatable>;
+  Repeatable.pipe(Schema.decodeTo(item));
 
 /**
  * The schema of a decoded sort list.
@@ -112,7 +110,7 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
     // so the 400 for an unknown field carries `meta.sortableFields` (see
     // `errorMeta`), and an empty set makes `sort` unsupported (#282). An
     // empty set's rejection says so rather than "Expected never".
-    field: Schema.Literals(fields as ReadonlyArray<Field>).annotate(
+    field: Schema.Literals(fields).annotate(
       vocabularyAnnotations(
         { family: "sort", values: fields },
         "This endpoint supports no sortable fields.",

@@ -211,15 +211,15 @@ export const make = (): LidMap => {
       ids.set(lid, id);
     },
     id: (lid) => ids.get(lid),
-    identifier: <R extends Any>(resource: R, ref: RefValue) => {
+    identifier: (resource, ref) => {
       if (ref.type !== resource.type) {
         throw new Error(`Ref type "${ref.type}" does not match resource type "${resource.type}"`);
       }
-      return resolveRef(ref) as R["identifier"]["Type"];
+      return resolveRef(ref);
     },
     // `_resource` only pins down the return type.
-    resolveLinkage: <R extends Any>(_resource: R, relationships: RefLinkageValue | undefined) => {
-      if (relationships === undefined) return {} as ResolvedLinkage<R>;
+    resolveLinkage: (_resource, relationships) => {
+      if (relationships === undefined) return {};
       const resolved: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(relationships)) {
         const linkage = value.data;
@@ -240,7 +240,7 @@ export const make = (): LidMap => {
           configurable: true,
         });
       }
-      return resolved as ResolvedLinkage<R>;
+      return resolved as ResolvedLinkage<Any>;
     },
   };
 };

@@ -89,7 +89,7 @@ describe("atomic operations: creating with lids", () => {
 
         // the paginated comments relationship is only reachable through its
         // relationship endpoint — verify the linkage landed there
-        const articleId = document["atomic:results"][0]!.data!.id;
+        const articleId = document["atomic:results"][0].data!.id;
         const linkage = yield* client.articles.commentsRelationship({
           params: { id: Article.Id.make(articleId) },
           query: {},
@@ -138,7 +138,7 @@ describe("atomic operations: creating with lids", () => {
           ),
         });
 
-        const id = created["atomic:results"][0]!.data!.id;
+        const id = created["atomic:results"][0].data!.id;
         return yield* client.articles.get({ params: { id: Article.Id.make(id) }, query: {} });
       }),
     );
@@ -162,7 +162,7 @@ describe("atomic operations: updating and removing", () => {
             }),
           ),
         });
-        const doomedId = created["atomic:results"][0]!.data!.id;
+        const doomedId = created["atomic:results"][0].data!.id;
 
         return yield* client.operations.operations({
           payload: Atomic.request(
@@ -212,7 +212,7 @@ describe("atomic operations: relationship operations", () => {
         const client = yield* buildClient;
 
         // create a second person to point the comment's author at
-        const comment = sampleComments[0]!;
+        const comment = sampleComments[0];
         return yield* client.operations.operations({
           payload: Atomic.request(
             // `one` relationships are replaced with another identifier — never null
@@ -270,7 +270,7 @@ describe("atomic operations: relationship operations", () => {
           ),
         });
 
-        const commentId = created["atomic:results"][0]!.data!.id;
+        const commentId = created["atomic:results"][0].data!.id;
         const afterAdd = yield* client.articles.commentsRelationship({
           params: { id: sampleArticle.id },
           query: {},

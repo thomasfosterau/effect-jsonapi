@@ -330,7 +330,7 @@ describe("the 400 for a rejected include path publishes the legal set", () => {
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
     onTestFinished(() => dispose());
     const response = await handler(new Request(url, { headers: { accept: MEDIA_TYPE } }));
-    return { status: response.status, body: (await response.json()) as any };
+    return { status: response.status, body: await response.json() };
   };
 
   it("names `include` and lists the includable paths", async () => {

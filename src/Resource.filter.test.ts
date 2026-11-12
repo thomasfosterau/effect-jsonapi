@@ -496,7 +496,7 @@ describe("Resource.filterable / Resource.sortable", () => {
         Schema.decodeTo(Point, {
           decode: SchemaGetter.transform((s: string) => {
             const [x, y] = s.split(":").map(Number);
-            return { x: x!, y: y! };
+            return { x: x, y: y };
           }),
           encode: SchemaGetter.transform((p: typeof Point.Type) => `${p.x}:${p.y}`),
         }),
@@ -772,7 +772,7 @@ describe("Resource.filterable / Resource.sortable", () => {
         Schema.decodeTo(Point, {
           decode: SchemaGetter.transform((s: string) => {
             const [x, y] = s.split(":").map(Number);
-            return { x: x!, y: y! };
+            return { x: x, y: y };
           }),
           encode: SchemaGetter.transform((p: typeof Point.Type) => `${p.x}:${p.y}`),
         }),
@@ -942,7 +942,7 @@ describe("Resource.filterable / Resource.sortable", () => {
         >;
         expect(entries.price?.operators).toEqual(["eq", "gt"]);
         // the new check applies to the literal too
-        expect(() => Schema.decodeUnknownSync(entries.price!.literal)("-1")).toThrow();
+        expect(() => Schema.decodeUnknownSync(entries.price.literal)("-1")).toThrow();
         expectTypeOf<FilterableKeys<typeof R>>().toEqualTypeOf<never>();
         expectTypeOf<SortableKeys<typeof R>>().toEqualTypeOf<never>();
         // a second check after that still finds it, as does one before and one after

@@ -830,7 +830,7 @@ const makePaginatedSchema = <M extends Schema.Top>(descriptor: {
 // carries no `meta`; it reads as the open record it always had.
 const metaOf = <M extends Schema.Top>(descriptor: { readonly meta: M }): M =>
   // SAFETY: `M` defaults to `typeof AnyMeta` wherever the descriptor carries none.
-  (descriptor.meta ?? AnyMeta) as M;
+  descriptor.meta ?? AnyMeta;
 
 /**
  * The resource a relationship descriptor points at — the return type of its

@@ -450,7 +450,7 @@ export const parsePointer = (value: string): Option.Option<PointerMember> => {
   if (segments[0] !== "data") return Option.none();
   let rest = segments.slice(1);
   let index: number | undefined;
-  if (rest.length === 3 && /^\d+$/.test(rest[0]!)) {
+  if (rest.length === 3 && /^\d+$/.test(rest[0])) {
     index = Number(rest[0]);
     rest = rest.slice(1);
   }

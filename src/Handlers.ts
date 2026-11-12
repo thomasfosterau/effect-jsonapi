@@ -264,7 +264,7 @@ export interface ResourceTransform<F extends TransformLambda = IdentityLambda> {
  */
 export const transform = <F extends TransformLambda>(
   f: (resource: AnyResourceValue) => AnyResourceValue,
-): ResourceTransform<F> => f as ResourceTransform<F>;
+): ResourceTransform<F> => f;
 
 // ---------------------------------------------------------------------------
 // project — sparse fieldsets
@@ -687,7 +687,7 @@ export const compose = <A extends TransformLambda, B extends TransformLambda>(
   projecting(
     (resource: ResourceValue) => second(first(resource) as ResourceValue),
     bothProjections(projectionOf(first), projectionOf(second)),
-  ) as unknown as ResourceTransform<ComposeLambda<A, B>>;
+  );
 
 // ---------------------------------------------------------------------------
 // Compound documents
@@ -738,7 +738,7 @@ const memoise = <F extends TransformLambda>(
     const transformed = onResource(resource);
     mapped.set(k, transformed);
     return transformed;
-  }, projectionOf(onResource)) as ResourceTransform<F>;
+  }, projectionOf(onResource));
 };
 
 // Applies a transform to every resource of an array, or hands the array back
@@ -907,7 +907,7 @@ const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
     }
   }
 
-  return mapped as ReadonlyArray<Transformed<F, Included>>;
+  return mapped;
 };
 
 // ---------------------------------------------------------------------------
@@ -1132,7 +1132,7 @@ const resolve = (
         if (ids === undefined) {
           const fresh = [identifier.id];
           byType.set(identifier.type, fresh);
-          batches.push({ load: targets[identifier.type]!, ids: fresh });
+          batches.push({ load: targets[identifier.type], ids: fresh });
         } else {
           ids.push(identifier.id);
         }

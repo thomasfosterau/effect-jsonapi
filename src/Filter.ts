@@ -550,7 +550,7 @@ export const Ast: Schema.Codec<Node> = Schema.Union([
   AndNode,
   OrNode,
   NotNode,
-]) as unknown as Schema.Codec<Node>;
+]);
 
 // ---------------------------------------------------------------------------
 // Constructors

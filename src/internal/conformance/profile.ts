@@ -714,10 +714,10 @@ const learnFamilies = (ctx: Context, endpoint: Discovered, path: string) =>
       endpoint.queryKeys.includes(`fields[${type}]`) &&
       attributeKeys.length >= 2
     ) {
-      out.push({ key: `fields[${type}]`, values: [attributeKeys[0]!, attributeKeys[1]!] });
+      out.push({ key: `fields[${type}]`, values: [attributeKeys[0], attributeKeys[1]] });
     }
     if (endpoint.queryKeys.includes("sort") && attributeKeys.length >= 2) {
-      out.push({ key: "sort", values: [attributeKeys[0]!, attributeKeys[1]!] });
+      out.push({ key: "sort", values: [attributeKeys[0], attributeKeys[1]] });
     }
     const relationships = first["relationships"];
     if (endpoint.queryKeys.includes("include") && isJsonObject(relationships)) {
@@ -728,7 +728,7 @@ const learnFamilies = (ctx: Context, endpoint: Discovered, path: string) =>
         return isJsonObject(relationship) && "data" in relationship;
       });
       if (includable.length >= 2)
-        out.push({ key: "include", values: [includable[0]!, includable[1]!] });
+        out.push({ key: "include", values: [includable[0], includable[1]] });
     }
     return out;
   });

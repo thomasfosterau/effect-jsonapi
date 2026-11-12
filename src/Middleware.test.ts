@@ -373,7 +373,7 @@ const request = async (
   const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
   onTestFinished(() => dispose());
   const response = await handler(new Request(url, { headers }));
-  return { status: response.status, body: (await response.json()) as any };
+  return { status: response.status, body: await response.json() };
 };
 
 // Like `request`, but provides a recording `Tracer` (the pattern the `effect`
@@ -403,7 +403,7 @@ const requestTraced = async (
   const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
   onTestFinished(() => dispose());
   const response = await handler(new Request(url, { headers }));
-  return { status: response.status, body: (await response.json()) as any, spans };
+  return { status: response.status, body: await response.json(), spans };
 };
 
 describe("Middleware.layer and a malformed Accept weight (#245)", () => {
