@@ -36,7 +36,7 @@ const Person = Resource("people", { attributes: { name: Schema.NonEmptyString } 
 const Article = Resource("articles", {
   attributes: {
     status: attribute(Schema.Literals(["open", "done", "archived"]), { filter: true }),
-    age: attribute(Schema.Number, { filter: true }),
+    age: attribute(Schema.Finite, { filter: true }),
     priority: attribute(Schema.Int, { filter: ["eq", "in", "nin"] }),
     title: attribute(Schema.String, { filter: ["eq", "ne", "in", "nin"] }),
     deletedAt: attribute(Schema.NullOr(Schema.DateFromString), {
@@ -44,7 +44,7 @@ const Article = Resource("articles", {
     }),
     createdAt: readOnlyAttribute(Schema.DateFromString, { filter: ["eq", "gte", "lte"] }),
     flag: attribute(Schema.Boolean, { filter: ["eq"] }),
-    limit: attribute(Schema.Number, { filter: ["eq"] }),
+    limit: attribute(Schema.Finite, { filter: ["eq"] }),
     body: Schema.String, // not filterable
   },
   relationships: {
@@ -1254,7 +1254,7 @@ describe("Query.Filter: types", () => {
     expectTypeOf<typeof codec.Encoded>().toEqualTypeOf<{ readonly [key: string]: string }>();
     expectTypeOf<Ast>().toEqualTypeOf<Query.FilterAst<typeof Article>>();
     // a resource declaring nothing has no condition nodes
-    const Plain = Resource("plains", { attributes: { n: Schema.Number } });
+    const Plain = Resource("plains", { attributes: { n: Schema.Finite } });
     expectTypeOf<
       Extract<Query.FilterAst<typeof Plain>, { readonly _tag: "Compare" }>
     >().toEqualTypeOf<never>();
@@ -1360,7 +1360,7 @@ describe("Query.schema with filter: true", () => {
   });
 
   it("fails closed on a resource declaring nothing filterable", () => {
-    const Plain = Resource("plains", { attributes: { n: Schema.Number } });
+    const Plain = Resource("plains", { attributes: { n: Schema.Finite } });
     const plain = Query.schema(Plain, { filter: true });
     expect(Schema.decodeUnknownSync(plain)({})).toEqual({});
     const result = Schema.decodeUnknownResult(plain)({ "filter[n]": "1" });

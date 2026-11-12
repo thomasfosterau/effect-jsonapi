@@ -394,7 +394,7 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
   // than an open `string` (#363).
   it("declares exactly the members of a name-only family that is the primary resource", () => {
     const Photo = Resource.make("photos", { attributes: { url: Schema.String } });
-    const Video = Resource.make("videos", { attributes: { length: Schema.Number } });
+    const Video = Resource.make("videos", { attributes: { length: Schema.Finite } });
     const Media = Resource.family("media", [Photo, Video]);
     expectFieldsets(Query.schema(Media, { fields: true }), ["fields[photos]", "fields[videos]"]);
   });
@@ -410,7 +410,7 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
       },
     });
     const Clip = Resource.make("clips", {
-      attributes: { duration: Schema.Number },
+      attributes: { duration: Schema.Finite },
       relationships: {
         owner: Relationship.one(() => Owner),
         // A different kind: not shared, so `tags` is no target of the family.

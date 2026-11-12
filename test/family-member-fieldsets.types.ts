@@ -90,7 +90,7 @@ assertType<Equals<FieldsetTypes<typeof deep>, "boards" | "holders" | "editors" |
 
 // A name-only family: its members, never its name.
 const Photo = Resource.make("photos", { attributes: { url: Schema.String } });
-const Video = Resource.make("videos", { attributes: { length: Schema.Number } });
+const Video = Resource.make("videos", { attributes: { length: Schema.Finite } });
 const Media = Resource.family("media", [Photo, Video]);
 const Gallery = Resource.make("galleries", {
   attributes: { title: Schema.String },
@@ -138,7 +138,7 @@ const Song = Resource.make("songs", {
   },
 });
 const Clip = Resource.make("clips", {
-  attributes: { duration: Schema.Number },
+  attributes: { duration: Schema.Finite },
   relationships: {
     owner: Relationship.one(() => Owner),
     tags: Relationship.optional(() => Tag),

@@ -377,7 +377,7 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
   describe("keeps the resource's typed document `meta`", () => {
     const Counted = Resource.make("counted", {
       attributes: { name: Schema.String },
-      meta: Schema.Struct({ revision: Schema.Number }),
+      meta: Schema.Struct({ revision: Schema.Finite }),
     });
     const counted = { type: "counted", id: "1", attributes: {} };
 

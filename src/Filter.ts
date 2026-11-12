@@ -307,7 +307,7 @@ export type OperatorsIn<D extends true | ReadonlyArray<Operator>> = [D] extends 
  *   attributes: {
  *     priceCents: Schema.Int.pipe(Filter.able([Filter.Op.eq, Filter.Op.gt, Filter.Op.lt]), Sort.able()),
  *     status: Schema.Literals(["draft", "published"]).pipe(Filter.able()),
- *     rating: Schema.NullOr(Schema.Number.pipe(Filter.able(["gte", "isnull"])))
+ *     rating: Schema.NullOr(Schema.Finite.pipe(Filter.able(["gte", "isnull"])))
  *   }
  * })
  *
@@ -747,7 +747,7 @@ export interface LiteralCodecs {
  * const Article = Resource.make("articles", {
  *   attributes: {
  *     status: Resource.attribute(Schema.String, { filter: true }),
- *     age: Resource.attribute(Schema.Number, { filter: true })
+ *     age: Resource.attribute(Schema.Finite, { filter: true })
  *   }
  * })
  *

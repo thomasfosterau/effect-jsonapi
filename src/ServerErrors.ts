@@ -104,7 +104,7 @@ export class Redirect extends Schema.TaggedError<Redirect, { readonly brand: uni
   "Redirect",
   {
     to: Schema.String,
-    status: Schema.Number,
+    status: Schema.Int,
   },
 ) {}
 
@@ -119,7 +119,7 @@ export class Redirect extends Schema.TaggedError<Redirect, { readonly brand: uni
 export class HttpError extends Schema.TaggedError<HttpError, { readonly brand: unique symbol }>()(
   "HttpError",
   {
-    status: Schema.Number,
+    status: Schema.Int,
     message: Schema.String,
   },
 ) {}
@@ -196,7 +196,7 @@ export class JsonapiError extends Schema.TaggedError<
   JsonapiError,
   { readonly brand: unique symbol }
 >()("JsonapiError", {
-  status: Schema.Number,
+  status: Schema.Int,
   errors: Schema.Array(Document.ErrorObject),
 }) {
   /**
@@ -334,7 +334,7 @@ const ValidationIssue = Schema.Union([
     message: Schema.String,
     path: Schema.optional(
       Schema.Array(
-        Schema.Union([Schema.String, Schema.Number, Schema.Struct({ key: Schema.Unknown })]),
+        Schema.Union([Schema.String, Schema.Int, Schema.Struct({ key: Schema.Unknown })]),
       ),
     ),
   }),

@@ -97,7 +97,7 @@ const Organisation = Resource.extend(Node, "organisations", {
 });
 const AnyNode = Resource.family(Node, [FamilyPerson, Organisation]);
 const Edge = Resource.make("edges", {
-  attributes: { weight: Schema.Number },
+  attributes: { weight: Schema.Finite },
   relationships: { to: Relationship.one(() => AnyNode) },
 });
 type ToData = NonNullable<NonNullable<(typeof Edge.Type)["relationships"]>["to"]["data"]>;
@@ -115,7 +115,7 @@ export const opTypo = Filter.Op.eqq;
 // @ts-expect-error an operator outside the core is a compile error
 export const outsideCore = Filter.able(["between"]);
 
-const Point = Schema.Struct({ x: Schema.Number, y: Schema.Number });
+const Point = Schema.Struct({ x: Schema.Finite, y: Schema.Finite });
 const PointFromString = Schema.String.pipe(
   Schema.decodeTo(Point, {
     decode: SchemaGetter.transform((s: string) => {
@@ -176,13 +176,13 @@ export const narrowReadOnly = Resource.readOnlyAttribute(Status, {
   filterLiteral: Narrow,
 });
 // @ts-expect-error a codec for another type does not fit (sugar)
-export const foreignSugar = Resource.attribute(Schema.Number, {
+export const foreignSugar = Resource.attribute(Schema.Finite, {
   filter: ["eq"],
   filterLiteral: Wide,
 });
 
-const filterDeclared = Schema.Number.pipe(Filter.able(["eq"]));
-const sortDeclared = Schema.Number.pipe(Sort.able());
+const filterDeclared = Schema.Finite.pipe(Filter.able(["eq"]));
+const sortDeclared = Schema.Finite.pipe(Sort.able());
 // @ts-expect-error a schema already Filter.able cannot take the `filter` sugar
 export const refiltered = Resource.attribute(filterDeclared, { filter: ["gt"] });
 // @ts-expect-error a schema already Sort.able cannot take the `sort` sugar

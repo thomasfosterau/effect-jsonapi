@@ -253,7 +253,7 @@ assertType<SameSuccess<typeof hatch, typeof explicitGet>>(true);
 // With `include` on it is not: `Article.document()`'s `included` is only the
 // direct targets, so `companies` (`author.employer`) is dropped, and an
 // endpoint `meta` override is ignored.
-const Total = Schema.Struct({ total: Schema.Number });
+const Total = Schema.Struct({ total: Schema.Finite });
 export const hatchIncluded = Endpoint.get(Article, {
   include: true,
   fields: true,

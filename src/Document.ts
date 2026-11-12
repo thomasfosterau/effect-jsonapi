@@ -1178,7 +1178,7 @@ const wireRelationship = (
  * })
  *
  * const Wire = Document.wire(Contest, {
- *   toManyMeta: Schema.Struct({ totalCount: Schema.Number })
+ *   toManyMeta: Schema.Struct({ totalCount: Schema.Finite })
  * })
  * const contest = {
  *   type: "contests",

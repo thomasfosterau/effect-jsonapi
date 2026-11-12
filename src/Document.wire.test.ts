@@ -88,7 +88,7 @@ describe("Document.wire", () => {
 });
 
 describe("Document.wire `toManyMeta` (#513)", () => {
-  const Count = Schema.Struct({ totalCount: Schema.Number });
+  const Count = Schema.Struct({ totalCount: Schema.Finite });
   const Ballot = Resource.make("ballots", { attributes: { label: Schema.String } });
   const Contest = Resource.make("contests", {
     attributes: { name: Schema.String },

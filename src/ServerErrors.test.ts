@@ -150,7 +150,7 @@ describe("schemaIssueToErrors", () => {
   it("renders each leaf's `detail` with Effect's default issue formatter", () => {
     const schema = Schema.Struct({
       name: Schema.String,
-      seats: Schema.Number,
+      seats: Schema.Finite,
       slug: Schema.String.check(Schema.isMinLength(3)),
       handle: Schema.String.check(
         // oxlint-disable-next-line effect/require-filter-metadata -- only the annotation under test
@@ -258,7 +258,7 @@ describe("schemaIssueToErrors", () => {
   it("emits one error per branch for a non-empty AnyOf, one leaf for an empty one", () => {
     const a = new SchemaIssue.Pointer(["name"], new SchemaIssue.InvalidValue());
     const b = new SchemaIssue.Pointer(["seats"], new SchemaIssue.MissingKey(undefined));
-    const anyOf = new SchemaIssue.AnyOf(Schema.Union([Schema.String, Schema.Number]).ast, [a, b]);
+    const anyOf = new SchemaIssue.AnyOf(Schema.Union([Schema.String, Schema.Finite]).ast, [a, b]);
     expect(ServerErrors.schemaIssueToErrors(anyOf)).toHaveLength(2);
     const literal = ServerErrors.schemaIssueToErrors(
       issueFor(Schema.Union([Schema.Literal("a"), Schema.Literal("b")]), "c"),
