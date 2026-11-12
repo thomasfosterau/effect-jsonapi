@@ -560,11 +560,9 @@ export const attribute = <
   // `Literal` is inferred from `filterLiteral` and, as for `Filter.able`, the
   // schema's `Type` must fit it; a schema already `Filter.able` / `Sort.able`
   // is refused when the corresponding sugar option is given.
-  schema: S & { readonly Type: NoInfer<Literal> | null } & NotAlready<
-      S,
-      Filter.MarkerKey,
-      FilterDecl
-    > &
+  schema: S & {
+    readonly Type: Schema.NullOr<Schema.Schema<NoInfer<Literal>>>["Type"];
+  } & NotAlready<S, Filter.MarkerKey, FilterDecl> &
     NotAlready<S, Sort.MarkerKey, Sortable>,
   options?: {
     // A literal only: a non-literal `boolean` cannot decide, at the type level,
@@ -658,11 +656,9 @@ export const readOnlyAttribute = <
   const Sortable extends boolean = false,
   Literal = FilterLiteralType<S>,
 >(
-  schema: S & { readonly Type: NoInfer<Literal> | null } & NotAlready<
-      S,
-      Filter.MarkerKey,
-      FilterDecl
-    > &
+  schema: S & {
+    readonly Type: Schema.NullOr<Schema.Schema<NoInfer<Literal>>>["Type"];
+  } & NotAlready<S, Filter.MarkerKey, FilterDecl> &
     NotAlready<S, Sort.MarkerKey, Sortable>,
   {
     filterLiteral,

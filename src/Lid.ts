@@ -27,6 +27,7 @@ import * as Option from "effect/Option";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as R from "effect/Record";
 import * as Arr from "effect/Array";
+import type * as Schema from "effect/Schema";
 import * as Types from "effect/Types";
 import type { MetaValue } from "./Handlers.js";
 import type * as Relationship from "./Relationship.js";
@@ -91,7 +92,7 @@ export class UnknownLidError extends Error {
  */
 export interface RefLinkageValue {
   readonly [key: string]: {
-    readonly data?: RefValue | ReadonlyArray<RefValue> | null;
+    readonly data?: Schema.NullOr<Schema.Schema<RefValue | ReadonlyArray<RefValue>>>["Type"];
     readonly meta?: MetaValue;
   };
 }
@@ -116,7 +117,7 @@ export type ResolvedLinkage<R extends Any> = {
   ]?: R["relationships"][K] extends Relationship.One<infer T>
     ? { readonly data: T["identifier"]["Type"]; readonly meta?: MetaValue }
     : R["relationships"][K] extends Relationship.Optional<infer T>
-      ? { readonly data: T["identifier"]["Type"] | null; readonly meta?: MetaValue }
+      ? { readonly data: Schema.NullOr<T["identifier"]>["Type"]; readonly meta?: MetaValue }
       : R["relationships"][K] extends Relationship.Many<infer T>
         ? { readonly data: ReadonlyArray<T["identifier"]["Type"]>; readonly meta?: MetaValue }
         : never;

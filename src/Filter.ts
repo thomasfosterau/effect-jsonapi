@@ -328,7 +328,7 @@ export function able<const Ops extends true | ReadonlyArray<Operator>, Literal>(
   operators: Ops,
   options: { readonly literal: Schema.Codec<Literal, string> },
 ): <S extends Schema.Top>(
-  self: S & { readonly Type: Literal | null },
+  self: S & { readonly Type: Schema.NullOr<Schema.Schema<Literal>>["Type"] },
 ) => Declared<S, OperatorsIn<Ops>, Literal>;
 export function able(
   operators: true | ReadonlyArray<Operator> = true,

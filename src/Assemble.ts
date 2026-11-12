@@ -51,6 +51,7 @@ import * as Effect from "effect/Effect";
 import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
+import type * as Schema from "effect/Schema";
 import type * as ApiError from "./ApiError.js";
 import type * as Document from "./Document.js";
 import * as Handlers from "./Handlers.js";
@@ -92,18 +93,18 @@ export type LinkLike = string | URL | { readonly href: string | URL };
  * @category models
  */
 export interface RelationshipObject {
-  readonly data?: Ref | ReadonlyArray<Ref> | null | undefined;
-  readonly links?: { readonly related?: LinkLike; readonly self?: LinkLike } | undefined;
-  readonly meta?: R.ReadonlyRecord<string, unknown> | undefined;
+  readonly data?: Schema.NullOr<Schema.Schema<Ref | ReadonlyArray<Ref>>>["Type"];
+  readonly links?: { readonly related?: LinkLike; readonly self?: LinkLike };
+  readonly meta?: R.ReadonlyRecord<string, unknown>;
 }
 
 /**
  * The minimum shape every resource an application hands the assembler
  * exposes. Relationship values are `unknown` so a mapper's own relationship
  * types fit without a cast; the assembler reads them structurally
- * ({@link relationshipRefs}). The `?: T | undefined` members admit an
- * explicit `undefined` under `exactOptionalPropertyTypes`, so a caller
- * forwards possibly-absent members without a conditional spread.
+ * ({@link relationshipRefs}). The optional members are the wire's own: a
+ * decoded resource (`Schema.optionalKey` members) assigns as it is, and a
+ * caller leaves out a member it has no value for.
  *
  * @since 0.16.0
  * @category models
@@ -112,9 +113,9 @@ export interface ResourceLike {
   readonly type: string;
   readonly id: string;
   readonly attributes: R.ReadonlyRecord<string, unknown>;
-  readonly relationships?: R.ReadonlyRecord<string, unknown> | undefined;
-  readonly links?: { readonly self?: LinkLike | undefined } | undefined;
-  readonly meta?: R.ReadonlyRecord<string, unknown> | undefined;
+  readonly relationships?: R.ReadonlyRecord<string, unknown>;
+  readonly links?: { readonly self?: LinkLike };
+  readonly meta?: R.ReadonlyRecord<string, unknown>;
 }
 
 /**
@@ -232,7 +233,7 @@ export type UnpaginatedCollectionDocument<
  * @category models
  */
 export interface RelationshipDocument<R extends ResourceLike, I extends ResourceLike = R> {
-  readonly data: Ref | ReadonlyArray<Ref> | null;
+  readonly data: Schema.NullOr<Schema.Schema<Ref | ReadonlyArray<Ref>>>["Type"];
   readonly included: ReadonlyArray<WireResource<I>>;
   readonly links?: { readonly related: string };
   readonly jsonapi: typeof JSONAPI_MEMBER;
@@ -679,18 +680,14 @@ export const stringifyLinks = <R extends ResourceLike>(resource: R): WireResourc
 };
 
 /**
- * A value in wire form: a JSON value, whose leaves may include one JSON has
- * no spelling for (`undefined`, a `bigint`, a `symbol`, a function) — passed
- * through untouched by {@link toWireValue} for the serialiser to judge.
+ * A value in wire form: a JSON value (effect's `Schema.Json`), whose leaves
+ * may include one JSON has no spelling for (`undefined`, a `bigint`, a
+ * `symbol`, a function) — passed through untouched by {@link toWireValue} for
+ * the serialiser to judge.
  */
 type WireValue =
-  | string
-  | number
-  | boolean
-  | null
-  | undefined
-  | bigint
-  | symbol
+  | Schema.Json
+  | Schema.Union<readonly [Schema.Undefined, Schema.BigInt, Schema.Symbol]>["Type"]
   | Function
   | ReadonlyArray<WireValue>
   | { readonly [key: string]: WireValue };

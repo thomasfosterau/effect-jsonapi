@@ -56,6 +56,7 @@ import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
+import type * as Schema from "effect/Schema";
 import type { JsonApiObject } from "./Document.js";
 import { serialise, withPagePairs } from "./internal/canonical.js";
 import { assign } from "./internal/define.js";
@@ -90,7 +91,7 @@ export interface ResourceValue {
   readonly id: string;
   readonly relationships?: {
     readonly [key: string]: {
-      readonly data?: ResourceIdentifierValue | ReadonlyArray<ResourceIdentifierValue> | null;
+      readonly data?: LinkageValue;
       readonly links?: unknown;
       readonly meta?: unknown;
     };
@@ -126,10 +127,10 @@ export interface LinksValue {
   readonly self?: LinkValue;
   readonly related?: LinkValue;
   readonly describedby?: LinkValue;
-  readonly first?: LinkValue | null;
-  readonly last?: LinkValue | null;
-  readonly prev?: LinkValue | null;
-  readonly next?: LinkValue | null;
+  readonly first?: Schema.NullOr<Schema.Schema<LinkValue>>["Type"];
+  readonly last?: Schema.NullOr<Schema.Schema<LinkValue>>["Type"];
+  readonly prev?: Schema.NullOr<Schema.Schema<LinkValue>>["Type"];
+  readonly next?: Schema.NullOr<Schema.Schema<LinkValue>>["Type"];
 }
 
 /**
@@ -1345,7 +1346,7 @@ const resolve = (
  * @category constructors
  */
 export const resolveIncluded = <Targets extends IncludeTargets>(
-  primary: ResourceValue | null | ReadonlyArray<ResourceValue>,
+  primary: Schema.NullOr<Schema.Schema<ResourceValue | ReadonlyArray<ResourceValue>>>["Type"],
   paths: Option.Option<ReadonlyArray<string>>,
   targets: Targets,
   options?: ResolveIncludedOptions,
@@ -1459,7 +1460,7 @@ const buildLinks = (options: {
 // `included` is seeded from rather than deduplicated against (#423);
 // `originals` are the resources `primary` was shaped from (#494).
 const build = (
-  data: ResourceValue | ReadonlyArray<ResourceValue> | LinkageValue | null,
+  data: ResourceValue | ReadonlyArray<ResourceValue> | LinkageValue,
   primary: ReadonlyArray<ResourceValue>,
   options?: {
     readonly included?: ReadonlyArray<ResourceValue>;
@@ -1612,7 +1613,7 @@ const build = (
  * @category constructors
  */
 export const data = <
-  Res extends ResourceValue | null,
+  Res extends Schema.NullOr<Schema.Schema<ResourceValue>>["Type"],
   const Included extends ResourceValue = never,
   const M extends MetaValue = never,
   const J extends JsonApiObjectValue = never,
@@ -1929,7 +1930,9 @@ type PaginatedRelationshipValue<Self extends string | false> = [Self] extends [n
  * @since 0.1.0
  * @category models
  */
-export type LinkageValue = ResourceIdentifierValue | ReadonlyArray<ResourceIdentifierValue> | null;
+export type LinkageValue = Schema.NullOr<
+  Schema.Schema<ResourceIdentifierValue | ReadonlyArray<ResourceIdentifierValue>>
+>["Type"];
 
 // The builder's return type is conditional on its generics for the same
 // reason as `DocumentValue` above.
