@@ -25,8 +25,8 @@ catalogs:
       specifier: 0.10.0
       version: 0.10.0
     '@thomasfosterau/effect-ext':
-      specifier: ^0.2.0
-      version: 0.2.0
+      specifier: ^0.2.0 || ^0.3.0
+      version: 0.3.0
     '@types/node':
       specifier: ^26.4.1
       version: 26.6.1
@@ -67,7 +67,7 @@ importers:
     dependencies:
       '@thomasfosterau/effect-ext':
         specifier: 'catalog:'
-        version: 0.2.0(@effect/platform-node@4.1.2(effect@4.1.4)(redis@6.3.0))(@thomasfosterau/effect-jsonapi@0.21.0(@effect/platform-node@4.1.2(effect@4.1.4)(redis@6.3.0))(effect@4.1.4))(effect@4.1.4)
+        version: 0.3.0(@effect/platform-node@4.1.2(effect@4.1.4)(redis@6.3.0))(effect@4.1.4)
     devDependencies:
       '@changesets/cli':
         specifier: 'catalog:'
@@ -1056,34 +1056,13 @@ packages:
     peerDependencies:
       '@testing-library/dom': '>=7.21.4'
 
-  '@thomasfosterau/effect-ext@0.1.0':
-    resolution: {integrity: sha512-gCewDQmefBF48NeR/3iVdPSxilNbPel6P/AYU5j1iykcBCmXNv3ZwAkkLOls2c5j7iscquXLlTov2IGsAvhgzw==}
-    engines: {node: '>=22.18'}
+  '@thomasfosterau/effect-ext@0.3.0':
+    resolution: {integrity: sha512-3MB+WhHsJ9RwSitjFFU7RyfnIMnqtiJ4LtLZG9BUa7CBlIpX63qIueNbcJd/SFRvDApx/aKfAs64stNs7ExcZA==}
+    engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
       '@effect/platform-browser': ^4.0.0
       '@effect/platform-node': ^4.0.0
-      '@thomasfosterau/effect-jsonapi': '>=0.16.1'
-      '@thomasfosterau/effect-parse': ^0.4.1
-      effect: 4.1.4
-    peerDependenciesMeta:
-      '@effect/platform-browser':
-        optional: true
-      '@effect/platform-node':
-        optional: true
-      '@thomasfosterau/effect-jsonapi':
-        optional: true
-      '@thomasfosterau/effect-parse':
-        optional: true
-
-  '@thomasfosterau/effect-ext@0.2.0':
-    resolution: {integrity: sha512-T1EukW6BJDub7EMdii65Qisy1uDMwAkbso6s2gQQD9MbUC8jGycJppsL4McRdnjgboEu5yVxirzr2pobkh9qFw==}
-    engines: {node: '>=22.18'}
-    hasBin: true
-    peerDependencies:
-      '@effect/platform-browser': ^4.0.0
-      '@effect/platform-node': ^4.0.0
-      '@thomasfosterau/effect-jsonapi': '>=0.16.1'
       '@thomasfosterau/effect-parse': ^0.4.1 || ^0.5.0
       effect: 4.1.4
     peerDependenciesMeta:
@@ -1091,16 +1070,8 @@ packages:
         optional: true
       '@effect/platform-node':
         optional: true
-      '@thomasfosterau/effect-jsonapi':
-        optional: true
       '@thomasfosterau/effect-parse':
         optional: true
-
-  '@thomasfosterau/effect-jsonapi@0.21.0':
-    resolution: {integrity: sha512-EoQJH+1r2tVOF+IRK9haOYMkvC8UpYqfOoxi+BHXkH7I4qbmQAjRuLTCdGh7cDsJJlLM4BdbG5UUz4I/uuytAw==}
-    engines: {node: '>=22', pnpm: '>=11'}
-    peerDependencies:
-      effect: 4.1.4
 
   '@ts-morph/common@0.29.0':
     resolution: {integrity: sha512-35oUmphHbJvQ/+UTwFNme/t2p3FoKiGJ5auTjjpNTop2dyREspirjMy82PLSC1pnDJ8ah1GU98hwpVt64YXQsg==}
@@ -2867,30 +2838,11 @@ snapshots:
     dependencies:
       '@testing-library/dom': 10.4.2
 
-  '@thomasfosterau/effect-ext@0.1.0(@effect/platform-node@4.1.2(effect@4.1.4)(redis@6.3.0))(@thomasfosterau/effect-jsonapi@0.21.0(@effect/platform-node@4.1.2(effect@4.1.4)(redis@6.3.0))(effect@4.1.4))(effect@4.1.4)':
+  '@thomasfosterau/effect-ext@0.3.0(@effect/platform-node@4.1.2(effect@4.1.4)(redis@6.3.0))(effect@4.1.4)':
     dependencies:
       effect: 4.1.4
     optionalDependencies:
       '@effect/platform-node': 4.1.2(effect@4.1.4)(redis@6.3.0)
-      '@thomasfosterau/effect-jsonapi': 0.21.0(@effect/platform-node@4.1.2(effect@4.1.4)(redis@6.3.0))(effect@4.1.4)
-    optional: true
-
-  '@thomasfosterau/effect-ext@0.2.0(@effect/platform-node@4.1.2(effect@4.1.4)(redis@6.3.0))(@thomasfosterau/effect-jsonapi@0.21.0(@effect/platform-node@4.1.2(effect@4.1.4)(redis@6.3.0))(effect@4.1.4))(effect@4.1.4)':
-    dependencies:
-      effect: 4.1.4
-    optionalDependencies:
-      '@effect/platform-node': 4.1.2(effect@4.1.4)(redis@6.3.0)
-      '@thomasfosterau/effect-jsonapi': 0.21.0(@effect/platform-node@4.1.2(effect@4.1.4)(redis@6.3.0))(effect@4.1.4)
-
-  '@thomasfosterau/effect-jsonapi@0.21.0(@effect/platform-node@4.1.2(effect@4.1.4)(redis@6.3.0))(effect@4.1.4)':
-    dependencies:
-      '@thomasfosterau/effect-ext': 0.1.0(@effect/platform-node@4.1.2(effect@4.1.4)(redis@6.3.0))(@thomasfosterau/effect-jsonapi@0.21.0(@effect/platform-node@4.1.2(effect@4.1.4)(redis@6.3.0))(effect@4.1.4))(effect@4.1.4)
-      effect: 4.1.4
-    transitivePeerDependencies:
-      - '@effect/platform-browser'
-      - '@effect/platform-node'
-      - '@thomasfosterau/effect-parse'
-    optional: true
 
   '@ts-morph/common@0.29.0':
     dependencies:
