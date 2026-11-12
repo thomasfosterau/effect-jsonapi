@@ -17,7 +17,7 @@ import * as Effect from "effect/Effect";
 import * as Formatter from "effect/Formatter";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import type * as Schema from "effect/Schema";
 import {
   type Body,
@@ -46,7 +46,7 @@ const LIST_LIMIT = 10;
  * @internal
  */
 export const quote = (value: Schema.Json): string => {
-  const text = Predicate.isString(value) ? value : Formatter.format(value);
+  const text = P.isString(value) ? value : Formatter.format(value);
   if (text.length <= QUOTE_LIMIT) return text;
   // Never split a surrogate pair: a high surrogate the cut would leave last goes too.
   const end = QUOTE_LIMIT - 1;
@@ -101,10 +101,10 @@ export const Link = Data.taggedEnum<Link>();
  */
 export const linkIn = (links: Schema.Json, name: string): Link => {
   const value = isJsonObject(links) ? links[name] : undefined;
-  if (Predicate.isNullish(value)) return Link.Unavailable();
-  if (Predicate.isString(value)) return Link.Href({ href: value });
+  if (P.isNullish(value)) return Link.Unavailable();
+  if (P.isString(value)) return Link.Href({ href: value });
   const href = isJsonObject(value) ? value["href"] : undefined;
-  return Predicate.isString(href) ? Link.Href({ href }) : Link.Malformed({ value });
+  return P.isString(href) ? Link.Href({ href }) : Link.Malformed({ value });
 };
 
 /**

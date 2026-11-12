@@ -26,8 +26,8 @@
  * @internal
  */
 import * as Arr from "effect/Array";
-import * as Predicate from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import { isSurface } from "../Include.js";
@@ -72,8 +72,8 @@ type SparseFields<F extends Any["fields"]> = {
  * A resource definition's resource object with every attribute and every
  * relationship optional.
  */
-export interface SparseResource<R extends Any> extends Schema.Struct<
-  AsFields<SparseFields<R["fields"]>>
+export interface SparseResource<Res extends Any> extends Schema.Struct<
+  AsFields<SparseFields<Res["fields"]>>
 > {}
 
 /**
@@ -122,15 +122,15 @@ export interface ResourceStruct extends Any {
 const hasMembers = (
   schema: Schema.Top,
 ): schema is Schema.Top & { readonly members: ReadonlyArray<Schema.Top> } =>
-  Predicate.hasProperty(schema, "members") && Arr.isArray(schema.members);
+  P.hasProperty(schema, "members") && Arr.isArray(schema.members);
 
 // A plain resource definition: a `type` name and an `attributes` struct, and
 // no members (a family has both).
 const isResource = (schema: Schema.Top): schema is ResourceStruct =>
-  Predicate.hasProperty(schema, "type") &&
-  Predicate.isString(schema.type) &&
-  Predicate.hasProperty(schema, "fields") &&
-  Predicate.hasProperty(schema.fields, "attributes") &&
+  P.hasProperty(schema, "type") &&
+  P.isString(schema.type) &&
+  P.hasProperty(schema, "fields") &&
+  P.hasProperty(schema.fields, "attributes") &&
   !hasMembers(schema);
 
 // One sparse schema per resource definition, so every document that carries a
@@ -146,13 +146,13 @@ const optionalMember = (field: Schema.Struct.Fields[string]) =>
 // hand-rolled definition's) as it stands.
 const sparseRelationships = (member: Schema.Struct.Fields[string] | undefined) => {
   if (member === undefined) return {};
-  const inner: unknown = Predicate.hasProperty(member, "schema") ? member.schema : undefined;
-  if (!Predicate.hasProperty(inner, "fields") || !Predicate.isObject(inner.fields))
+  const inner: unknown = P.hasProperty(member, "schema") ? member.schema : undefined;
+  if (!P.hasProperty(inner, "fields") || !P.isObject(inner.fields))
     return { relationships: member };
   // SAFETY: the `fields` of a `Schema.Struct`, which a definition's
   // `relationships` member wraps (`Resource.make`).
   const fields = inner.fields as Schema.Struct.Fields;
-  return { relationships: Schema.optionalKey(Schema.Struct(Rec.map(fields, optionalMember))) };
+  return { relationships: Schema.optionalKey(Schema.Struct(R.map(fields, optionalMember))) };
 };
 
 /**
@@ -167,7 +167,7 @@ export const sparseResource = (resource: ResourceStruct): Schema.Top => {
   const { identifier: _identifier, ...annotations } = resource.ast.annotations ?? {};
   const sparse = Schema.Struct({
     ...resource.fields,
-    attributes: Schema.Struct(Rec.map(resource.fields.attributes.fields, optionalMember)),
+    attributes: Schema.Struct(R.map(resource.fields.attributes.fields, optionalMember)),
     ...sparseRelationships(resource.fields["relationships"]),
   }).annotate(annotations);
   sparseCache.set(resource, sparse);
@@ -199,7 +199,7 @@ const includablePaths = (
 ): ReadonlyArray<string> =>
   include === true
     ? includePathsFor(resources)
-    : Predicate.isObject(include)
+    : P.isObject(include)
       ? includePathsFor(resources, include)
       : [];
 

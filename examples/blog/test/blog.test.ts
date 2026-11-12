@@ -13,7 +13,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HttpApiTest, OpenApi } from "effect/http-api";
@@ -771,7 +771,7 @@ describe("blog example: heterogeneous search", () => {
       );
       // `next` is the same query on the next page, decoded through the schema
       // the endpoint decodes.
-      const search = Rec.fromEntries(new URL(next, "https://example.test").searchParams);
+      const search = R.fromEntries(new URL(next, "https://example.test").searchParams);
       expect(yield* Schema.decodeEffect(SearchQuery)(search)).toEqual({
         include: ["author"],
         fields: { articles: ["title"] },

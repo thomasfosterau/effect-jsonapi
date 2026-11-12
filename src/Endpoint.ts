@@ -79,7 +79,7 @@
 import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { HttpApiEndpoint, HttpApiSchema } from "effect/http-api";
 import * as Atomic from "./Atomic.js";
@@ -239,7 +239,7 @@ const reachableIncluded = (
   resources: ReadonlyArray<Any>,
   include?: IncludeArgument,
 ): Option.Option<Schema.Top> =>
-  include === true || (Predicate.isObject(include) && !isSurface(include))
+  include === true || (P.isObject(include) && !isSurface(include))
     ? Option.some(
         Schema.Union(
           includedResources(
@@ -1867,7 +1867,7 @@ export type RelationshipSuccess<
 
 // The paths of `P` rooted at the relationship `Name`: `Name` itself and every
 // dotted path whose first segment it is.
-type RootedAt<P, Name extends string> = Extract<P, Name | `${Name}.${string}`>;
+type RootedAt<Paths, Name extends string> = Extract<Paths, Name | `${Name}.${string}`>;
 
 // Resolves to `T` for every concrete resource definition; needed because the
 // `Omit`-built view below can't be proven to satisfy `Any` while `R` is
@@ -3333,7 +3333,11 @@ type EffMeta<C, GMeta, Meta extends Schema.Top> = ResolveMeta<FieldOr<C, "meta",
 // The effective write payload of a `create` / `update` config: the captured
 // `payload` override, else the resource's enveloped default.
 type EffPayload<C, Default extends Schema.Top> =
-  FieldOr<C, "payload", Default> extends infer P ? (P extends Schema.Top ? P : Default) : Default;
+  FieldOr<C, "payload", Default> extends infer Pay
+    ? Pay extends Schema.Top
+      ? Pay
+      : Default
+    : Default;
 
 // The effective `idempotency` option of a write config: the captured
 // per-endpoint value, else the top-level default.
@@ -4243,7 +4247,7 @@ export const resource = <
   // The resource's base meta schema, for resolving `meta` functions.
   const baseMeta = (resource.fields.meta as { readonly schema: Schema.Top }).schema;
   const resolveMeta = (value: MetaOption<Schema.Top>): Schema.Top =>
-    Predicate.isFunction(value)
+    P.isFunction(value)
       ? // SAFETY: a callable `meta` is read as `MetaOption`'s
         // `(base) => Schema.Top` member.
         (value as (base: Schema.Top) => Schema.Top)(baseMeta)
@@ -4380,7 +4384,7 @@ export const resource = <
     // SAFETY: a `RelationshipsOption` map's entries are shorthands or
     // `RelationshipConfig`s over this resource, each of which is a
     // `RelationshipConfig` over any.
-    const relMap = Predicate.isObjectOrArray(relationshipsOpt)
+    const relMap = P.isObjectOrArray(relationshipsOpt)
       ? (relationshipsOpt as RelationshipsMap)
       : {};
     const relationships = resource.relationships as Record<string, Relationship.Descriptor>;
@@ -4392,7 +4396,7 @@ export const resource = <
       // A constrained `include` names this resource's paths, not the target's:
       // a relationship endpoint only inherits that the parameter is on.
       const inheritedInclude = pick(relConfig, "include", gInclude);
-      const include = Predicate.isObjectOrArray(inheritedInclude) ? true : inheritedInclude;
+      const include = P.isObjectOrArray(inheritedInclude) ? true : inheritedInclude;
       const fields = pick(relConfig, "fields", gFields);
       const sortOpt = pick(relConfig, "sort", gSort);
       const page = pick(relConfig, "page", gPage);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import type * as Schema from "effect/Schema";
 import { requestedFieldsets, unlinkedIncluded } from "../linkage.js";
 
@@ -14,7 +14,7 @@ type Identifier = { readonly type: string } & ({ readonly id: string } | { reado
 const one = (linkage: Identifier | ReadonlyArray<Identifier>) => ({ data: linkage });
 
 /** A member's `type` / `id` / `lid` as text; anything but a string shows as `?`. */
-const text = (value: Schema.Json | undefined): string => (Predicate.isString(value) ? value : "?");
+const text = (value: Schema.Json | undefined): string => (P.isString(value) ? value : "?");
 
 /** The `type:id` (or `type:lid`) of each member the kit reports, in order. */
 const orphans = (document: Parameters<typeof unlinkedIncluded>[0]) =>
