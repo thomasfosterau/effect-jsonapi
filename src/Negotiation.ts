@@ -185,14 +185,17 @@ export interface Negotiator {
 
 /**
  * The 406 a read answers when the JSON:API media type appears in `Accept`
- * only with disallowed media-type parameters (JSON:API §5).
+ * only with disallowed media-type parameters (JSON:API §5). Its `code`,
+ * `not_acceptable`, is the one {@link toApiError}'s `ApiError.NotAcceptable`
+ * carries: this package's spelling of the negotiation codes, which a host
+ * adopts in place of its own (effect-ext's `Negotiate` defines none, #577).
  *
  * @since 0.16.0
  * @category constants
  */
 export const NOT_ACCEPTABLE: NegotiationError = {
   status: 406,
-  code: "not-acceptable",
+  code: "not_acceptable",
   title: "Not Acceptable",
   detail:
     "The Accept header carried the JSON:API media type, but every instance was modified with media-type parameters other than `ext` or `profile` (JSON:API §6.3.2).",
@@ -210,7 +213,7 @@ export const NOT_ACCEPTABLE: NegotiationError = {
  */
 export const NOT_ACCEPTABLE_REFUSED: NegotiationError = {
   status: 406,
-  code: "not-acceptable",
+  code: "not_acceptable",
   title: "Not Acceptable",
   detail:
     "The Accept header refused the JSON:API media type with `q=0` and named no other acceptable media type (RFC 9110 §12.4.2).",
@@ -218,14 +221,16 @@ export const NOT_ACCEPTABLE_REFUSED: NegotiationError = {
 
 /**
  * The 415 a write answers when its JSON:API `Content-Type` carries a
- * disallowed media-type parameter (JSON:API §5).
+ * disallowed media-type parameter (JSON:API §5). Its `code`,
+ * `unsupported_media_type`, is `ApiError.UnsupportedMediaType`'s, as
+ * {@link NOT_ACCEPTABLE}'s is `ApiError.NotAcceptable`'s.
  *
  * @since 0.16.0
  * @category constants
  */
 export const UNSUPPORTED_MEDIA_TYPE: NegotiationError = {
   status: 415,
-  code: "unsupported-media-type",
+  code: "unsupported_media_type",
   title: "Unsupported Media Type",
   detail:
     "The Content-Type header carried the JSON:API media type with media-type parameters other than `ext` or `profile` (JSON:API §6.3.1).",
@@ -726,7 +731,11 @@ export type Outcome =
  *
  * Render the error with `ApiError.toDocument`, or fail an `HttpApi` handler
  * with it (both classes are in `ApiError.Standard`, which every JSON:API
- * endpoint declares).
+ * endpoint declares). Their codes, `not_acceptable` and
+ * `unsupported_media_type`, are the canonical spellings of the two
+ * negotiation errors: effect-ext's `Negotiate` returns a tagged verdict and
+ * defines no codes of its own, and this module's {@link NOT_ACCEPTABLE} /
+ * {@link UNSUPPORTED_MEDIA_TYPE} carry the same ones.
  *
  * @example
  * ```ts

@@ -414,7 +414,7 @@ describe("errorResponse", () => {
   it("serialises a JSON:API error document with the media type", async () => {
     const response = Negotiation.errorResponse({
       status: 415,
-      code: "unsupported-media-type",
+      code: "unsupported_media_type",
       title: "Unsupported Media Type",
       detail: "nope",
     });
@@ -427,7 +427,7 @@ describe("errorResponse", () => {
     expect(body.jsonapi.version).toBe("1.1");
     expect(body.errors[0]).toEqual({
       status: "415",
-      code: "unsupported-media-type",
+      code: "unsupported_media_type",
       title: "Unsupported Media Type",
       detail: "nope",
     });
@@ -531,5 +531,26 @@ describe("toApiError (#577)", () => {
     expect(statusOf({ _tag: "UnsupportedMediaType", representation: markdown })).toEqual(
       Option.none(),
     );
+  });
+});
+
+describe("negotiation error codes (#577)", () => {
+  const codeOf = (error: ApiError.Any): Option.Option<string> =>
+    Option.flatMap(Arr.head(ApiError.toDocument(error).errors), (e) =>
+      Option.fromNullishOr(e.code),
+    );
+
+  it("spell the seam constants' codes as the ApiError classes do", () => {
+    expect(Option.some(Negotiation.NOT_ACCEPTABLE.code)).toEqual(
+      codeOf(new ApiError.NotAcceptable()),
+    );
+    expect(Option.some(Negotiation.NOT_ACCEPTABLE_REFUSED.code)).toEqual(
+      codeOf(new ApiError.NotAcceptable()),
+    );
+    expect(Option.some(Negotiation.UNSUPPORTED_MEDIA_TYPE.code)).toEqual(
+      codeOf(new ApiError.UnsupportedMediaType()),
+    );
+    expect(Negotiation.NOT_ACCEPTABLE.code).toBe("not_acceptable");
+    expect(Negotiation.UNSUPPORTED_MEDIA_TYPE.code).toBe("unsupported_media_type");
   });
 });
