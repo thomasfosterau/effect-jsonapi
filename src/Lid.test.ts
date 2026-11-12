@@ -112,7 +112,7 @@ describe("lidMap", () => {
   // a caller hands in is a plain record: an own `__proto__` member stays a key
   // of the result rather than re-parenting it.
   it("keeps an own __proto__ member as a key, never as the result's prototype", () => {
-    const linkage = Schema.decodeUnknownSync(
+    const linkage = Schema.decodeSync(
       Schema.fromJsonString(
         Schema.Record(
           Schema.String,

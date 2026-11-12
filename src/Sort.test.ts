@@ -11,7 +11,7 @@ describe("Sort.able", () => {
     expect(Sort.AnnotationId).toBe("@thomasfosterau/effect-jsonapi/sort");
     expect(Schema.resolveAnnotations(declared)?.[Sort.AnnotationId]).toBe(true);
     expect(Schema.resolveAnnotations(Schema.String)?.[Sort.AnnotationId]).toBeUndefined();
-    expect(Schema.decodeUnknownSync(declared)("2026-01-01T00:00:00.000Z")).toBeInstanceOf(Date);
+    expect(Schema.decodeSync(declared)("2026-01-01T00:00:00.000Z")).toBeInstanceOf(Date);
     expectTypeOf(declared.Type).toEqualTypeOf<Date>();
     expectTypeOf(declared).toMatchTypeOf<typeof Schema.DateFromString>();
   });

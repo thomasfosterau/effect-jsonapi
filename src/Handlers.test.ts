@@ -514,9 +514,7 @@ describe("Handlers.project", () => {
     const resource = {
       type: "articles",
       id: "3",
-      attributes: Schema.decodeUnknownSync(Json)(
-        '{"__proto__":{"inner":2},"title":"T","body":"B"}',
-      ),
+      attributes: Schema.decodeSync(Json)('{"__proto__":{"inner":2},"title":"T","body":"B"}'),
     };
     const { attributes } = Handlers.project(resource, { articles: ["__proto__", "title"] });
     expect(Object.getPrototypeOf(attributes)).toBe(Object.prototype);
@@ -1183,7 +1181,7 @@ describe("pagination links", () => {
 
     it("keeps the request's pairs, its own page[*] included, on `self` when the window is unpageable", () => {
       // ?sort=-title&page[limit]=0 — `PageInt` admits 0, so the request decodes and nothing can be paged
-      const request = Schema.decodeUnknownSync(listQuery as Schema.Codec<any, any>)({
+      const request = Schema.decodeSync(listQuery as Schema.Codec<any, any>)({
         sort: "-title",
         "page[limit]": "0",
       }) as typeof listQuery.Type;
@@ -1253,7 +1251,7 @@ describe("Handlers.DocumentValue / Document.Value", () => {
 
   it("Document.Value names a data-document value type", () => {
     const doc: Document.Value<typeof Article> = {
-      data: Schema.decodeUnknownSync(Article)({
+      data: Schema.decodeSync(Article)({
         type: "articles",
         id: "1",
         attributes: { title: "Hi" },
@@ -1264,7 +1262,7 @@ describe("Handlers.DocumentValue / Document.Value", () => {
   });
 
   it("Document.Value carries included and meta when parameterized", () => {
-    const item = Schema.decodeUnknownSync(Article)({
+    const item = Schema.decodeSync(Article)({
       type: "articles",
       id: "1",
       attributes: { title: "Hi" },

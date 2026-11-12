@@ -322,10 +322,10 @@ describe("the advertised parameter", () => {
 
   it("decodes through a whole query schema", () => {
     const query = Query.schema(Article, { include: surface, fields: true });
-    expect(Schema.decodeUnknownSync(query)({ include: "comments.author" })).toEqual({
+    expect(Schema.decodeSync(query)({ include: "comments.author" })).toEqual({
       include: ["comments.author"],
     });
-    expect(() => Schema.decodeUnknownSync(query)({ include: "comments.editor" })).toThrow();
+    expect(() => Schema.decodeSync(query)({ include: "comments.editor" })).toThrow();
   });
 
   it("leaves `include: true` and `Query.IncludeOptions` behaviour untouched", () => {
