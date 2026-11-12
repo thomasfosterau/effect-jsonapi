@@ -138,7 +138,7 @@ export interface LinksValue {
  * @since 0.1.0
  * @category models
  */
-export type MetaValue = { readonly [key: string]: unknown };
+export type MetaValue = R.ReadonlyRecord<string, unknown>;
 
 // Simplifies intersections for readable hover types.
 type Simplify<T> = { readonly [K in keyof T]: T[K] } extends infer S ? S : never;
@@ -159,7 +159,7 @@ type Simplify<T> = { readonly [K in keyof T]: T[K] } extends infer S ? S : never
  * @category models
  */
 export interface AnyResourceValue extends ResourceValue {
-  readonly attributes?: { readonly [key: string]: unknown };
+  readonly attributes?: R.ReadonlyRecord<string, unknown>;
   readonly meta?: MetaValue;
   readonly links?: unknown;
 }

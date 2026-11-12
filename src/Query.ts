@@ -1304,7 +1304,7 @@ export type FilterRest = typeof FilterRest.Type;
 // One issue per offending key, or a `Composite` of them when several keys fail.
 const filterIssues = (
   ast: SchemaAST.AST,
-  input: { readonly [key: string]: unknown },
+  input: R.ReadonlyRecord<string, unknown>,
   issues: ReadonlyArray<SchemaIssue.Issue>,
   options: SchemaAST.ParseOptions,
 ): SchemaIssue.Issue =>
@@ -1857,7 +1857,7 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
   const nested = Schema.Struct(nestedFields);
   const fields = filterFields;
 
-  type Values = { readonly [x: string]: unknown };
+  type Values = R.ReadonlyRecord<string, unknown>;
   // A struct with no fields is effect's `{}`: it accepts any object and hands
   // it on *unchanged*, where a struct with fields drops the keys it doesn't
   // declare. So an endpoint whose query declares nothing would pass every
@@ -1945,7 +1945,7 @@ export type Pair = CanonicalPair;
  */
 export interface FlatQuerySchema extends Schema.Codec<
   unknown,
-  { readonly [key: string]: unknown },
+  R.ReadonlyRecord<string, unknown>,
   unknown
 > {}
 

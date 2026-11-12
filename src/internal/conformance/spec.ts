@@ -1113,7 +1113,7 @@ const inSlot = (pointer: string, where: Slot): boolean =>
  * `relationships` keys — the two are its "fields" together (§Resource Object
  * Fields, #494).
  */
-const fieldNamesOf = (resource: Readonly<Record<string, unknown>>): ReadonlyArray<string> => {
+const fieldNamesOf = (resource: R.ReadonlyRecord<string, unknown>): ReadonlyArray<string> => {
   const attributes = resource["attributes"];
   const relationships = resource["relationships"];
   return [

@@ -18,6 +18,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as R from "effect/Record";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
@@ -83,7 +84,7 @@ const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Any));
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Any));
 
 // A JSON request body: a document, or a flat command input.
-type RequestBody = Readonly<Record<string, unknown>>;
+type RequestBody = R.ReadonlyRecord<string, unknown>;
 
 const send = async (
   method: "POST" | "PATCH",

@@ -35,6 +35,7 @@ import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
+import * as Types from "effect/Types";
 import { HttpApiSchema } from "effect/http-api";
 import { ErrorDocument, ErrorObject } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
@@ -248,7 +249,7 @@ const makeWire = (
         decode: (doc) => {
           const first = doc.errors[0];
           const meta = first?.meta ?? {};
-          const fields: Record<string, unknown> = {};
+          const fields: Types.Mutable<R.ReadonlyRecord<string, unknown>> = {};
           Arr.forEach(options.fieldKeys, (key) => {
             if (key in meta) fields[key] = meta[key];
             else if (key === "detail" && first?.detail !== undefined) fields[key] = first.detail;
@@ -259,7 +260,7 @@ const makeWire = (
         // leaves absent stays out of `meta` (an `undefined` member is not
         // JSON), mirroring `decode` above.
         encode: (encoded) => {
-          const fields = encoded as Record<string, unknown>;
+          const fields = encoded as R.ReadonlyRecord<string, unknown>;
           const detail = options.detail?.(fields);
           const source = options.source?.(fields);
           return {

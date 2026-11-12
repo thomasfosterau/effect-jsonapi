@@ -9,6 +9,7 @@ import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
+import * as Types from "effect/Types";
 import { define } from "./define.js";
 import { vocabularyAnnotations } from "./vocabulary.js";
 
@@ -184,17 +185,17 @@ export const nest = <V>(flat: { readonly [key: string]: V }) => {
 /**
  * Inverse of {@link nest}: flattens nested groups back to bracket keys.
  */
-export const flatten = (nested: { readonly [key: string]: unknown }) => {
-  const flat: Record<string, unknown> = {};
+export const flatten = (nested: R.ReadonlyRecord<string, unknown>) => {
+  const flat: Types.Mutable<R.ReadonlyRecord<string, unknown>> = {};
   Arr.forEach(R.toEntries(nested), ([key, value]) => {
     if (value === undefined) return;
     if (P.isObject(value)) {
       Arr.forEach(R.toEntries(value), ([sub, subValue]) => {
         if (subValue === undefined) return;
-        define(flat, `${key}[${sub}]`, subValue);
+        define<unknown>(flat, `${key}[${sub}]`, subValue);
       });
     } else {
-      define(flat, key, value);
+      define<unknown>(flat, key, value);
     }
   });
   return flat;

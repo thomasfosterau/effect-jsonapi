@@ -11,6 +11,7 @@ import * as Arr from "effect/Array";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as R from "effect/Record";
 import { HttpApi, OpenApi } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
 import * as FlatQuery from "./FlatQuery.js";
@@ -26,7 +27,7 @@ const decode = <S extends Schema.Top>(schema: S) =>
 /** A built group's endpoints, structurally. */
 interface GroupLike {
   readonly identifier: string;
-  readonly endpoints: Readonly<Record<string, unknown>>;
+  readonly endpoints: R.ReadonlyRecord<string, unknown>;
 }
 interface EndpointLike {
   readonly method: string;
@@ -249,7 +250,7 @@ describe("the wire contract", () => {
     readonly paths: Readonly<
       Record<
         string,
-        Readonly<Record<string, { readonly responses: Readonly<Record<string, unknown>> }>>
+        Readonly<Record<string, { readonly responses: R.ReadonlyRecord<string, unknown> }>>
       >
     >;
   }

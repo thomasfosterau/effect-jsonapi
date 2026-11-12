@@ -13,6 +13,7 @@ import * as Option from "effect/Option";
 import * as Effect from "effect/Effect";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
+import * as R from "effect/Record";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { HttpApi } from "effect/http-api";
 import * as Conformance from "./Conformance.js";
@@ -52,7 +53,7 @@ const unpagedApi = HttpApi.make("unpaged").add(
 type Wire = {
   readonly type: "tasks";
   readonly id: string;
-  readonly attributes: Readonly<Record<string, unknown>>;
+  readonly attributes: R.ReadonlyRecord<string, unknown>;
 };
 
 /**
