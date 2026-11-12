@@ -177,7 +177,6 @@ describe("Middleware.schemaError", () => {
           code: "bad_request",
           title: "Bad Request",
           detail: "Request query failed validation",
-          meta: { detail: "Request query failed validation" },
         },
       ],
     });
