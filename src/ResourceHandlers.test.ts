@@ -883,18 +883,18 @@ describe("list", () => {
     }),
   );
 
-  it("stamps the page only when `capabilitiesOnIncluded` is false", async () => {
-    const { ops } = seeded();
-    const { handlers } = handlersFor(ops, { capabilitiesOnIncluded: false });
-    const document = await success(
-      handlers
+  it.effect("stamps the page only when `capabilitiesOnIncluded` is false", () =>
+    Effect.gen(function* () {
+      const { ops } = seeded();
+      const { handlers } = handlersFor(ops, { capabilitiesOnIncluded: false });
+      const document = yield* handlers
         .list({ query: { include: ["birthPlace"] } })
-        .pipe(Effect.provide(as(Option.some(ADMIN)))),
-    );
-    expect(document.data[0]?.meta).toEqual({ canEdit: true, canDelete: true });
-    expect(document.included?.map((r) => r.id)).toEqual([PLACE]);
-    expect(document.included?.[0]).not.toHaveProperty("meta");
-  });
+        .pipe(Effect.provide(as(Option.some(ADMIN))));
+      expect(document.data[0]?.meta).toEqual({ canEdit: true, canDelete: true });
+      expect(document.included?.map((r) => r.id)).toEqual([PLACE]);
+      expect(document.included?.[0]).not.toHaveProperty("meta");
+    }),
+  );
 
   /**
    * One test per axis the links have to carry, each asserting the parameter
