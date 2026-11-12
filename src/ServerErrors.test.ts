@@ -262,6 +262,12 @@ describe("schemaIssueToErrors", () => {
   });
 });
 
+/** A tagged failure no catalogue arm maps, so `respond` answers it with the opaque 500. */
+class DbDown extends Schema.TaggedError<DbDown, { readonly brand: unique symbol }>()(
+  "DbDown",
+  {},
+) {}
+
 /** Unwrap the mapping's verdict, failing the test when it declined to map. */
 const mapped = (cause: unknown): ServerErrors.JsonapiError => {
   const result = ServerErrors.fromTaggedError(cause);
@@ -461,7 +467,7 @@ describe("respond", () => {
   });
 
   it("answers an unmapped failure or defect with the opaque 500", async () => {
-    const failed = await responseOf(ServerErrors.respond(Effect.fail(new Error("db down"))));
+    const failed = await responseOf(ServerErrors.respond(Effect.fail(new DbDown())));
     expect(failed.status).toBe(500);
     expect(failed.body.errors[0]?.code).toBe("internal");
     const died = await responseOf(ServerErrors.respond(Effect.die("boom")));

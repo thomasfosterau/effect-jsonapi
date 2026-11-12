@@ -88,10 +88,12 @@ import * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as ErrorReporter from "effect/ErrorReporter";
+import * as Filter from "effect/Filter";
 import * as Layer from "effect/Layer";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as Rec from "effect/Record";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaIssue from "effect/SchemaIssue";
@@ -1386,16 +1388,16 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
       }
       // The linkage check reads the encoded success only: a defect it dies
       // with passes `catch`, which sees failures alone.
-      return yield* Effect.catch(
+      return yield* Effect.catchFilter(
         checkLinkage
           ? Effect.flatMap(httpEffect, (response) =>
               checkWireLinkage(response, requestedFieldsets(searchPairs(params))),
             )
           : httpEffect,
-        (error) =>
-          HttpApiError.HttpApiSchemaError.is(error)
-            ? transformSchemaError(endpoint, error)
-            : Effect.fail(error),
+        Filter.make((error) =>
+          HttpApiError.HttpApiSchemaError.is(error) ? Result.succeed(error) : Result.fail(error),
+        ),
+        (error) => transformSchemaError(endpoint, error),
       );
     }),
   );

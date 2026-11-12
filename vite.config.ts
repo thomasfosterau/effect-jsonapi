@@ -170,6 +170,10 @@ export default defineConfig({
       // and 24 (all in tests and examples). The tsc gate leaves both off.
       "effecttsgo/any-unknown-in-error-context": "warn",
       "effecttsgo/unsafe-effect-type-assertion": "warn",
+      // At zero sites: the preset's `warn`, raised so a new one fails the gate.
+      "effecttsgo/multiple-effect-provide": "error",
+      "effecttsgo/catch-conditional-refail-to-catch-if": "error",
+      "effecttsgo/global-error-in-effect-failure": "error",
       // tsconfig.json keeps `unstableApiUsage` at "suggestion" so the HTTP
       // surface this library is built on (`effect/http`, `effect/http-api`,
       // much of it `@stability unstable`) does not flood the gates (#205):

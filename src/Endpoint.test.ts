@@ -290,8 +290,7 @@ const buildClient = HttpApiTest.groups(Api, ["articles"]);
 const withHandlers = <A, E>(effect: Effect.Effect<A, E, any>) =>
   effect.pipe(
     Effect.scoped,
-    Effect.provide(ArticlesLive),
-    Effect.provide(Middleware.layer),
+    Effect.provide(Layer.provideMerge(ArticlesLive, Middleware.layer)),
   ) as Effect.Effect<A, E>;
 
 // ---------------------------------------------------------------------------
@@ -1205,8 +1204,7 @@ describe("Endpoint.resource / Group.resource", () => {
     const withComments = <A, E>(effect: Effect.Effect<A, E, any>) =>
       effect.pipe(
         Effect.scoped,
-        Effect.provide(CommentsLive),
-        Effect.provide(Middleware.layer),
+        Effect.provide(Layer.provideMerge(CommentsLive, Middleware.layer)),
       ) as Effect.Effect<A, E>;
 
     const result = await Effect.runPromise(
@@ -1400,8 +1398,7 @@ describe("HTTP round-trip with a flat write payload", () => {
     Effect.runPromise(
       effect.pipe(
         Effect.scoped,
-        Effect.provide(FlatLive),
-        Effect.provide(Middleware.layer),
+        Effect.provide(Layer.provideMerge(FlatLive, Middleware.layer)),
       ) as Effect.Effect<A, E>,
     );
 
@@ -1751,8 +1748,7 @@ describe("HTTP round-trip with an overridden list query", () => {
         return yield* client.articles.list({ query: { offset: 3, limit: 1, authorId: "9" } });
       }).pipe(
         Effect.scoped,
-        Effect.provide(FlatLive),
-        Effect.provide(Middleware.layer),
+        Effect.provide(Layer.provideMerge(FlatLive, Middleware.layer)),
       ) as Effect.Effect<any>,
     );
 
@@ -2066,8 +2062,7 @@ describe("HTTP round-trip with a wire success document", () => {
     Effect.runPromise(
       effect.pipe(
         Effect.scoped,
-        Effect.provide(WireLive),
-        Effect.provide(Middleware.layer),
+        Effect.provide(Layer.provideMerge(WireLive, Middleware.layer)),
       ) as Effect.Effect<A, E>,
     );
 
