@@ -20,7 +20,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
@@ -98,7 +98,7 @@ const wire = {
   archives: { type: "archives", id: "6", attributes: { label: "Old" } },
 } as const;
 type WireType = keyof typeof wire;
-const types: ReadonlyArray<WireType> = Rec.keys(wire);
+const types: ReadonlyArray<WireType> = R.keys(wire);
 
 // An endpoint's success document schema, for decoding wire documents.
 const successOf = (endpoint: { readonly success: Iterable<Schema.Top> }) =>

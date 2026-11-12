@@ -32,7 +32,7 @@
 import * as P from "effect/Predicate";
 import type * as Schema from "effect/Schema";
 import * as ApiError from "./ApiError.js";
-import type { NonEmptyReadonlyArray } from "effect/Array";
+import type * as Arr from "effect/Array";
 import type { HttpApiEndpoint } from "effect/http-api";
 import { HttpApiGroup } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
@@ -82,21 +82,21 @@ import type { AttributeKeys, Id, Parameter, Resource } from "./Resource.js";
  */
 export function make<
   const Type extends string,
-  const Endpoints extends NonEmptyReadonlyArray<HttpApiEndpoint.Top>,
+  const Endpoints extends Arr.NonEmptyReadonlyArray<HttpApiEndpoint.Top>,
 >(
   resource: { readonly type: Type },
   ...endpoints: Endpoints
 ): HttpApiGroup.HttpApiGroup<Type, Endpoints[number]>;
 export function make<
   const Name extends string,
-  const Endpoints extends NonEmptyReadonlyArray<HttpApiEndpoint.Top>,
+  const Endpoints extends Arr.NonEmptyReadonlyArray<HttpApiEndpoint.Top>,
 >(name: Name, ...endpoints: Endpoints): HttpApiGroup.HttpApiGroup<Name, Endpoints[number]>;
 export function make(
   nameOrResource: string | { readonly type: string },
   ...endpoints: ReadonlyArray<HttpApiEndpoint.Top>
 ) {
   return HttpApiGroup.make(P.isString(nameOrResource) ? nameOrResource : nameOrResource.type).add(
-    ...(endpoints as unknown as NonEmptyReadonlyArray<HttpApiEndpoint.Top>),
+    ...(endpoints as unknown as Arr.NonEmptyReadonlyArray<HttpApiEndpoint.Top>),
   );
 }
 

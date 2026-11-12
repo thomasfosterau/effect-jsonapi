@@ -19,7 +19,7 @@ import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { declaresName } from "../declaredQuery.js";
@@ -1465,7 +1465,7 @@ const noEndpointWhere = (claim: string, opaque: ReadonlyArray<string>): string =
 const attributeNamesOf = (data: Schema.JsonArray): ReadonlyArray<string> =>
   Option.match(Arr.findFirst(data, isJsonObject), {
     onNone: () => [],
-    onSome: (first) => Rec.keys(objectIn(first["attributes"])),
+    onSome: (first) => R.keys(objectIn(first["attributes"])),
   });
 
 /** The attribute names the first primary resource object of a response carries. */

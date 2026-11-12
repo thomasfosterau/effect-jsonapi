@@ -12,7 +12,7 @@
 import * as Formatter from "effect/Formatter";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { isJsonObject, unlinkedIncluded } from "./linkage.js";
@@ -28,7 +28,7 @@ export const bodyText = (response: HttpServerResponse.HttpServerResponse): strin
   return Match.value(body).pipe(
     Match.tag("Empty", () => ""),
     Match.tag("Uint8Array", (body) => new TextDecoder().decode(body.body)),
-    Match.tag("Raw", (body) => (Predicate.isString(body.body) ? body.body : undefined)),
+    Match.tag("Raw", (body) => (P.isString(body.body) ? body.body : undefined)),
     Match.orElse(() => undefined),
   );
 };
@@ -49,7 +49,7 @@ const decodeResourceSelf = Schema.decodeUnknownOption(Schema.Struct({ data: Self
 const decodeDocumentSelf = Schema.decodeUnknownOption(SelfLinked);
 
 /** The URL of a link, whichever way it is spelled. */
-const href = (link: typeof Link.Type): string => (Predicate.isString(link) ? link : link.href);
+const href = (link: typeof Link.Type): string => (P.isString(link) ? link : link.href);
 
 // `Location` is a URI-reference (RFC 9110 §10.2.2), and RFC 3986 spells one in
 // visible US-ASCII only: no space, no tab, no CR or LF (which the platform
@@ -98,8 +98,7 @@ export const withCreatedLocation = (
 // `toString` member there and `String` would throw on it. A member the object
 // lacks reads as `undefined` at runtime (the index signature does not say so),
 // which `Formatter.format` shows as such.
-const part = (value: Schema.Json): string =>
-  Predicate.isString(value) ? value : Formatter.format(value);
+const part = (value: Schema.Json): string => (P.isString(value) ? value : Formatter.format(value));
 
 // The body text as a JSON value, for the linkage walk. Stricter than
 // `parseJson` (a non-finite number is not JSON), which costs nothing here: the

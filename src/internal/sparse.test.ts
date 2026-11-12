@@ -10,8 +10,8 @@
  * whose type it does not name stays strict, alone or as a family's member.
  */
 import { describe, expect, it } from "vite-plus/test";
-import * as Predicate from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { HttpApi, OpenApi } from "effect/http-api";
 import * as Endpoint from "../Endpoint.js";
@@ -27,10 +27,10 @@ const Article = Resource.make("articles", {
 
 // Whether attribute `key` of a resource object struct is the schema `expected`.
 const attributeIs = (schema: Schema.Top, key: string, expected: Schema.Top): boolean =>
-  Predicate.hasProperty(schema, "fields") &&
-  Predicate.hasProperty(schema.fields, "attributes") &&
-  Predicate.hasProperty(schema.fields.attributes, "fields") &&
-  Predicate.hasProperty(schema.fields.attributes.fields, key) &&
+  P.hasProperty(schema, "fields") &&
+  P.hasProperty(schema.fields, "attributes") &&
+  P.hasProperty(schema.fields.attributes, "fields") &&
+  P.hasProperty(schema.fields.attributes.fields, key) &&
   schema.fields.attributes.fields[key] === expected;
 
 // The OpenAPI document of an api serving `Article` strict (`list`) and
@@ -85,7 +85,7 @@ describe("sparseResource (#322)", () => {
   it("drops a user `identifier`, so the strict component is the only one named", () => {
     const document = openApi();
     expect(
-      Rec.keys(document.components.schemas).filter((name) => name.startsWith("Article")),
+      R.keys(document.components.schemas).filter((name) => name.startsWith("Article")),
     ).toEqual(["Article"]);
     // The component is the strict definition…
     expect(document.components.schemas).toMatchObject({

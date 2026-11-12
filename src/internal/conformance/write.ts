@@ -37,7 +37,7 @@ import * as MutableHashSet from "effect/MutableHashSet";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HEADER as IDEMPOTENCY_HEADER } from "../../Idempotency.js";
@@ -1018,7 +1018,7 @@ export const readBackDifferences = (
       Eq.equals(value, storedAttributes[name])
         ? Result.failVoid
         : Result.succeed(
-            `attributes.${name}: ${rendered(value)} · read back ${shown(Rec.get(storedAttributes, name))}`,
+            `attributes.${name}: ${rendered(value)} · read back ${shown(R.get(storedAttributes, name))}`,
           ),
   );
   const relationships = Arr.filterMap(
@@ -1028,7 +1028,7 @@ export const readBackDifferences = (
         onNone: () => Result.failVoid,
         onSome: (linkage) => {
           const read = Option.flatMap(
-            Option.filter(Rec.get(storedRelationships, name), isJsonObject),
+            Option.filter(R.get(storedRelationships, name), isJsonObject),
             linkageValue,
           );
           return Option.exists(read, (other) => Eq.equals(linkage, other))

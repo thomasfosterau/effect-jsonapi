@@ -39,7 +39,7 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { MEDIA_TYPE } from "../media.js";
@@ -345,7 +345,7 @@ const decodeIdentifierType = Schema.decodeUnknownOption(Schema.Struct({ type: Sc
 
 /** The first relationship of `payload` whose linkage names a resource of one of `types`. */
 const relinkFor = (payload: Payload, types: ReadonlyArray<string>): Option.Option<Relink> =>
-  Arr.findFirst(Rec.toEntries(payload.relationships ?? {}), ([name, relationship]) => {
+  Arr.findFirst(R.toEntries(payload.relationships ?? {}), ([name, relationship]) => {
     if (!isRecord(relationship)) return Option.none();
     const data = relationship["data"];
     const items: ReadonlyArray<unknown> = Array.isArray(data) ? data : [data];

@@ -12,7 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HttpApiTest, OpenApi } from "effect/http-api";
@@ -382,7 +382,7 @@ describe("github example: listing", () => {
 describe("github example: pagination links carry the request's query (#447)", () => {
   // A link's query string as the flat record the endpoint's query schema decodes.
   const searchOf = (link: string): Record<string, string> =>
-    Rec.fromEntries(new URL(link, "https://example.test").searchParams);
+    R.fromEntries(new URL(link, "https://example.test").searchParams);
 
   it.effect(
     "`next` on GET /issues keeps `sort`, `filter` and `include`, and continues the order",

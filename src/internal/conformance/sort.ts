@@ -34,8 +34,8 @@ import * as Effect from "effect/Effect";
 import * as HashMap from "effect/HashMap";
 import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import type * as Schema from "effect/Schema";
 import {
@@ -164,10 +164,10 @@ const attributesOf = (resource: Schema.Json): Readonly<Record<string, Schema.Jso
 
 const keyOf = (resource: Schema.Json, field: string): Key => {
   const value = attributesOf(resource)[field];
-  if (Predicate.isNullish(value)) return NULL;
-  if (Predicate.isString(value)) return { kind: "string", value };
-  if (Predicate.isNumber(value)) return { kind: "number", value };
-  if (Predicate.isBoolean(value)) return { kind: "boolean", value };
+  if (P.isNullish(value)) return NULL;
+  if (P.isString(value)) return { kind: "string", value };
+  if (P.isNumber(value)) return { kind: "number", value };
+  if (P.isBoolean(value)) return { kind: "boolean", value };
   return { kind: "unordered" };
 };
 
@@ -266,7 +266,7 @@ const keysOf = (data: ReadonlyArray<Schema.Json>, field: string): ReadonlyArray<
 
 /** The attribute names any resource of `data` carries, each once, in the order first seen. */
 const namesOf = (data: ReadonlyArray<Schema.Json>): ReadonlyArray<string> =>
-  Arr.dedupe(Arr.flatMap(data, (resource) => Rec.keys(attributesOf(resource))));
+  Arr.dedupe(Arr.flatMap(data, (resource) => R.keys(attributesOf(resource))));
 
 /** The attributes of `data` whose values are of one JSON scalar type besides NULL. */
 const orderedNamesOf = (data: ReadonlyArray<Schema.Json>): ReadonlyArray<string> =>
@@ -570,10 +570,10 @@ const sortable = <A>(ctx: Context, suite: Suite<A>) => {
   }));
   return {
     resolved: Arr.flatMap(resolutions, ({ endpoint, resolution }) =>
-      Predicate.isTagged(resolution, "Resolved") ? [{ endpoint, path: resolution.path }] : [],
+      P.isTagged(resolution, "Resolved") ? [{ endpoint, path: resolution.path }] : [],
     ),
     unresolved: Arr.flatMap(resolutions, ({ resolution }) =>
-      Predicate.isTagged(resolution, "Unresolved") ? [resolution.reason] : [],
+      P.isTagged(resolution, "Unresolved") ? [resolution.reason] : [],
     ),
   };
 };
