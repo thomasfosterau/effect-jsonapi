@@ -386,7 +386,7 @@ describe("northwind example: pagination links carry the request's query (#447)",
         });
         const next = first.links?.next;
         assert(P.isString(next));
-        const query = yield* Schema.decodeUnknownEffect(ProductsQuery)(searchOf(next));
+        const query = yield* Schema.decodeEffect(ProductsQuery)(searchOf(next));
         const second = yield* client.products.list({ query });
         return [first, second] as const;
       }),
@@ -432,7 +432,7 @@ describe("northwind example: pagination links carry the request's query (#447)",
     );
     const next = document.links?.next;
     assert(P.isString(next));
-    expect(Schema.decodeUnknownSync(SearchQuery)(searchOf(next))).toEqual({
+    expect(Schema.decodeSync(SearchQuery)(searchOf(next))).toEqual({
       include: ["category"],
       fields: { products: ["name"] },
       filter: { q: "a" },
@@ -925,7 +925,7 @@ describe("northwind example: spec compliance on the wire", () => {
   it("sample resources decode against their own schemas (round-trip)", () => {
     const encoded = Schema.encodeUnknownSync(Order)(order10248);
     expect(encoded.attributes.orderDate).toBe("1996-07-04T00:00:00.000Z");
-    const decoded = Schema.decodeUnknownSync(Order)(encoded);
+    const decoded = Schema.decodeSync(Order)(encoded);
     expect(decoded).toEqual(order10248);
 
     // the unshipped order encodes a null shipper and no shipped date

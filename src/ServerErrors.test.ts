@@ -48,7 +48,7 @@ const issueFor = <S extends Schema.Top>(
   options?: { readonly errors: "first" | "all" },
 ): SchemaIssue.Issue => {
   const exit = Effect.runSyncExit(
-    Schema.decodeUnknownEffect(schema as unknown as Schema.Codec<S["Type"]>)(input, options),
+    Schema.decodeEffect(schema as unknown as Schema.Codec<S["Type"]>)(input, options),
   );
   if (Exit.isSuccess(exit)) throw new Error("expected schema to fail");
   const error = Cause.findErrorOption(exit.cause);

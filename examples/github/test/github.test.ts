@@ -360,7 +360,7 @@ describe("github example: pagination links carry the request's query (#447)", ()
         });
         const next = first.links?.next;
         assert(P.isString(next));
-        const query = yield* Schema.decodeUnknownEffect(IssuesQuery)(searchOf(next));
+        const query = yield* Schema.decodeEffect(IssuesQuery)(searchOf(next));
         const second = yield* client.issues.list({ query });
         return [first, second] as const;
       }),
@@ -405,7 +405,7 @@ describe("github example: pagination links carry the request's query (#447)", ()
     );
     const next = document.links?.next;
     assert(P.isString(next));
-    expect(Schema.decodeUnknownSync(SearchQuery)(searchOf(next))).toEqual({
+    expect(Schema.decodeSync(SearchQuery)(searchOf(next))).toEqual({
       include: ["owner"],
       fields: { repositories: ["name"] },
       filter: { q: "o" },
@@ -1058,7 +1058,7 @@ describe("github example: spec compliance on the wire", () => {
   it("sample resources decode against their own schemas (round-trip)", () => {
     const encoded = Schema.encodeUnknownSync(Repository)(helloWorld);
     expect(encoded.attributes.createdAt).toBe("2011-01-26T19:01:12.000Z");
-    const decoded = Schema.decodeUnknownSync(Repository)(encoded);
+    const decoded = Schema.decodeSync(Repository)(encoded);
     expect(decoded).toEqual(helloWorld);
 
     const pull = Schema.encodeUnknownSync(PullRequest)(readmePull);

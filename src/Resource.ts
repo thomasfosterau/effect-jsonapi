@@ -3217,7 +3217,7 @@ export const make = <
     // Decode the wire string through the id schema (rather than `id.make`) so
     // `ref` honours whatever decoded type a custom `Codec<_, string>` id carries.
     ref: (refId: string) =>
-      identifier.make({ id: Schema.decodeUnknownSync(id)(refId) } as Identifier<
+      identifier.make({ id: Schema.decodeSync(id)(refId) } as Identifier<
         Type,
         IdSchema
       >["~type.make.in"]),

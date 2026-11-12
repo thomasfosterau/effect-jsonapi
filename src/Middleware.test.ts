@@ -194,12 +194,9 @@ describe("Middleware.schemaError", () => {
 
 describe("Middleware.schemaErrorDocument", () => {
   const failure = <S extends Schema.Top>(schema: S, input: Schema.Json) => {
-    const result = Schema.decodeUnknownResult(schema as unknown as Schema.Codec<unknown, unknown>)(
-      input,
-      {
-        errors: "all",
-      },
-    );
+    const result = Schema.decodeResult(schema as unknown as Schema.Codec<unknown, unknown>)(input, {
+      errors: "all",
+    });
     if (Result.isSuccess(result)) throw new Error("expected a failure");
     return result.failure;
   };

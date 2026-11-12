@@ -705,7 +705,7 @@ describe("blog example: heterogeneous search", () => {
     // `next` is the same query on the next page, decoded through the schema
     // the endpoint decodes.
     const search = Rec.fromEntries(new URL(next, "https://example.test").searchParams);
-    expect(Schema.decodeUnknownSync(SearchQuery)(search)).toEqual({
+    expect(Schema.decodeSync(SearchQuery)(search)).toEqual({
       include: ["author"],
       fields: { articles: ["title"] },
       filter: { q: "e" },
@@ -839,7 +839,7 @@ describe("blog example: spec compliance on the wire", () => {
   it("sample resources decode against their own schemas (round-trip)", () => {
     const encoded = Schema.encodeUnknownSync(Article)(sampleArticle);
     expect(encoded.attributes.createdAt).toBe("2024-01-01T00:00:00.000Z");
-    const decoded = Schema.decodeUnknownSync(Article)(encoded);
+    const decoded = Schema.decodeSync(Article)(encoded);
     expect(decoded).toEqual(sampleArticle);
 
     const person = Schema.encodeUnknownSync(Person)(sampleAuthor);

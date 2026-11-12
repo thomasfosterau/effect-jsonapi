@@ -83,7 +83,7 @@ describe("mutually-recursive resource definitions", () => {
   });
 
   it("decodes a compound document across the cycle", () => {
-    const decoded = Schema.decodeUnknownSync(Article.document())({
+    const decoded = Schema.decodeSync(Article.document())({
       data: {
         type: "articles",
         id: "1",
@@ -115,7 +115,7 @@ describe("mutually-recursive resource definitions", () => {
   });
 
   it("decodes the inverse document too", () => {
-    const decoded = Schema.decodeUnknownSync(Comment.document())({
+    const decoded = Schema.decodeSync(Comment.document())({
       data: {
         type: "comments",
         id: "9",
@@ -136,7 +136,7 @@ describe("mutually-recursive resource definitions", () => {
   it("keeps the included union finite — one hop, not the transitive closure", () => {
     // A cycle must not make the union infinite: `Article.document()` admits the
     // targets of Article's own linkable relationships and nothing further.
-    const decoded = Schema.decodeUnknownSync(Article.document())({
+    const decoded = Schema.decodeSync(Article.document())({
       data: { type: "articles", id: "1", attributes: { title: "JSON:API" } },
       included: [{ type: "articles", id: "2", attributes: { title: "Editor's" } }],
     });
@@ -164,7 +164,7 @@ describe("mutually-recursive resource definitions", () => {
 
   it("derives the typed include whitelist across the cycle", () => {
     const query = Query.schema(Article, { include: true });
-    expect(Schema.decodeUnknownSync(query)({ include: "comments.article" })).toEqual({
+    expect(Schema.decodeSync(query)({ include: "comments.article" })).toEqual({
       include: ["comments.article"],
     });
     expectTypeOf<"comments.article">().toMatchTypeOf<IncludePath<Article>>();
@@ -180,7 +180,7 @@ describe("mutually-recursive resource definitions", () => {
   });
 
   it("derives create and update payloads on both sides of the cycle", () => {
-    const createComment = Schema.decodeUnknownSync(Comment.createPayload)({
+    const createComment = Schema.decodeSync(Comment.createPayload)({
       data: {
         type: "comments",
         attributes: { body: "first" },
@@ -196,7 +196,7 @@ describe("mutually-recursive resource definitions", () => {
       }),
     ).toThrow();
 
-    const updateArticle = Schema.decodeUnknownSync(Article.updatePayload)({
+    const updateArticle = Schema.decodeSync(Article.updatePayload)({
       data: { type: "articles", id: "1", attributes: { title: "new" } },
     });
     expect(updateArticle.data.attributes?.title).toBe("new");
@@ -235,7 +235,7 @@ describe("self-recursive resource definitions", () => {
   });
 
   it("decodes a self-referencing document", () => {
-    const decoded = Schema.decodeUnknownSync(Category.document())({
+    const decoded = Schema.decodeSync(Category.document())({
       data: {
         type: "categories",
         id: "1",

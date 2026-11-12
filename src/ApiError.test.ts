@@ -78,7 +78,7 @@ describe("ApiError.make", () => {
         },
       ],
     };
-    const error = Schema.decodeUnknownSync(ArticleNotFound.wire)(document);
+    const error = Schema.decodeSync(ArticleNotFound.wire)(document);
     expect(error).toBeInstanceOf(ArticleNotFound);
     expect(error.id).toBe("42");
   });
@@ -88,7 +88,7 @@ describe("ApiError.make", () => {
     expect(wire).toEqual({
       errors: [{ status: "429", code: "rate_limited", title: "Too Many Requests" }],
     });
-    const error = Schema.decodeUnknownSync(RateLimited.wire)(wire);
+    const error = Schema.decodeSync(RateLimited.wire)(wire);
     expect(error).toBeInstanceOf(RateLimited);
   });
 
@@ -127,7 +127,7 @@ describe("standard errors", () => {
 
   it("BadRequest decodes a document carrying detail on the error object but no meta", () => {
     // the schema-error middleware's source-bearing 400s, and any other server's
-    const decoded = Schema.decodeUnknownSync(ApiError.BadRequest.wire)({
+    const decoded = Schema.decodeSync(ApiError.BadRequest.wire)({
       errors: [
         {
           status: "400",
@@ -142,7 +142,7 @@ describe("standard errors", () => {
     expect(decoded.detail).toBe('Unknown filter field "body"');
     // without detail anywhere the field is simply absent
     expect(
-      Schema.decodeUnknownSync(ApiError.BadRequest.wire)({
+      Schema.decodeSync(ApiError.BadRequest.wire)({
         errors: [{ status: "400", code: "bad_request" }],
       }).detail,
     ).toBeUndefined();
@@ -218,9 +218,7 @@ describe("ApiError.make source", () => {
     const bare = Schema.encodeSync(MaybePointed.wire)(new MaybePointed({ id: "1" }));
     expect(bare.errors[0]?.meta).toEqual({ id: "1" });
     expect(bare.errors[0]?.source).toBeUndefined();
-    expect(Schema.decodeUnknownSync(MaybePointed.wire)(bare)).toEqual(
-      new MaybePointed({ id: "1" }),
-    );
+    expect(Schema.decodeSync(MaybePointed.wire)(bare)).toEqual(new MaybePointed({ id: "1" }));
 
     const pointed = Schema.encodeSync(MaybePointed.wire)(
       new MaybePointed({ id: "1", pointer: "/data" }),
@@ -278,7 +276,7 @@ describe("query-parameter errors", () => {
       includablePaths: ["author"],
     });
     const wire = Schema.encodeUnknownSync(ApiError.UnsupportedIncludePath.wire)(original);
-    const decoded = Schema.decodeUnknownSync(ApiError.UnsupportedIncludePath.wire)(wire);
+    const decoded = Schema.decodeSync(ApiError.UnsupportedIncludePath.wire)(wire);
     expect(decoded).toBeInstanceOf(ApiError.UnsupportedIncludePath);
     expect(decoded.path).toBe("publisher");
     expect(decoded.includablePaths).toEqual(["author"]);
@@ -325,7 +323,7 @@ describe("query-parameter errors", () => {
       includablePaths: ["a", "a.b"],
     });
     const wire = Schema.encodeUnknownSync(ApiError.UnsupportedIncludeDepth.wire)(original);
-    const decoded = Schema.decodeUnknownSync(ApiError.UnsupportedIncludeDepth.wire)(wire);
+    const decoded = Schema.decodeSync(ApiError.UnsupportedIncludeDepth.wire)(wire);
     expect(decoded).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
     expect(decoded.path).toBe("a.b.c");
     expect(decoded.maxDepth).toBe(2);
@@ -370,7 +368,7 @@ describe("query-parameter errors", () => {
       sortableFields: ["title"],
     });
     const wire = Schema.encodeUnknownSync(ApiError.UnsupportedSortField.wire)(original);
-    const decoded = Schema.decodeUnknownSync(ApiError.UnsupportedSortField.wire)(wire);
+    const decoded = Schema.decodeSync(ApiError.UnsupportedSortField.wire)(wire);
     expect(decoded).toBeInstanceOf(ApiError.UnsupportedSortField);
     expect(decoded.field).toBe("score");
     expect(decoded.sortableFields).toEqual(["title"]);
@@ -411,7 +409,7 @@ describe("query-parameter errors", () => {
       attributes: ["title"],
     });
     const wire = Schema.encodeUnknownSync(ApiError.UnsupportedFieldsetMember.wire)(original);
-    const decoded = Schema.decodeUnknownSync(ApiError.UnsupportedFieldsetMember.wire)(wire);
+    const decoded = Schema.decodeSync(ApiError.UnsupportedFieldsetMember.wire)(wire);
     expect(decoded).toBeInstanceOf(ApiError.UnsupportedFieldsetMember);
     expect(decoded.type).toBe("articles");
     expect(decoded.field).toBe("secret");
