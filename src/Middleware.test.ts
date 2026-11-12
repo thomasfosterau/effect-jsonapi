@@ -169,7 +169,8 @@ describe("Middleware.negotiate", () => {
   it("composes with ApiError.toDocument to render the spec error body", () => {
     const error = negotiate({ contentType: `${MEDIA_TYPE}; charset=utf-8` });
     expect(error).toBeInstanceOf(UnsupportedMediaType);
-    expect(toDocument(error!)).toEqual({
+    assert(error !== undefined);
+    expect(toDocument(error)).toEqual({
       errors: [{ status: "415", code: "unsupported_media_type", title: "Unsupported Media Type" }],
     });
   });
@@ -503,7 +504,8 @@ describe("tracing", () => {
     expect(span?.attributes.get("jsonapi.negotiation.outcome")).toBe("rejected");
     expect(span?.attributes.get("jsonapi.negotiation.rule")).toBe("content_type");
     // the raw header value is never captured as an attribute
-    expect(stringify([...span!.attributes.values()])).not.toContain("charset");
+    assert(span !== undefined);
+    expect(stringify([...span.attributes.values()])).not.toContain("charset");
   });
 
   it("tags Span.negotiate with the accept rule on a 406", async () => {
@@ -526,8 +528,9 @@ describe("tracing", () => {
     expect(span?.attributes.get("jsonapi.request_part")).toBe("Query");
     // only the fixed request-part enum is attached — never the offending
     // parameter name, the decode failure message, or anything else per-request
-    expect([...span!.attributes.keys()]).toEqual(["jsonapi.request_part"]);
-    expect(stringify([...span!.attributes.values()])).not.toContain("limit");
+    assert(span !== undefined);
+    expect([...span.attributes.keys()]).toEqual(["jsonapi.request_part"]);
+    expect(stringify([...span.attributes.values()])).not.toContain("limit");
   });
 
   it("does not emit Span.schemaError for a request that never fails validation", async () => {

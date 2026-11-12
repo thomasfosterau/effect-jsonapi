@@ -1207,8 +1207,8 @@ describe("Query.canonical with filter: true", () => {
         queries.some(
           (q) =>
             Object.keys(q).length === 5 &&
-            Arr.isReadonlyArrayNonEmpty(q.include!) &&
-            Arr.isReadonlyArrayNonEmpty(q.sort!),
+            Arr.isReadonlyArrayNonEmpty(q.include ?? []) &&
+            Arr.isReadonlyArrayNonEmpty(q.sort ?? []),
         ),
       ).toBe(true);
     });
@@ -1521,14 +1521,16 @@ describe("Endpoint.list with filter: true, end to end", () => {
   });
 
   it("answers 400 with source.parameter for a malformed or bare filter key", async () => {
-    await Promise.all(
-      ["filter[status]x", "filter"].map(async (key) => {
-        const response = await request(`http://localhost/articles?${key}=open`);
-        expect(response.status).toBe(400);
-        expect(response.body.errors).toHaveLength(1);
-        expect(response.body.errors[0].source).toEqual({ parameter: key });
-        expect(response.body.errors[0].detail).toMatch(/^Malformed filter key/);
-      }),
+    const check = async (key: string) => {
+      const response = await request(`http://localhost/articles?${key}=open`);
+      expect(response.status).toBe(400);
+      expect(response.body.errors).toHaveLength(1);
+      expect(response.body.errors[0].source).toEqual({ parameter: key });
+      expect(response.body.errors[0].detail).toMatch(/^Malformed filter key/);
+    };
+    // One request after another, in order.
+    await Arr.reduce(["filter[status]x", "filter"], Promise.resolve(), (previous, key) =>
+      previous.then(() => check(key)),
     );
   });
 

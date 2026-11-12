@@ -5,7 +5,7 @@
  * refused, and the web handler answers documents, negotiated 400s, and the
  * error seam's 404 / 409 through the flat presets end to end.
  */
-import { describe, expect, it, onTestFinished } from "vite-plus/test";
+import { assert, describe, expect, it, onTestFinished } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -103,11 +103,11 @@ describe("registry ↔ contract", () => {
   it("gives every group a family with exactly its endpoint names", () => {
     Arr.forEach(Object.entries(Api.groups), ([identifier, group]) => {
       const family = families.find((f) => f.group === identifier);
-      expect(family, identifier).toBeDefined();
-      expect(Arr.sort(Object.keys(family!.handlers), Order.String)).toEqual(
+      assert(family !== undefined, identifier);
+      expect(Arr.sort(Object.keys(family.handlers), Order.String)).toEqual(
         Arr.sort(Object.keys(group.endpoints), Order.String),
       );
-      expect(() => Registry.checkFamily(Api, family!)).not.toThrow();
+      expect(() => Registry.checkFamily(Api, family)).not.toThrow();
       Arr.forEach(Object.keys(group.endpoints), (endpoint) => {
         expect(Option.isSome(Registry.handlerFor(families, identifier, endpoint))).toBe(true);
       });

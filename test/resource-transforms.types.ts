@@ -243,7 +243,7 @@ const withSelfLink = Handlers.transform<SelfLinkLambda>((resource) => ({
 const linked = Handlers.data(article, { included: [related], onResource: withSelfLink });
 assertType<string>(linked.data.links.self);
 assertType<string>(linked.data.attributes.body);
-assertType<string>(linked.included![0].links.self);
+if (linked.included !== undefined) assertType<string>(linked.included[0].links.self);
 // @ts-expect-error -- the lambda declares `self`, and nothing else
 assertType<string>(linked.data.links.related);
 

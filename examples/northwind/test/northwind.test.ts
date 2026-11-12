@@ -158,8 +158,9 @@ describe("northwind example: fetching", () => {
       // without discriminating on `type`
       const category = document.included?.[0];
       expect(category?.attributes.name).toBe("Beverages");
-      expectTypeOf(category!.attributes.name).toEqualTypeOf<string>();
-      expectTypeOf(category!.type).toEqualTypeOf<"categories">();
+      assert(category !== undefined);
+      expectTypeOf(category.attributes.name).toEqualTypeOf<string>();
+      expectTypeOf(category.type).toEqualTypeOf<"categories">();
     }),
   );
 
