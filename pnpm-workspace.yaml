@@ -62,7 +62,7 @@ catalog:
   # (#205). Read the
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
   # before bumping any of the three.
-  "@effect/tsgo": 0.67.7
+  "@effect/tsgo": 0.69.0
   # Effect-aware test runner (`it.effect`, `layer`, `TestClock`): tests run
   # their Effects through it instead of `Effect.runPromise` in the body
   # (`effect/effect-run-in-body`, #600). Pinned to the `effect` release below
