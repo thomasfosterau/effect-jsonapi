@@ -11,7 +11,7 @@ Tick what you ran, in the order of [docs/CONTRIBUTING.md](https://github.com/tho
 - [ ] `vp run check` (sources, type-level tests, examples, emitted declarations)
 - [ ] `vp run -r test:unit`
 - [ ] `vp run docgen` (every JSDoc `@example` compiled and executed)
-- [ ] `vp exec fallow audit --base origin/trunk`
+- [ ] `vp run fallow:audit` (the pre-commit hook)
 
 ## Changeset
 

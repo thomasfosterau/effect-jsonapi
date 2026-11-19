@@ -4,7 +4,7 @@ Releases use [Changesets](https://github.com/changesets/changesets) and npm [tru
 
 ## Flow
 
-1. Add a changeset with your change (`vp run changeset`). Pre-1.0: `minor` for a breaking change, `patch` otherwise, never `major`.
+1. Add a changeset with your change (`vp exec changeset`). Pre-1.0: `minor` for a breaking change, `patch` otherwise, never `major`.
 2. On `trunk`, [release.yml](../.github/workflows/release.yml) opens or updates the "chore: version packages" PR and assigns it to the owner.
 3. Merging that PR publishes: `pnpm publish --recursive --ignore-scripts` from the protected `release` environment (a no-op when npm already has the version), then `changeset git-tag` and a GitHub release. `pnpm publish` is what rewrites `catalog:peers` into the published peer range.
 

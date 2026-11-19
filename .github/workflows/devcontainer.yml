@@ -44,7 +44,7 @@ jobs:
       # Only to run the devcontainers CLI on the runner.
       - uses: voidzero-dev/setup-vp@v1.22.0
         with:
-          node-version: "*"
+          node-version: lts
           version-file: pnpm-workspace.yaml
           cache: true
           run-install: false

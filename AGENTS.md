@@ -15,4 +15,4 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 
 ## Fallow
 
-Before committing, run `vp run test:coverage`, then `vp exec fallow audit --base origin/trunk --format json --quiet --explain --gate-marker agent`; fix a `fail` verdict. Only findings the change introduces count. `fallow dead-code --trace <file>:<export>` before deleting an "unused" export.
+The pre-commit hook runs `vp run fallow:audit` and blocks a commit on findings the change introduces; fix them rather than skipping the hook. Run `fallow dead-code --trace <file>:<export>` before deleting an "unused" export.

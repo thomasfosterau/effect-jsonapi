@@ -283,6 +283,16 @@ export default defineConfig({
         dependsOn: ["build"],
         cache: false,
       },
+      // Blocks a commit on a `fail` verdict (.vite-hooks/pre-commit).
+      "fallow:audit": {
+        command: "vp exec fallow audit --base origin/trunk --quiet",
+        dependsOn: ["test:coverage"],
+        cache: false,
+      },
+      fallow: {
+        command: "vp exec fallow --summary",
+        cache: false,
+      },
       // Compiles and runs every JSDoc `@example` against `dist/`; writes the
       // API reference to docs/api/.
       docgen: {

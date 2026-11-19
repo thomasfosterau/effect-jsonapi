@@ -10,7 +10,7 @@
 
 ## Toolchain
 
-[Vite+](https://viteplus.dev) (`vp`) manages Node.js, pnpm and the tools; run everything through it (`vp exec <bin>`, not `npx`). `vp install` installs dependencies and the git hooks; the pre-commit hook formats and lints staged files.
+[Vite+](https://viteplus.dev) (`vp`) manages Node.js, pnpm and the tools; run everything through it (`vp exec <bin>`, not `npx`). `vp install` installs dependencies and the git hooks; the pre-commit hook formats and lints staged files, then runs the Fallow audit.
 
 | Command | Does |
 | --- | --- |
@@ -22,7 +22,7 @@
 | `vp run ci` | All of the above plus `pnpm audit` and `typecheck:floor` (network), as CI runs it |
 | `vp run test:coverage` | The coverage map `fallow audit` reads |
 
-[Fallow](https://fallow.tools) checks dead code, duplication and complexity: `vp run test:coverage && vp exec fallow audit --base origin/trunk`. Use it to polish your work; its findings are guidance, not dogma, and CI doesn't run it.
+[Fallow](https://fallow.tools) checks dead code, duplication and complexity. The pre-commit hook runs `vp run fallow:audit` (coverage, then `fallow audit` against `origin/trunk`) and blocks a commit on findings the change introduces; `vp run fallow` summarises the whole tree. Use it to polish your work: its findings are guidance, not dogma, and CI doesn't run it.
 
 `vp check` (format and lint) and `vp run check` (type gates) are different commands.
 
@@ -64,8 +64,8 @@ Use Effect idioms throughout, and strongly prefer Effect v4's own modules (`Opti
 
 ## Before pushing
 
-Run `vp run ci` (or each gate in its order), then the Fallow audit above.
+Run `vp run ci` (or each gate in its order). The pre-commit hook runs the Fallow audit.
 
 ## Changesets
 
-Every change to the published package's behaviour, including doc comments that reach the emitted `.d.ts`, needs a changeset: `vp run changeset`. Docs-, CI- and tooling-only changes need none. Pre-1.0, a breaking change is `minor`; never `major`. Never version or publish by hand: see [PUBLISHING.md](PUBLISHING.md).
+Every change to the published package's behaviour, including doc comments that reach the emitted `.d.ts`, needs a changeset: `vp exec changeset`. Docs-, CI- and tooling-only changes need none. Pre-1.0, a breaking change is `minor`; never `major`. Never version or publish by hand: see [PUBLISHING.md](PUBLISHING.md).
