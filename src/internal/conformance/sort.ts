@@ -76,14 +76,13 @@ import {
   unanswered,
 } from "./crawl.js";
 
-const REFERENCE =
-  "https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md";
+const REFERENCE = "https://jsonapi.org/format/1.1/#fetching-sorting";
 
 const rule: Rule = {
   id: "profile/sort/ordering",
   tier: "profile",
   section: "filter-grammar/v1 §10 Sort order",
-  reference: `${REFERENCE}#10-sort-order`,
+  reference: REFERENCE,
   level: "MUST",
   requirement:
     "`?sort=f` MUST list a collection's primary data in ascending order of `f`'s JSON value — F-ORD-1's order for that JSON type: numeric, code-point, `false` < `true` — with every NULL (an absent member or `null`) after every value, and `?sort=-f` MUST list it in exactly the reverse order, NULLs first (S-ORD-1 to S-ORD-3).",
@@ -93,7 +92,7 @@ const multiRule: Rule = {
   id: "profile/sort/multi-field",
   tier: "profile",
   section: "filter-grammar/v1 §10.4 Several fields",
-  reference: `${REFERENCE}#104-several-fields`,
+  reference: REFERENCE,
   level: "MUST",
   requirement:
     "`?sort=f₁,f₂,…` MUST order the primary data by `f₁`, the resources that tie on `f₁` by `f₂`, and so on, each term in its own direction — so `?sort=a,-b` lists the resources that tie on `a` in descending order of `b` (S-MULTI-1).",
@@ -103,7 +102,7 @@ const tieRule: Rule = {
   id: "profile/sort/id-tiebreak",
   tier: "profile",
   section: "filter-grammar/v1 §10.5 Ties and stability",
-  reference: `${REFERENCE}#105-ties-and-stability`,
+  reference: REFERENCE,
   level: "SHOULD",
   requirement:
     "A server SHOULD break every tie left after the last sort field by `id`, in one fixed order the same for every request, so that resources tying on `f` are listed in the same relative order under `?sort=f` and `?sort=-f` (S-TIE-1, S-TIE-2).",
@@ -113,7 +112,7 @@ const pageRule: Rule = {
   id: "profile/sort/across-pages",
   tier: "profile",
   section: "filter-grammar/v1 §10.6 With `filter` and `page`",
-  reference: `${REFERENCE}#106-with-filter-and-page`,
+  reference: REFERENCE,
   level: "MUST",
   requirement:
     "The order `sort` asks for MUST be the whole collection's, before `page` cuts it into pages: walking `next` through `?sort=f`, every resource on a page follows every resource on the page before it (S-PAGE-1).",

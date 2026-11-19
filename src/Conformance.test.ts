@@ -479,9 +479,12 @@ describe("Conformance: the catalogue", () => {
     const profile = Conformance.rules.filter((rule) => rule.tier === "profile");
     expect(spec.length).toBeGreaterThan(0);
     expect(profile.length).toBeGreaterThan(0);
-    // The profile tier never cites the specification as its authority.
-    Arr.forEach(profile, (rule) => {
-      expect(rule.reference).not.toContain("jsonapi.org/format");
+    // A profile rule that cites the specification cites the section its
+    // profile extends; its `section` still names the profile as authority.
+    const citingSpec = Arr.filter(profile, (rule) => rule.reference.includes("jsonapi.org/format"));
+    expect(citingSpec.length).toBeGreaterThan(0);
+    Arr.forEach(citingSpec, (rule) => {
+      expect(rule.section).toMatch(/^(filter-grammar|idempotency)\/v1 /);
     });
   });
 
@@ -10316,12 +10319,12 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
       ...options,
     });
 
-  it("is a profile-tier SHOULD citing docs/idempotency.md §1", () => {
+  it("is a profile-tier SHOULD citing the profiles section of the spec", () => {
     const rule = Conformance.rules.find((candidate) => candidate.id === RULE);
     expect(rule).toMatchObject({
       tier: "profile",
       level: "SHOULD",
-      reference: expect.stringMatching(/docs\/idempotency\.md#1-what-the-profile-is-and-is-not$/),
+      reference: "https://jsonapi.org/format/1.1/#profiles",
     });
   });
 

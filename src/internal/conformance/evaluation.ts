@@ -93,8 +93,7 @@ const rule: Rule = {
   id: "profile/filter/evaluation",
   tier: "profile",
   section: "filter-grammar/v1 §6 Semantics",
-  reference:
-    "https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md#6-semantics",
+  reference: "https://jsonapi.org/format/1.1/#fetching-filtering",
   level: "MUST",
   requirement:
     "A filtered collection MUST hold exactly the resources whose filter tree evaluates to TRUE under §6, read from each resource's complete JSON representation whatever sparse fieldset the request names (F-EVAL-6), a to-one relationship valued by its related id (F-EVAL-4, F-ORD-5): every comparison against NULL is UNKNOWN (F-CMP-1), `lt` / `lte` / `gt` / `gte` order a value in the domain of its JSON type (F-CMP-2, F-ORD-1), `nin` is the negation of `in` (F-IN-2, F-IN-3), `isnull` is total (F-ISNULL-1, F-ISNULL-2, F-ISNULL-4), `Or(x, Not(x))` misses the NULLs (F-CONS-1), De Morgan holds both ways (F-CONS-2), `Not(In)` is `nin` (F-CONS-3), `Not(Not(x))` is `x` (F-CONS-4), a filter changes a response's membership and never its shape — an empty result a 200 collection, each resource as served unfiltered (F-CONS-5, F-ERR-2) — and never `included` (F-CONS-6), two spellings of one canonical form match alike (F-CONS-7), `And([])` matches every resource and `Or([])` none (F-AND-2), and FALSE and UNKNOWN both exclude (F-EVAL-3).",

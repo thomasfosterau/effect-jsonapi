@@ -15,7 +15,7 @@ import {
 } from "./internal/conformance/semantics.js";
 
 // ---------------------------------------------------------------------------
-// The profile's semantics (docs/filter-grammar.md §6), as an executable table.
+// The profile's semantics (§6), as an executable table.
 //
 // This package evaluates no filter — a server does, against its store (§6.9).
 // What is checked here is that §6 is *coherent*: that the truth tables compose
