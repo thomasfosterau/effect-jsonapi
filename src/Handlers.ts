@@ -277,7 +277,7 @@ export const transform = <F extends TransformLambda>(
 
 /**
  * A sparse-fieldset selection: the field names — attributes and relationships
- * (#494) — requested per resource type. This is the decoded `fields` member
+ * — requested per resource type. This is the decoded `fields` member
  * of a query schema
  * (`Query.schema(Article, { fields: true })`), so a handler passes
  * `query.fields` straight through.
@@ -292,7 +292,7 @@ export interface Fields {
 // The attributes a fieldset selects. A selection known only as an *array* of
 // names (a `query.fields` value, whose contents are a runtime fact) can be any
 // subset of them, so every selected attribute becomes optional; a literal
-// tuple is exact, and the empty tuple (`?fields[TYPE]=`, #488) selects none.
+// tuple is exact, and the empty tuple (`?fields[TYPE]=`) selects none.
 // No set at all (`undefined` alone) selects every attribute, as at runtime.
 type SelectedAttributes<A, Keys> = [Keys] extends [never]
   ? A
@@ -382,7 +382,7 @@ const projectResource = (
   // No requested set for this type leaves every field. A *present* empty set
   // (`?fields[TYPE]=`) is the spec's "no fields" (§Sparse Fieldsets: "An empty
   // value indicates that no fields should be returned") and projects
-  // `attributes` to `{}` like any other set (#488).
+  // `attributes` to `{}` like any other set.
   const found = requestedFor(fields, resource.type);
   if (Option.isNone(found)) return resource;
   const requested = found.value;
@@ -392,7 +392,7 @@ const projectResource = (
   if (attributes === undefined && relationships === undefined) return resource;
   const { relationships: _relationships, ...rest } = resource;
   // A relationship is a field (§Resource Object Fields), dropped whole —
-  // `data`, `links` and `meta` alike — when the set does not name it (#494).
+  // `data`, `links` and `meta` alike — when the set does not name it.
   // A `relationships` member left with nothing in it is omitted.
   const kept = relationships === undefined ? {} : selectMembers(relationships, requested);
   return {
@@ -406,7 +406,7 @@ const projectResource = (
 };
 
 // The fieldset a transform built by `project` applies, and so excludes the
-// relationships of — what the builders' full-linkage check exempts (#494).
+// relationships of — what the builders' full-linkage check exempts.
 // `compose` and the builders' memoisation carry it to the transform they
 // build.
 const projections = new WeakMap<ResourceTransform<TransformLambda>, Fields>();
@@ -468,9 +468,9 @@ const bothProjections = (
  *     unchanged: the spec leaves that type's fields to the server, and every
  *     field is what it already carries. A requested **empty** set
  *     (`?fields[TYPE]=`, decoded as `[]`) is the spec's "no fields", not
- *     "every field", and projects `attributes` to `{}` (#488);
+ *     "every field", and projects `attributes` to `{}`;
  *   - only fields are projected — `attributes` and `relationships`, which
- *     JSON:API 1.1 counts as fields together (§Resource Object Fields, #494).
+ *     JSON:API 1.1 counts as fields together (§Resource Object Fields).
  *     A relationship the set does not name is dropped whole, its `links` and
  *     `meta` with its `data`, and a `relationships` member left empty is
  *     omitted, so an empty set drops every relationship. The resource's own
@@ -721,7 +721,7 @@ const linkageKeys = (resource: ResourceValue): Array<string> =>
 // every relationship of the original the fieldset excludes for its type. The
 // spec waives full linkage "when relationship fields that would otherwise
 // contain linkage data are excluded due to sparse fieldsets" (§Compound
-// Documents, #494), so the walk counts them as the linkage they would
+// Documents), so the walk counts them as the linkage they would
 // otherwise have carried. A relationship the transform dropped for any
 // other reason is not counted.
 const walkKeys = (
@@ -799,13 +799,13 @@ const mapResources = <F extends TransformLambda>(
  * element a bare identifier, with no `attributes`, `relationships` or `links`
  * (`Handlers.linkage`'s `data`, as an array). Then the walk starts from those
  * identifiers themselves (JSON:API 1.1 §Compound Documents), and `included` is
- * not deduplicated against them, since an identifier is not a resource object
- * (#423). {@link data} and {@link collection} always read their primary data
+ * not deduplicated against them, since an identifier is not a resource object.
+ * {@link data} and {@link collection} always read their primary data
  * as resource objects.
  *
  * Under a sparse fieldset the check has one exemption, the spec's own
  * (§Compound Documents: "when relationship fields that would otherwise
- * contain linkage data are excluded due to sparse fieldsets"; #494). When
+ * contain linkage data are excluded due to sparse fieldsets"). When
  * `onResource` is a {@link project} transform (or a {@link compose} of one),
  * the walk also follows the linkage of every relationship that fieldset
  * excludes, as each `included` member carried it before the transform: a
@@ -821,8 +821,8 @@ const mapResources = <F extends TransformLambda>(
  * resource carries. Encoding through an endpoint's schema drops a
  * relationship the resource does not declare, so a member linked only through
  * one passes here and is unreachable on the wire; `Middleware.SchemaErrorsLive`
- * re-runs the walk on the encoded document and answers that with a 500
- * (#250). This option's `checkLinkage: false` does not reach that check.
+ * re-runs the walk on the encoded document and answers that with a 500.
+ * This option's `checkLinkage: false` does not reach that check.
  *
  * The transform is keyed off the resource as given, so it must not change a
  * resource's `type` or `id`.
@@ -867,7 +867,7 @@ export const buildIncluded = <
 // duplicate to drop, not a member to link.
 // `originals` are the primary resources `primary` was shaped from, in the same
 // order — the relationships a fieldset excluded from them are followed from
-// there (#494) — and `primary` itself when it was not shaped.
+// there — and `primary` itself when it was not shaped.
 const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
   primary: ReadonlyArray<ResourceValue>,
   asLinkage: boolean,
@@ -892,7 +892,7 @@ const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
   // Full linkage: every included resource is reachable from the primary data,
   // through its linkage and then through other included members' linkage.
   // Under a `project` transform's fieldset, a relationship it excluded is
-  // followed as the resource carried it before the transform (#494).
+  // followed as the resource carried it before the transform.
   if (options?.checkLinkage !== false) {
     const fields = projectionOf(options?.onResource);
     const members = HashMap.fromIterable(
@@ -1264,7 +1264,7 @@ const resolve = (
  *   itself to the document.
  *   {@link withMeta} leaves `relationships` alone; {@link project} drops the
  *   relationships its fieldset does not name, which the check exempts, as
- *   the spec does (§Compound Documents, #494); {@link transform} is
+ *   the spec does (§Compound Documents); {@link transform} is
  *   unconstrained;
  * - the array is edited: a member taken out can orphan everything reachable
  *   only through it, and a resource added was never reached at all;
@@ -1457,8 +1457,8 @@ const buildLinks = (options: {
 // transform runs on them before the document is assembled, and `onResource`
 // is the memoised pass shared with `included` so nothing is shaped twice.
 // `asLinkage` marks `primary` as a relationship document's identifiers, which
-// `included` is seeded from rather than deduplicated against (#423);
-// `originals` are the resources `primary` was shaped from (#494).
+// `included` is seeded from rather than deduplicated against;
+// `originals` are the resources `primary` was shaped from.
 const build = (
   data: ResourceValue | ReadonlyArray<ResourceValue> | LinkageValue,
   primary: ReadonlyArray<ResourceValue>,
@@ -1479,7 +1479,7 @@ const build = (
   // An array — however empty, and however empty dedup against the primary
   // data leaves it — is a compound document, and keeps its `included` key:
   // §Fetching Includes requires one in every response to a request carrying
-  // `include`, "even if that `included` key holds an empty array" (#232).
+  // `include`, "even if that `included` key holds an empty array".
   // Only `undefined` (nothing was requested) omits the member.
   const included =
     options?.included === undefined
@@ -2133,7 +2133,7 @@ export const linkage = <
 ): LinkageDocumentValue<TransformedLinkage<F, Data>, M, J, Transformed<F, Included>> => {
   const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource);
   const transformed = applyToLinkage(data, onResource);
-  // The identifiers are the primary data `included` is seeded from (#423). An
+  // The identifiers are the primary data `included` is seeded from. An
   // `included` member is shaped by its own pass, not the identifiers'
   // memoised one: the two share a `(type, id)` but not a shape.
   // SAFETY: `build` emits each member exactly when its option was passed, as

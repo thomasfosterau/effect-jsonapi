@@ -1,5 +1,5 @@
 /**
- * The JSON:API half of a generic negotiator, driven end to end (#577):
+ * The JSON:API half of a generic negotiator, driven end to end:
  * `@thomasfosterau/effect-ext/Negotiate`'s `negotiateRepresentation` decides
  * from the request line and headers, handed `Negotiation.representation(...)`
  * as the JSON:API `Representation`, and `Negotiation.toApiError` turns its
@@ -52,7 +52,7 @@ const wireError = (outcome: Negotiation.Outcome) =>
     Arr.head(ApiError.toDocument(error).errors),
   );
 
-describe("negotiateRepresentation with the JSON:API representation (#577)", () => {
+describe("negotiateRepresentation with the JSON:API representation", () => {
   describe("Accept", () => {
     it.effect("selects a plain application/vnd.api+json", () =>
       Effect.sync(() => {

@@ -126,7 +126,7 @@ describe("northwind example: fetching", () => {
     }),
   );
 
-  it.effect("omits `included` when the request carries no `include` (#232)", () =>
+  it.effect("omits `included` when the request carries no `include`", () =>
     Effect.gen(function* () {
       const { list, one } = yield* run(
         Effect.gen(function* () {
@@ -190,7 +190,7 @@ describe("northwind example: fetching", () => {
     }),
   );
 
-  it.effect("resolves the depth-2 path employee.territories on an order (#338)", () =>
+  it.effect("resolves the depth-2 path employee.territories on an order", () =>
     Effect.gen(function* () {
       const document = yield* run(
         Effect.gen(function* () {
@@ -212,39 +212,37 @@ describe("northwind example: fetching", () => {
     }),
   );
 
-  it.effect(
-    "resolves depth-2 paths across a page of orders, contributing each resource once (#338)",
-    () =>
-      Effect.gen(function* () {
-        const document = yield* run(
-          Effect.gen(function* () {
-            const client = yield* buildClient;
-            return yield* client.orders.list({
-              query: {
-                include: ["customer", "employee.territories"],
-                sort: [{ field: "orderDate", direction: "asc" }],
-              },
-            });
-          }),
-        );
+  it.effect("resolves depth-2 paths across a page of orders, contributing each resource once", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.orders.list({
+            query: {
+              include: ["customer", "employee.territories"],
+              sort: [{ field: "orderDate", direction: "asc" }],
+            },
+          });
+        }),
+      );
 
-        // Three orders, three salespeople; only Nancy (10248) and Andrew (10250)
-        // have territories.
-        const keys = document.included?.map((resource) => `${resource.type}:${resource.id}`) ?? [];
-        expect(
-          Arr.sort(
-            keys.filter((key) => key.startsWith("territories:")),
-            Ord.String,
-          ),
-        ).toEqual(
-          Arr.sort(
-            [`territories:${westboro.id}`, `territories:${boston.id}`, "territories:90405"],
-            Ord.String,
-          ),
-        );
-        expect(keys.filter((key) => key.startsWith("employees:"))).toHaveLength(3);
-        expect(Arr.dedupe(keys).length).toBe(keys.length);
-      }),
+      // Three orders, three salespeople; only Nancy (10248) and Andrew (10250)
+      // have territories.
+      const keys = document.included?.map((resource) => `${resource.type}:${resource.id}`) ?? [];
+      expect(
+        Arr.sort(
+          keys.filter((key) => key.startsWith("territories:")),
+          Ord.String,
+        ),
+      ).toEqual(
+        Arr.sort(
+          [`territories:${westboro.id}`, `territories:${boston.id}`, "territories:90405"],
+          Ord.String,
+        ),
+      );
+      expect(keys.filter((key) => key.startsWith("employees:"))).toHaveLength(3);
+      expect(Arr.dedupe(keys).length).toBe(keys.length);
+    }),
   );
 
   it.effect("404s with a typed error for unknown products", () =>
@@ -406,7 +404,7 @@ describe("northwind example: listing & filtering", () => {
   );
 });
 
-describe("northwind example: pagination links carry the request's query (#447)", () => {
+describe("northwind example: pagination links carry the request's query", () => {
   // A link's query string as the flat record the endpoint's query schema decodes.
   const searchOf = (link: string): Record<string, string> =>
     R.fromEntries(new URL(link, "https://example.test").searchParams);
@@ -752,7 +750,7 @@ describe("northwind example: related & relationship endpoints", () => {
   );
 
   it.effect(
-    "resolves the depth-2 path product.category,product.supplier on the line-item feed (#338)",
+    "resolves the depth-2 path product.category,product.supplier on the line-item feed",
     () =>
       Effect.gen(function* () {
         const document = yield* run(
@@ -912,7 +910,7 @@ describe("northwind example: heterogeneous search", () => {
         expect(types).toEqual(["customers", "products", "suppliers"]);
 
         // The endpoint declares `fields`, so a client reads each attribute as
-        // optional (#322).
+        // optional.
         Arr.forEach(document.data, (result) => {
           if (result.type === "products") {
             expectTypeOf<Pick<typeof result.attributes, "unitPrice">>().toEqualTypeOf<{

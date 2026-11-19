@@ -13,7 +13,7 @@ import * as Relationship from "./Relationship.js";
 import { platformLayer } from "./Registry.js";
 import * as Resource from "./Resource.js";
 
-// #329: JSON:API 1.1 defines only the bare `include` and `sort` parameters,
+// JSON:API 1.1 defines only the bare `include` and `sort` parameters,
 // so a bracketed one — `include[]`, `include[x]`, `sort[title]`,
 // `sort[x][y]` — is a parameter the server does not know how to process. It
 // is a 400 naming it under the general rule (§Implementation-Specific Query
@@ -139,8 +139,8 @@ const bracketed = (parameter: string) => ({
   source: { parameter },
 });
 
-// The 400 on an endpoint that does not support the family at all (#261),
-// unchanged by #329.
+// The 400 on an endpoint that does not support the family at all,
+// unchanged.
 const unsupported = (parameter: string) => ({
   status: "400",
   code: "bad_request",
@@ -161,7 +161,7 @@ const layers = [
   ],
 ] as const;
 
-describe("a bracketed `include` / `sort` (#329)", () => {
+describe("a bracketed `include` / `sort`", () => {
   const onDeclaring: ReadonlyArray<
     readonly [what: string, url: string, rejected: ReadonlyArray<string>]
   > = [
@@ -223,7 +223,7 @@ describe("a bracketed `include` / `sort` (#329)", () => {
   });
 
   // A hand-built query schema that declares a bracketed member literally
-  // supports that very name, as a declared `filter[status]` does (#321):
+  // supports that very name, as a declared `filter[status]` does:
   // declaring it is how an endpoint "knows how to process" it.
   describe("a hand-built schema that declares a bracketed member", () => {
     it("decodes the member it declares", async () => {
@@ -254,7 +254,7 @@ describe("a bracketed `include` / `sort` (#329)", () => {
   });
 });
 
-describe("Middleware.checkQueryParameters on a bracketed `include` / `sort` (#329)", () => {
+describe("Middleware.checkQueryParameters on a bracketed `include` / `sort`", () => {
   // The 400 document, or `undefined` when every name is acceptable: the
   // assertions below read the document itself.
   const check = (names: Iterable<string>, options?: Middleware.QueryParameterCheck) =>

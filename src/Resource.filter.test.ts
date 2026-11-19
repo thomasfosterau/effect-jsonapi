@@ -25,7 +25,7 @@ import * as Sort from "./Sort.js";
 const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
 
 // ---------------------------------------------------------------------------
-// Filterable and sortable declarations (#84)
+// Filterable and sortable declarations
 // ---------------------------------------------------------------------------
 
 const Supplier = Resource("suppliers", { attributes: { name: Schema.NonEmptyString } });
@@ -288,7 +288,7 @@ describe("Resource.filterable / Resource.sortable", () => {
     });
   });
 
-  describe("the resource id as a filter field (#556)", () => {
+  describe("the resource id as a filter field", () => {
     const Notes = Resource("notes", {
       id: Schema.String.pipe(Filter.able(["eq", "in"])),
       attributes: { title: Schema.String.pipe(Filter.able(["eq"])) },

@@ -7,8 +7,8 @@
  * opaque transformation. `wireProperties` recovers it, where it can show it,
  * by running that transformation on probes, so the query support check reads
  * the property a parameter actually decodes into, and a rejected value's
- * `source` names the query parameter (#305), body member, header or path
- * parameter (#316) the request sent (`wireLeaves`).
+ * `source` names the query parameter, body member, header or path
+ * parameter the request sent (`wireLeaves`).
  *
  * @internal
  */
@@ -191,7 +191,7 @@ const settledByStruct = new WeakMap<SchemaAST.Objects, ReadonlyArray<WirePropert
  * (a chain of more than one transformation, a source that is no plain
  * struct, a `Middleware`, a decode that fails on a probe, a value the
  * transformation rebuilds) pairs nothing it cannot show, and callers fall
- * back to reading the property by its name (#306's rule).
+ * back to reading the property by its name.
  *
  * The probes run the schema's own decode, synchronously, outside any request
  * and with no service, once per struct AST (the result is cached): a
@@ -373,7 +373,7 @@ const walkCheck = (
  * in wire names too: a property a struct's encoding renames
  * (`Schema.encodeKeys`, `Query.bracketKeys`) is reported under its decoded
  * name when its decoded side rejected it, which names no query parameter,
- * body member, header or path parameter the request carries (#305, #316).
+ * body member, header or path parameter the request carries.
  * Each place a leaf's path enters a struct's property, at any depth, takes
  * the wire name `wireProperties` settles for it, read off the issue's own
  * schema; one it does not settle keeps its reported name, so a leaf whose

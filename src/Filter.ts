@@ -2,7 +2,7 @@
  * The JSON:API `filter` query family — the operator vocabulary and the
  * per-attribute declaration.
  *
- * The filter grammar (`docs/filter-grammar.md`) fixes a **closed** operator
+ * The filter grammar fixes a **closed** operator
  * core: `eq ne lt lte gt gte in nin isnull`. This module names it once — as a
  * schema ({@link Operator}) with typed constants ({@link Op}) — so a resource's
  * per-attribute declaration and the URL codec agree byte for byte on what an
@@ -477,7 +477,7 @@ export type Condition<Fields extends FieldTypes = FieldTypes> = {
  *
  * The AST itself carries no evaluator — it is plain data. What a tree
  * *means*, though, is not open: the filter profile defines it, operator by
- * operator, in `docs/filter-grammar.md` §6 (three-valued logic, the NULL
+ * operator, in its §6 (three-valued logic, the NULL
  * rules, the comparison domains and the coercion rules). A server that
  * advertises {@link PROFILE_URI} answers according to those tables.
  *
@@ -775,7 +775,7 @@ export const normalise = <N extends Node>(node: N, fields: LiteralCodecs): N =>
  * handling keys off it — an endpoint declared with `filter: true` speaks the
  * grammar whether or not the client names the profile.
  *
- * The profile is both halves of `docs/filter-grammar.md`: the URL surface,
+ * The profile has two halves: the URL surface,
  * operator core and canonical encoding (§1–§4), and the **semantics** (§6) —
  * three-valued logic, the per-operator truth tables, the comparison domains
  * and the coercion rules. Advertising the URI is a claim to answer according

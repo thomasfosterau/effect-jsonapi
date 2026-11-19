@@ -8,7 +8,7 @@
  * constructor with no explicit return type is emitted as whatever declaration
  * emit serialised, which can differ from what the source resolves to.
  *
- * That gap produced a real bug (#104). The `:id` constructors passed a bare
+ * That gap produced a real bug. The `:id` constructors passed a bare
  * field record as `params`, so `HttpApiEndpoint`'s return type stayed a
  * deferred conditional; emit serialised it with the true branch's narrowing
  * baked in, as `Schema.Struct<Schema.Struct.Fields & { id: … }>`. The index
@@ -17,7 +17,7 @@
  * client carried an `unknown` requirement that no layer could satisfy —
  * while the source-resolved type checked clean.
  *
- * This file is checked by `tsconfig.dist.json` (`pnpm run typecheck:dist`),
+ * This file is checked by `tsconfig.dist.json` (`vp run typecheck:dist`),
  * which maps the package to `./dist/index.d.ts` and therefore only means
  * anything after a build.
  */

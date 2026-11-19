@@ -137,8 +137,7 @@ export const refusedOnKeyGrounds = (
 /**
  * Whether `observation` is an endpoint's refusal of a write the kit sent it
  * without a key: a {@link refusedOnKeyGrounds} refusal whose status is `400`,
- * the package's own `400` for a missing required key
- * (`docs/idempotency.md` §2).
+ * the package's own `400` for a missing required key.
  *
  * This is the delete rule's test, and it is deliberately narrower than the
  * atomic rule's. The delete rule judges the answer itself, so any other 4xx

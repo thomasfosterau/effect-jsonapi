@@ -1,6 +1,6 @@
 /**
- * The refusal of a client-generated id on a create payload (#450) and on an
- * atomic `add` operation (#464).
+ * The refusal of a client-generated id on a create payload and on an
+ * atomic `add` operation.
  *
  * `Resource.createPayload`'s resource object declares no `id`, and a struct
  * with fields drops a key it doesn't declare, so a `data.id` the client sent
@@ -78,7 +78,7 @@ export const refusingClientId = <const Fields extends Schema.Struct.Fields>(
 };
 
 // Where a refused id sits: a create payload's `data.id`, or an atomic `add`
-// operation's, `atomic:operations/N/data/id` (#464).
+// operation's, `atomic:operations/N/data/id`.
 const ID_PATH = ["data", "id"] as const;
 const OPERATIONS_MEMBER = "atomic:operations";
 

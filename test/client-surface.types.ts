@@ -104,7 +104,7 @@ Client.isMutatingMethod(1);
 export { calls, custom };
 
 // ---------------------------------------------------------------------------
-// Options members do not accept an explicit `undefined` (#533)
+// Options members do not accept an explicit `undefined`
 // ---------------------------------------------------------------------------
 
 export const forward = (maybeBaseUrl?: string) => [

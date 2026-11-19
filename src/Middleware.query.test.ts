@@ -18,10 +18,10 @@ import * as Relationship from "./Relationship.js";
 import { platformLayer } from "./Registry.js";
 import * as Resource from "./Resource.js";
 
-// JSON:API 1.1 §Query Parameters (#148): a query parameter whose family base
+// JSON:API 1.1 §Query Parameters: a query parameter whose family base
 // name is made only of a-z is reserved for the specification, so one the
 // endpoint does not process is a 400 naming it in `source.parameter`, and so
-// (#263) is one whose base name is not a legal member name or names an
+// is one whose base name is not a legal member name or names an
 // extension's parameter; a legal member name carrying a character outside
 // a-z is implementation-specific and still ignored.
 
@@ -110,7 +110,7 @@ const rejection = (parameter: string) => ({
   source: { parameter },
 });
 
-describe("unknown all-lowercase query parameters (#148)", () => {
+describe("unknown all-lowercase query parameters", () => {
   it("rejects `?unknown=1` with a 400 naming the parameter", async () => {
     const response = await request("/articles/1?unknown=1");
     expect(response.status).toBe(400);
@@ -194,7 +194,7 @@ describe("unknown all-lowercase query parameters (#148)", () => {
   });
 });
 
-describe("illegal and extension query parameter names (#263)", () => {
+describe("illegal and extension query parameter names", () => {
   // JSON:API 1.1 §Query Parameters: a name that "does not follow the naming
   // conventions" is a 400 — a base name that is not a legal member name, or
   // an extension's parameter the server does not process.
@@ -335,7 +335,7 @@ describe("allowedQueryParameters", () => {
     expect(response.body.data).toMatchObject({ type: "articles", id: "1" });
   });
 
-  // #260: `Endpoint.get(Article)` declares no query family, and its empty
+  // `Endpoint.get(Article)` declares no query family, and its empty
   // query struct used to hand every parameter to the handler and to the
   // bracket reshaper, which threw (a 500) on a bare/bracketed collision.
   it.each(["lang=en", "lang[region]=au", "lang=en&lang[region]=au", "lang[region]=au&lang=en"])(
@@ -442,7 +442,7 @@ describe("allowedQueryParameters entries", () => {
     },
   );
 
-  // JSON:API defines only the bare `include` and `sort` (#329): declaring a
+  // JSON:API defines only the bare `include` and `sort`: declaring a
   // bracketed member in the query schema is no way to support it, so the
   // advice says so rather than pointing at a schema setting.
   it.each(["include[]", "include[x]", "sort[title]", "sort[x][y]"])(
@@ -540,7 +540,7 @@ describe("allowedQueryParameters entries", () => {
     expect(() => Middleware.layerWith({ allowedQueryParameters: [] })).not.toThrow();
   });
 
-  // Owner decision on #261: the allow-list admits only implementation-
+  // The allow-list admits only implementation-
   // specific names, so a family the specification defines is never silently
   // ignored. An endpoint supports one by declaring it.
   const families = ["include", "fields", "sort", "page", "filter"];
@@ -594,7 +594,7 @@ describe("Middleware.checkQueryParameters", () => {
     ).toBeUndefined();
   });
 
-  it("rejects `fields`, `page` and `filter` unless declared (#261)", () => {
+  it("rejects `fields`, `page` and `filter` unless declared", () => {
     expect(check(["fields[articles]", "page[limit]", "filter[age][gt]", "filter"])).toEqual({
       errors: [
         expect.objectContaining({
@@ -620,7 +620,7 @@ describe("Middleware.checkQueryParameters", () => {
   // `fields` is per resource type: each `fields[TYPE]` is its own parameter,
   // so a declared one admits only itself, where a declared `page[limit]`
   // admits the whole `page` family.
-  it("admits a `fields[TYPE]` only by its own name or a declared `fields[` prefix (#261)", () => {
+  it("admits a `fields[TYPE]` only by its own name or a declared `fields[` prefix", () => {
     const declared = ["fields[articles]"];
     expect(check(["fields[articles]"], { declared })).toBeUndefined();
     expect(
@@ -636,7 +636,7 @@ describe("Middleware.checkQueryParameters", () => {
     ]);
   });
 
-  it("rejects `include` and `sort` unless declared (#261)", () => {
+  it("rejects `include` and `sort` unless declared", () => {
     expect(check(["include", "sort[x]"])).toEqual({
       errors: [
         expect.objectContaining({
@@ -674,7 +674,7 @@ describe("Middleware.checkQueryParameters", () => {
   // `URLSearchParams#keys` yields a repeated key once per occurrence, so this
   // is where the check's own deduplication shows: over HTTP the middleware
   // reads the parsed search params' record keys, already one per name.
-  it("answers a repeated unsupported `include` or `sort` once (#261)", () => {
+  it("answers a repeated unsupported `include` or `sort` once", () => {
     const names = new URLSearchParams("include=a&sort=x&include=a&sort=y").keys();
     expect(check(names)?.errors.map((error) => error.source)).toEqual([
       { parameter: "include" },
@@ -747,7 +747,7 @@ describe("what an endpoint's query schema declares", () => {
   });
 });
 
-describe("spec families an endpoint does not support (#261)", () => {
+describe("spec families an endpoint does not support", () => {
   // JSON:API 1.1 §Inclusion of Related Resources: "If an endpoint does not
   // support the `include` parameter, it MUST respond with `400 Bad Request`
   // to any requests that include it." §Sorting, on an endpoint that responds
@@ -925,7 +925,7 @@ describe("spec families an endpoint does not support (#261)", () => {
     expect(field.body.errors[0].source).toEqual({ parameter: "sort" });
   });
 
-  // Owner decision on #282: an empty vocabulary means unsupported. A family
+  // An empty vocabulary means unsupported. A family
   // declared with no legal value, as `[]` or derived empty from `true`, is
   // answered exactly like an undeclared one: the same 400 naming it, whatever
   // its value (an empty one too), before the endpoint decodes anything.
@@ -967,7 +967,7 @@ describe("spec families an endpoint does not support (#261)", () => {
     });
   });
 
-  // The same precedence as #148's: `SchemaErrors` is the outer middleware,
+  // The same precedence as for reserved names: `SchemaErrors` is the outer middleware,
   // so the 400 wins over a 406 or 415 the same request would otherwise get.
   describe("is decided before content negotiation", () => {
     // `schemaErrorsLayer` wired directly, beside the live negotiation, as
@@ -1000,8 +1000,8 @@ describe("spec families an endpoint does not support (#261)", () => {
       expect((await serve("/people/1", middleware, contentType)).status).toBe(415);
     });
 
-    // A family declared with an empty vocabulary is unsupported (#282), so
-    // its 400 takes the same precedence; before #282 the request reached the
+    // A family declared with an empty vocabulary is unsupported, so
+    // its 400 takes the same precedence; before the request reached the
     // negotiation, which answered 406 / 415 first.
     it.each(layers)(
       "for a family declared with an empty vocabulary, over a 406 and a 415, under %s",
@@ -1027,7 +1027,7 @@ describe("spec families an endpoint does not support (#261)", () => {
   });
 });
 
-describe("which declared `include` / `sort` an endpoint supports (#282)", () => {
+describe("which declared `include` / `sort` an endpoint supports", () => {
   // The support check reads the vocabulary the `include` / `sort` codecs
   // publish, only on the property the family's wire parameter decodes into
   // (the one of that name, or one the encoding renames to it). A family
@@ -1273,7 +1273,7 @@ describe("which declared `include` / `sort` an endpoint supports (#282)", () => 
     ["a suspended `include` codec", "/suspended-include?include=author", "include"],
     ["an optional `include`", "/optional-include?include=", "include"],
     ["a record of empty `include` codecs", "/include-record?include=", "include"],
-    // Owner decision on #282: the wire name decides, not the decoded one.
+    // The wire name decides, not the decoded one.
     ["an `include` renamed on the wire", "/renamed-include?include=author", "include"],
     ["an `include` renamed on the wire, an empty value", "/renamed-include?include=", "include"],
     [
@@ -1293,7 +1293,7 @@ describe("which declared `include` / `sort` an endpoint supports (#282)", () => 
   });
 });
 
-describe("which property a renamed wire parameter decodes into (#305, #306 follow-up)", () => {
+describe("which property a renamed wire parameter decodes into", () => {
   // `Schema.encodeKeys` renames a struct's properties on the wire inside an
   // opaque transformation, so the support check and the 400's
   // `source.parameter` both need to know which decoded property each wire
@@ -1356,12 +1356,12 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       paths: Query.Include(Tag),
       order: Query.Sort(["title"]),
     }).pipe(Schema.encodeKeys({ include: "0", paths: "include" })),
-    // Two renamed fieldsets, one of them empty (#313's type-aware path).
+    // Two renamed fieldsets, one of them empty.
     "renamed-fieldsets": Schema.Struct({
       tagFields: Schema.optionalKey(Query.Fieldset(Tag)),
       personFields: Schema.optionalKey(Query.Fieldset(Person)),
     }).pipe(Schema.encodeKeys({ tagFields: "fields[tags]", personFields: "fields[people]" })),
-    // #305's reproduction, with a non-empty vocabulary.
+    // the reproduction, with a non-empty vocabulary.
     "renamed-include": Schema.Struct({ paths: Schema.optionalKey(Query.Include(Post)) }).pipe(
       Schema.encodeKeys({ paths: "include" }),
     ),
@@ -1571,7 +1571,7 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
 
   describe("the support check reads the property the wire parameter decodes into", () => {
     it.each([
-      // The review's should-fix: #306 dropped every property whose decoded
+      // A regression guard: an earlier version dropped every property whose decoded
       // name is on the wire, so the decoded `sort` was never read.
       [
         "a wire `include` decoded into `sort`",
@@ -1605,7 +1605,7 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       ["`sort`, one of two renames", "/two-renames?sort=", "sort"],
       ["`include`, one of two required renames", "/two-renames-required?include=", "include"],
       ["`sort`, one of two required renames", "/two-renames-required?sort=title", "sort"],
-      // #306's known limit: the decoded `include` is not the wire `include`.
+      // the known limit: the decoded `include` is not the wire `include`.
       [
         "an `include` beside a decoded `include` sent elsewhere",
         "/include-sent-elsewhere?include=author",
@@ -1638,7 +1638,7 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
     });
   });
 
-  describe("`source.parameter` names the wire parameter (#305)", () => {
+  describe("`source.parameter` names the wire parameter", () => {
     const rejected = (parameter: string, detail: string) => ({
       status: "400",
       code: "bad_request",
@@ -1756,7 +1756,7 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       ["a struct check that rejects the whole query", "/checked-rename?page[size]=7", [whole]],
       // Since effect 4.1 the formatter carries a check's own message down to
       // the property it points to, so the rejection names the wire
-      // parameter, with the check's message (#530).
+      // parameter, with the check's message.
       [
         "a struct check with a message of its own",
         "/checked-rename?page[size]=9",
@@ -1874,8 +1874,8 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
   });
 });
 
-describe("`fields`, `page` and `filter` an endpoint does not support (#261)", () => {
-  // Owner decision on #261: an undeclared `fields[…]`, `page[…]` or
+describe("`fields`, `page` and `filter` an endpoint does not support", () => {
+  // An undeclared `fields[…]`, `page[…]` or
   // `filter[…]` is a 400, exactly as an unsupported `include` / `sort` is,
   // and so is one declared with an empty vocabulary. JSON:API 1.1
   // §Implementation-Specific Query Parameters: "If a server encounters a
@@ -2037,7 +2037,7 @@ describe("`fields`, `page` and `filter` an endpoint does not support (#261)", ()
       "/posts/1?fields[posts]=title&page[limit]=1&filter[title]=x",
       ["fields[posts]", "page[limit]", "filter[title]"],
     ],
-    // Declared with an empty vocabulary: unsupported (owner decision, #261).
+    // Declared with an empty vocabulary: unsupported (owner decision).
     ["`filter: true` over no filterable attribute", "/people?filter[name]=Ada", ["filter[name]"]],
     ["`filter: true` over no filterable attribute, a bare value", "/people?filter=", ["filter"]],
     ["`filter: {}`", "/tags?filter[name]=x", ["filter[name]"]],
@@ -2132,8 +2132,8 @@ describe("`fields`, `page` and `filter` an endpoint does not support (#261)", ()
   });
 
   // An undeclared member of a `page` family the endpoint declares is a 400
-  // too since #321, which `Middleware.members.test.ts` covers.
-  it("rejects an undeclared member of a declared `page` family (#321)", async () => {
+  // too, which `Middleware.members.test.ts` covers.
+  it("rejects an undeclared member of a declared `page` family", async () => {
     queries.length = 0;
     const response = await serve("/posts?page[size]=1");
     expect(response.status).toBe(400);

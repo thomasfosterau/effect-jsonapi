@@ -6,7 +6,7 @@
  * shape, and an id that crosses a brand boundary.
  *
  * These assertions used to sit beside their runtime cases in the colocated
- * `src/*.test.ts` files (#436). They live here because a type-level test is a
+ * `src/*.test.ts` files. They live here because a type-level test is a
  * `test/*.types.ts` file: it is type-checked by `tsconfig.json` and never run,
  * and `@ts-expect-error` is its assertion mechanism. Where a runtime case
  * also checks that the same call throws, it stays in the test file and passes

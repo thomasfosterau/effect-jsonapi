@@ -325,7 +325,7 @@ describe("Assemble.resource", () => {
   );
 
   it.effect(
-    "emits `included: []` for `?include=` with no paths: the request carried `include` (#232)",
+    "emits `included: []` for `?include=` with no paths: the request carried `include`",
     () =>
       Effect.gen(function* () {
         // Presence is the signal: `?include=` decodes to `[]`, and a client that
@@ -337,7 +337,7 @@ describe("Assemble.resource", () => {
       }),
   );
 
-  it.effect("emits `included: []` when include was requested and nothing resolved (#232)", () =>
+  it.effect("emits `included: []` when include was requested and nothing resolved", () =>
     Effect.gen(function* () {
       // §Fetching Includes: a response to a request carrying `include` MUST be a
       // compound document with an `included` key, even an empty one.
@@ -378,7 +378,7 @@ describe("Assemble.resource", () => {
         Assemble.resource(person("p1"), { include: ["a.b.c.d"], includable: ["a"] }),
       );
       expect(deep).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
-      // The 400 names the legal paths, as the membership error does (#512).
+      // The 400 names the legal paths, as the membership error does.
       expect(ApiError.toDocument(deep).errors[0]?.meta).toEqual({
         path: "a.b.c.d",
         maxDepth: 3,
@@ -527,7 +527,7 @@ describe("Assemble.collection", () => {
       }),
   );
 
-  it.effect("does not repeat a page member in `included` (#147)", () =>
+  it.effect("does not repeat a page member in `included`", () =>
     Effect.gen(function* () {
       // A heterogeneous page: `place-1` is a hit in its own right and the
       // birthplace of the person beside it. The include walk already skips
@@ -543,12 +543,12 @@ describe("Assemble.collection", () => {
       expect(calls).toEqual([]);
       expect(ids(document.data)).toEqual(["people:a", "places:place-1"]);
       // Every candidate was a hit, but the request carried `include`, so the
-      // compound document keeps its `included` key, empty (#232).
+      // compound document keeps its `included` key, empty.
       expect(document.included).toEqual([]);
     }),
   );
 
-  it.effect("emits `included: []` when include was requested and nothing resolved (#232)", () =>
+  it.effect("emits `included: []` when include was requested and nothing resolved", () =>
     Effect.gen(function* () {
       const { calls, targets } = registry([]);
       const document = yield* Assemble.collection(
@@ -569,7 +569,7 @@ describe("Assemble.collection", () => {
     }),
   );
 
-  it.effect("emits `included: []` in validate-only mode: include, no registry (#232)", () =>
+  it.effect("emits `included: []` in validate-only mode: include, no registry", () =>
     Effect.gen(function* () {
       const pagination = { totalCount: 3, offset: 0, limit: 10, baseUrl };
       expect(
@@ -751,7 +751,7 @@ describe("Assemble.unpaginatedCollection", () => {
     }),
   );
 
-  it.effect("emits `included: []` when include was requested and nothing remains (#232)", () =>
+  it.effect("emits `included: []` when include was requested and nothing remains", () =>
     Effect.gen(function* () {
       const { calls, targets } = registry([]);
       const unresolved = yield* Assemble.unpaginatedCollection(whole, {
@@ -774,7 +774,7 @@ describe("Assemble.unpaginatedCollection", () => {
     }),
   );
 
-  it.effect("emits `included: []` in validate-only mode: include, no registry (#232)", () =>
+  it.effect("emits `included: []` in validate-only mode: include, no registry", () =>
     Effect.gen(function* () {
       expect(
         (yield* Assemble.unpaginatedCollection(whole, {
@@ -808,7 +808,7 @@ describe("Assemble.unpaginatedCollection", () => {
     }),
   );
 
-  describe("with a `self` link (#242)", () => {
+  describe("with a `self` link", () => {
     const self = "https://example.test/people";
     const query: ReadonlyArray<Query.Pair> = [
       ["include", "birthPlace"],
@@ -881,7 +881,7 @@ describe("Assemble.unpaginatedCollection", () => {
     );
   });
 
-  describe("with a top-level `meta` (#253)", () => {
+  describe("with a top-level `meta`", () => {
     const self = "https://example.test/people";
     const meta = { generatedAt: "2026-10-08T00:00:00Z", cache: { maxAge: 60 } };
     const options = {
@@ -957,7 +957,7 @@ describe("Assemble.relationship", () => {
     expect(withLink.links).toEqual({ related: "https://example.test/people/p1/birthPlace" });
   });
 
-  // #444: the primary data names the children, so the parent in `included`
+  // The primary data names the children, so the parent in `included`
   // was reachable only through a child linking back to it.
   it("leaves the parent out of included, so the document passes the full-linkage walk", () => {
     const parent = contest("x");
@@ -967,7 +967,7 @@ describe("Assemble.relationship", () => {
     const toOne = Assemble.relationship({ parent: person("p1"), key: "birthPlace" });
     expect(toOne.included).toEqual([]);
     expect(unlinkedIncluded(onWire(toOne))).toEqual([]);
-    // The children the identifiers name are reachable from them (#423).
+    // The children the identifiers name are reachable from them.
     const withChildren = Assemble.relationship({
       parent,
       key: "candidates",
@@ -977,8 +977,8 @@ describe("Assemble.relationship", () => {
     expect(unlinkedIncluded(onWire(withChildren))).toEqual([]);
   });
 
-  // #498: full linkage is checked from the identifiers, as `Handlers.linkage`
-  // checks it — with the sparse-fieldset exemption (#494).
+  // Full linkage is checked from the identifiers, as `Handlers.linkage`
+  // checks it — with the sparse-fieldset exemption.
   it("throws on an `included` member the identifiers do not reach", () => {
     expect(() =>
       Assemble.relationship({ parent: contest("x"), key: "candidates", included: [place] }),
@@ -1039,7 +1039,7 @@ describe("Assemble.relationship", () => {
   });
 });
 
-describe("Assemble.collection linkTotal / lastUnknown (#569)", () => {
+describe("Assemble.collection linkTotal / lastUnknown", () => {
   const page = [person("a"), person("b"), person("c")];
   const baseUrl = "https://example.test/people";
   const at = (offset: number, extra: { linkTotal?: number; lastUnknown?: boolean }, total = 42) =>
@@ -1141,7 +1141,7 @@ describe("Assemble.edgePage", () => {
       expect(document.meta.totalCount).toBe(7);
     }),
   );
-  it.effect("carries the request's other query pairs on every link (#569)", () =>
+  it.effect("carries the request's other query pairs on every link", () =>
     Effect.gen(function* () {
       const document = yield* Assemble.edgePage(
         "contributions",
@@ -1205,7 +1205,7 @@ describe("helpers", () => {
   // A value parsed from JSON (or read by a database driver) can carry
   // `__proto__` as an own key; a copy that assigned it would run the
   // prototype setter, dropping the member and re-parenting the copy onto its
-  // value (#269).
+  // value.
   it("keeps a member keyed __proto__ as an own data member, coerced like any other", () => {
     const json =
       '{"type":"things","id":"1","attributes":{"settings":{"kept":1,"__proto__":{"inner":2}}},' +

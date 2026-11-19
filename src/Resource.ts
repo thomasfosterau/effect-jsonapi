@@ -1067,7 +1067,7 @@ export type UpdateRelationshipFields<Rels extends Relationships> = {
  * attributes (and relationships and optionally a local id `lid`) but never an
  * `id`. A client-generated `data.id` is rejected at `/data/id`, which
  * `Middleware.SchemaErrorsLive` answers with 403 Forbidden (§Client-Generated
- * IDs, #450).
+ * IDs).
  *
  * Required (`one`) relationships must be present; `paginated` relationships
  * cannot appear.
@@ -1270,7 +1270,7 @@ export interface Resource<
    * Request body schema for creating this resource (no `id`, optional `lid`,
    * required `one` relationships). A client-generated `data.id` is rejected
    * at `/data/id`, when decoding and when encoding, rather than dropped:
-   * `Middleware.SchemaErrorsLive` answers it with 403 Forbidden (#450). Its
+   * `Middleware.SchemaErrorsLive` answers it with 403 Forbidden. Its
    * `attributes` and `relationships` members reject, when decoding and when
    * encoding, every member they don't declare: the first
    * `maxUndeclaredMemberErrors` each as an "Expected no excess property"
@@ -2208,7 +2208,7 @@ type FilterableRelationshipKeys<Res extends Any> =
           : K;
       }[RelationshipName<Res>];
 
-// `"id"` when the resource's id schema is `Filter.able` (#556), else `never`.
+// `"id"` when the resource's id schema is `Filter.able`, else `never`.
 // The id is not an attribute — JSON:API reserves the name — so it can never
 // collide with an attribute or relationship key.
 type FilterableIdKey<Res extends Any> = [FilterMarkerOf<Res["Id"]>] extends [never] ? never : "id";
@@ -2617,7 +2617,7 @@ const filterDeclarationOf = (
 
 // Builds the filterable record for a resource: the resource id when its schema
 // carries a `Filter.able` annotation, with the id schema itself (or the explicit
-// `literal`) as its codec (#556); each attribute carrying one, with its derived
+// `literal`) as its codec; each attribute carrying one, with its derived
 // (or explicit) codec; then each declared to-one relationship with the target's
 // `Id` schema as its literal codec. The target is resolved lazily
 // (`Schema.suspend` over the descriptor's thunk), never here: definitions can be
@@ -2875,7 +2875,7 @@ type CheckFieldNames<Own, Other> = string extends keyof Own
 // JSON:API 1.1 §Fields: a resource object's attributes and relationships share
 // one namespace with each other and with `type` and `id`, so no field may be
 // named `type` or `id`, and no name may be both an attribute and a
-// relationship. Refused at definition time, naming the field (#503).
+// relationship. Refused at definition time, naming the field.
 const reservedFieldNames: HashSet.HashSet<string> = HashSet.make("type", "id");
 
 const validateFieldNames = (
@@ -2908,7 +2908,7 @@ const validateFieldNames = (
   validateStorageKeys(context, attributes, relationships);
 };
 
-// A to-one relationship's storage key (#509) names a field of the stored row
+// A to-one relationship's storage key names a field of the stored row
 // the resource's attributes do not, so it may not be an attribute name, and
 // two to-one relationships can not share one column. Refused at definition
 // time, naming both declarations.
@@ -3142,9 +3142,9 @@ export const make = <
   // They derive from the *declared* map, so input-only attributes project too.
   // Every member struct of a write body is closed (`closedStruct`): a member a
   // client sends that it doesn't declare is a 400 at that member, where a
-  // struct with fields would silently drop it (#292) and a bare empty struct
-  // would hand it to the handler (#270).
-  // Each reports at most `maxUndeclaredMemberErrors` of them at their own paths (#308).
+  // struct with fields would silently drop it and a bare empty struct
+  // would hand it to the handler.
+  // Each reports at most `maxUndeclaredMemberErrors` of them at their own paths.
   const createAttributes = closedStruct(
     createAttributeFields<Attributes>(options.attributes),
     maxUndeclaredMemberErrors,
@@ -3200,7 +3200,7 @@ export const make = <
 
   // A `data.id` is a client-generated id, which this payload does not
   // support: rejected at `/data/id` rather than dropped, and answered 403 by
-  // `Middleware.SchemaErrorsLive` (#450).
+  // `Middleware.SchemaErrorsLive`.
   const createPayload = Schema.Struct({
     data: refusingClientId(
       Schema.Struct({
@@ -3511,7 +3511,7 @@ export type ExtendedId<
 // The base's id branded with the child's type. A `Filter.able` base id stays
 // filterable at runtime through the brand (a rebuild keeps the annotation), so
 // the type-level marker is carried over too, its literal re-typed to the child's
-// brand (#556).
+// brand.
 type InheritedId<BaseId extends Schema.Top, Type extends string> = BaseId extends {
   readonly [K in Filter.MarkerKey]: Filter.Marker<infer Op, unknown>;
 }

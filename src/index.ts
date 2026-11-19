@@ -219,7 +219,7 @@ export * as Sort from "./Sort.js";
 export { MEDIA_TYPE } from "./internal/media.js";
 
 // ---------------------------------------------------------------------------
-// Declaration-emit names (#348)
+// Declaration-emit names
 // ---------------------------------------------------------------------------
 //
 // The TypeScript checker does not follow a namespace alias (`export * as X`)
@@ -231,10 +231,10 @@ export { MEDIA_TYPE } from "./internal/media.js";
 // hits a name it cannot spell, such as `effect`'s `NodeInspectSymbol` inside
 // an inlined error class.
 //
-// Since #385 every module is a public subpath with its own declaration file
+// Every module is a public subpath with its own declaration file
 // (`@thomasfosterau/effect-jsonapi/Query` exports `QuerySchema` directly), so
 // declaration emit can always name a type through its module. The root
-// aliases below came first (#348); they stay for 0.17.0 and are deprecated.
+// aliases below came first; they stay for 0.17.0 and are deprecated.
 // Each type is canonical in its namespace, and a name that would be
 // ambiguous at the root carries its namespace as a prefix. Every alias is
 // type-only: a class or value keeps its runtime form under its namespace
@@ -246,8 +246,8 @@ export type {
    * `ApiError.Wire`, at the package root so declaration emit can name it: the
    * endpoint error schema of an `ApiError` class.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    *
    * @deprecated Use `ApiError.Wire`, or import `Wire` from
    * `@thomasfosterau/effect-jsonapi/ApiError` instead; once this alias is removed,
@@ -261,8 +261,8 @@ export type {
    * it: the `SchemaErrors` middleware's error, in every client method's error
    * channel.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the type: for the class, use `ApiError.BadRequest`.
    *
    * @deprecated Use `ApiError.BadRequest`, or import `BadRequest` from
@@ -276,8 +276,8 @@ export type {
    * `ApiError.Conflict`, at the package root so declaration emit can name it:
    * the error `Group.flat` declares on its `create` and `update` endpoints.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the type: for the class, use `ApiError.Conflict`.
    *
    * @deprecated Use `ApiError.Conflict`, or import `Conflict` from
@@ -292,8 +292,8 @@ export type {
    * it: a `ContentNegotiation` middleware error, in every client method's
    * error channel.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the type: for the class, use `ApiError.NotAcceptable`.
    *
    * @deprecated Use `ApiError.NotAcceptable`, or import `NotAcceptable` from
@@ -308,8 +308,8 @@ export type {
    * can name it: a `ContentNegotiation` middleware error, in every client
    * method's error channel.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the type: for the class, use `ApiError.UnsupportedMediaType`.
    *
    * @deprecated Use `ApiError.UnsupportedMediaType`, or import `UnsupportedMediaType` from
@@ -326,8 +326,8 @@ export type {
    * `Atomic.Operations`, at the package root so declaration emit can name it:
    * the payload of `Endpoint.operations`.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the type: for the value, use `Atomic.Operations`.
    *
    * @deprecated Use `Atomic.Operations`, or import `Operations` from
@@ -341,8 +341,8 @@ export type {
    * `Atomic.Result`, at the package root so declaration emit can name it: one
    * result object of `Endpoint.operations`' success document.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the type: for the value, use `Atomic.Result`.
    *
    * @deprecated Use `Atomic.Result`, or import `Result` from
@@ -359,8 +359,8 @@ export type {
    * `Document.CollectionDocument`, at the package root so declaration emit can
    * name it: the collection document of `Group.flat`'s list endpoint.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the type: for the value, use `Document.CollectionDocument`.
    * This is the document schema `Document.CollectionDocument` — not
    * `Assemble.CollectionDocument` or `Client.CollectionDocument`, which are
@@ -377,8 +377,8 @@ export type {
    * `Document.DataDocument`, at the package root so declaration emit can name
    * it: the single-resource document of `Group.flat`'s other endpoints.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the type: for the value, use `Document.DataDocument`.
    * This is the document schema `Document.DataDocument` — not an `Assemble.*`
    * or `Client.*` document type (`Assemble.ResourceDocument`,
@@ -395,8 +395,8 @@ export type {
    * `Document.WireSchema`, at the package root so declaration emit can name
    * it: the wire form of a document `Group.flat` serves.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    *
    * @deprecated Use `Document.WireSchema`, or import `WireSchema` from
    * `@thomasfosterau/effect-jsonapi/Document` instead; once this alias is removed,
@@ -412,8 +412,8 @@ export type {
    * `Endpoint.IncludedResources`, at the package root so declaration emit can
    * name it.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    *
    * @deprecated Use `Endpoint.IncludedResources`, or import `IncludedResources` from
    * `@thomasfosterau/effect-jsonapi/Endpoint` instead; once this alias is removed,
@@ -426,8 +426,8 @@ export type {
    * `Endpoint.ReachableIncluded`, at the package root so declaration emit can
    * name it.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    *
    * @deprecated Use `Endpoint.ReachableIncluded`, or import `ReachableIncluded` from
    * `@thomasfosterau/effect-jsonapi/Endpoint` instead; once this alias is removed,
@@ -440,8 +440,8 @@ export type {
    * `Endpoint.SparseResource`, at the package root so declaration emit can
    * name it.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    *
    * @deprecated Use `Endpoint.SparseResource`, or import `SparseResource` from
    * `@thomasfosterau/effect-jsonapi/Endpoint` instead; once this alias is removed,
@@ -454,8 +454,8 @@ export type {
    * `Endpoint.SparseUnion`, at the package root so declaration emit can name
    * it.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    *
    * @deprecated Use `Endpoint.SparseUnion`, or import `SparseUnion` from
    * `@thomasfosterau/effect-jsonapi/Endpoint` instead; once this alias is removed,
@@ -472,8 +472,8 @@ export type {
    * name it: the request-headers schema of a write endpoint that accepts an
    * `idempotency-key`.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the schema type: for the value, use `Idempotency.Headers`.
    *
    * @deprecated Use `Idempotency.HeadersSchema`, or import `HeadersSchema` from
@@ -488,8 +488,8 @@ export type {
    * name it: an idempotency middleware error, in the error channel of a client
    * method whose endpoint accepts an `idempotency-key`.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the type: for the class, use `Idempotency.KeyInProgress`.
    *
    * @deprecated Use `Idempotency.KeyInProgress`, or import `KeyInProgress` from
@@ -504,8 +504,8 @@ export type {
    * name it: an idempotency middleware error, in the error channel of a client
    * method whose endpoint accepts an `idempotency-key`.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the type: for the class, use `Idempotency.KeyMismatch`.
    *
    * @deprecated Use `Idempotency.KeyMismatch`, or import `KeyMismatch` from
@@ -519,8 +519,8 @@ export type {
    * `Idempotency.Middleware`, at the package root so declaration emit can name
    * it: the middleware of a write endpoint declared with `idempotency: true`.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the type: for the class, use `Idempotency.Middleware`.
    *
    * @deprecated Use `Idempotency.Middleware`, or import `Middleware` from
@@ -537,8 +537,8 @@ export type {
    * `Middleware.ContentNegotiation`, at the package root so declaration emit
    * can name it: the middleware on every endpoint.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the type: for the class, use `Middleware.ContentNegotiation`.
    *
    * @deprecated Use `Middleware.ContentNegotiation`, or import `ContentNegotiation` from
@@ -552,8 +552,8 @@ export type {
    * `Middleware.CreatedLocation`, at the package root so declaration emit can
    * name it: the middleware on every `create` endpoint.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the type: for the class, use `Middleware.CreatedLocation`.
    *
    * @deprecated Use `Middleware.CreatedLocation`, or import `CreatedLocation` from
@@ -567,8 +567,8 @@ export type {
    * `Middleware.SchemaErrors`, at the package root so declaration emit can
    * name it: the middleware on every endpoint.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    * It names only the type: for the class, use `Middleware.SchemaErrors`.
    *
    * @deprecated Use `Middleware.SchemaErrors`, or import `SchemaErrors` from
@@ -585,8 +585,8 @@ export type {
    * `Query.BracketedKeys`, at the package root so declaration emit can name
    * it: the flat list query `Group.flat` builds.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    *
    * @deprecated Use `Query.BracketedKeys`, or import `BracketedKeys` from
    * `@thomasfosterau/effect-jsonapi/Query` instead; once this alias is removed,
@@ -599,8 +599,8 @@ export type {
    * `Query.QuerySchema`, at the package root so declaration emit can name it:
    * the query schema of every read endpoint.
    *
-   * Type-only alias, kept at the root for declaration emit (#348) and
-   * superseded by the module's subpath export (#385).
+   * Type-only alias, kept at the root for declaration emit and
+   * superseded by the module's subpath export.
    *
    * @deprecated Use `Query.QuerySchema`, or import `QuerySchema` from
    * `@thomasfosterau/effect-jsonapi/Query` instead; once this alias is removed,

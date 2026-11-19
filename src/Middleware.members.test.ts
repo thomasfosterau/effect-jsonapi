@@ -13,11 +13,11 @@ import * as Query from "./Query.js";
 import { platformLayer } from "./Registry.js";
 import * as Resource from "./Resource.js";
 
-// Owner decision on #321: a request naming a member of the `filter` or
+// A request naming a member of the `filter` or
 // `page` family that the endpoint does not declare — `filter[stauts]` beside
 // a declared `filter[status]`, `page[sise]` beside `page[size]` — is a 400
-// naming it, exactly as a family the endpoint does not declare at all is
-// (#261). The query schema would otherwise drop it, and the client would get
+// naming it, exactly as a family the endpoint does not declare at all is.
+// The query schema would otherwise drop it, and the client would get
 // an unfiltered or unpaginated collection. JSON:API 1.1 §Implementation-
 // Specific Query Parameters: a server that "does not know how to process it
 // as a query parameter from this specification … MUST return `400 Bad
@@ -152,7 +152,7 @@ const undeclaredMember = (parameter: string, declared: ReadonlyArray<string>) =>
 
 const OFFSET = ["page[offset]", "page[limit]"];
 
-describe("an undeclared member of a declared `filter` map or `page` key set (#321)", () => {
+describe("an undeclared member of a declared `filter` map or `page` key set", () => {
   // Every way the middleware is provided: the default layer, `layerWith`
   // (with an allow-list, which admits none of these), and
   // `SchemaErrorsLive` beside the live negotiation.
@@ -332,7 +332,7 @@ describe("an undeclared member of a declared `filter` map or `page` key set (#32
   });
 });
 
-describe("Middleware.checkQueryParameters on members (#321)", () => {
+describe("Middleware.checkQueryParameters on members", () => {
   // The 400 document, or `undefined` when every name is acceptable: the
   // assertions below read the document itself.
   const check = (names: Iterable<string>, options?: Middleware.QueryParameterCheck) =>

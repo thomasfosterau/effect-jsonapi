@@ -1,5 +1,5 @@
 /**
- * Type-level tests for `Middleware.RequestPart` (#228).
+ * Type-level tests for `Middleware.RequestPart`.
  *
  *   - It is exactly HttpApi's request-side `HttpApiSchemaError` kinds:
  *     `"Params"`, `"Headers"`, `"Query"` and `"Payload"`.

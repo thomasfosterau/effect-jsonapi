@@ -48,7 +48,7 @@ import { definedMember, someMember } from "../members.js";
 
 // The kit's identity and linkage over arbitrary JSON live beside the shared
 // reachability walk, which the endpoint middleware runs over the encoded
-// document too (#250); the rules keep importing them from here.
+// document too; the rules keep importing them from here.
 export { idKey, identity, isJsonArray, isJsonObject, isRecord };
 
 // ---------------------------------------------------------------------------
@@ -358,7 +358,7 @@ export interface Discovered {
   readonly queryPrefixes: ReadonlyArray<string>;
   /**
    * Whether the endpoint's headers schema declares `Idempotency-Key`, opting
-   * into the idempotency profile (`docs/idempotency.md`): `"required"` when it
+   * into the idempotency profile: `"required"` when it
    * insists on the header (`idempotency: "required"`), `"optional"` when it
    * accepts one (`idempotency: true`), `"absent"` when it declares none.
    */
@@ -863,8 +863,8 @@ const unredirected = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A,
  * rewrites every request (`HttpClient.mapRequest` onto another origin, say)
  * is read as the server it sends to, not as one that followed a redirect.
  * The kit does not read that answer, so the request is left as one a redirect
- * answered that the kit did not follow — not decided, as for any other (owner
- * decision on #333). `status` is the answer's, or `0` when the transport
+ * answered that the kit did not follow — not decided, as for any other.
+ * `status` is the answer's, or `0` when the transport
  * failed there. Only where the transport ended is checked: a chain that left
  * the origin and came back, keeping the method, is read.
  */
@@ -1065,7 +1065,7 @@ export const timedOutNote = (timeout: Duration.Duration): string =>
 
 /**
  * How long the kit waits for one request when the run does not say:
- * thirty seconds (owner decision on #302).
+ * thirty seconds.
  *
  * @internal
  */
@@ -1129,7 +1129,7 @@ const timed = (
  * endpoint is reported as a finding instead of aborting the whole run.
  *
  * A redirect is followed only when its `Location` stays on the base URL's
- * origin (owner decision on #168): the kit requests each hop itself, after
+ * origin: the kit requests each hop itself, after
  * checking where it leads, so no request is ever sent to another origin on a
  * server's say-so. A `301`, `302` or `303` is followed only for a `GET`,
  * since `fetch` would turn any other method into a `GET`; a `307` or `308`
@@ -1462,8 +1462,8 @@ const REASON_LIMIT = 3;
 /**
  * A rule's outcome once the requests a redirect the kit did not follow
  * answered are taken out of it: such a request has no answer to read, so it
- * decides nothing — not a "was not rejected", and not a pass (owner decision
- * on #333). A finding it produced is dropped; a finding on an answer the kit
+ * decides nothing — not a "was not rejected", and not a pass.
+ * A finding it produced is dropped; a finding on an answer the kit
  * did read still fails the rule. With none left, the rule is skipped, naming
  * the redirects and keeping its own note: never a partial pass on the answers
  * it did read, whether those are a source, a link or a page. A rule that
@@ -1651,7 +1651,7 @@ export const resourcesOf = (body: Body): ReadonlyArray<Located> =>
 
 /**
  * The resource objects a document carries, as {@link resourcesOf} lists them
- * but without a relationship document's primary identifiers (#443): when the
+ * but without a relationship document's primary identifiers: when the
  * primary data is resource linkage ({@link isLinkageData}), only `included`
  * holds resource objects, and the full resource for a primary identifier
  * sitting there duplicates nothing.

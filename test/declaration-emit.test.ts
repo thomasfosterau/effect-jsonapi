@@ -1,5 +1,5 @@
 /**
- * Declaration emit as a consumer sees it (#348, #385): a project that depends
+ * Declaration emit as a consumer sees it: a project that depends
  * on this package and compiles with `declaration: true` must be able to export
  * the values it builds without annotating them.
  *
@@ -118,7 +118,7 @@ const RESOURCES = [
   "});",
 ].join("\n");
 
-/** An endpoint, groups and clients over `RESOURCES`, importing only what they call (#385). */
+/** An endpoint, groups and clients over `RESOURCES`, importing only what they call. */
 const ENDPOINTS = [
   'import { HttpApi, HttpApiClient } from "effect/http-api";',
   'import { Client, Endpoint, Group } from "@thomasfosterau/effect-jsonapi";',
@@ -236,7 +236,7 @@ describe("declaration emit in a consumer project", () => {
   );
 
   /**
-   * The case #385 reported: an endpoint, a group and a client over resources
+   * The reported case: an endpoint, a group and a client over resources
    * imported from another file, built from the root's namespaces and from
    * the module subpaths. Their inferred types need `Resource.Resource`,
    * `Resource.Id` and friends, which the exporting file has no namespace
@@ -261,7 +261,7 @@ describe("declaration emit in a consumer project", () => {
   );
 
   /**
-   * The root type aliases (#348) are deprecated in favour of the subpaths:
+   * The root type aliases are deprecated in favour of the subpaths:
    * with every one of them withdrawn from `dist/index.d.ts`, the same
    * consumer files still emit, each type named through its module's subpath.
    */

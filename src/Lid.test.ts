@@ -109,7 +109,7 @@ describe("lidMap", () => {
     expect(lids.resolveLinkage(Article, undefined)).toEqual({});
   });
 
-  // A decoded body only carries declared relationships (#270), but the linkage
+  // A decoded body only carries declared relationships, but the linkage
   // a caller hands in is a plain record: an own `__proto__` member stays a key
   // of the result rather than re-parenting it.
   it("keeps an own __proto__ member as a key, never as the result's prototype", () => {

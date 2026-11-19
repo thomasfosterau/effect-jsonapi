@@ -120,7 +120,7 @@ describe("blog example: fetching", () => {
         expect(document.included?.map((resource) => resource.attributes)).toEqual([
           { lastName: sampleAuthor.attributes.lastName },
         ]);
-        // A relationship is a field too (#494): `author` was not requested, so it
+        // A relationship is a field too: `author` was not requested, so it
         // is dropped, and the included author it linked is exempt from full
         // linkage (§Compound Documents).
         expect(document.data.relationships).toBeUndefined();
@@ -461,7 +461,7 @@ describe("blog example: relationship endpoints", () => {
     () =>
       Effect.gen(function* () {
         // The spec's own example (§Inclusion of Related Resources), on the
-        // paginated `comments` (#483).
+        // paginated `comments`.
         const [bare, firstPage, secondPage] = yield* run(
           Effect.gen(function* () {
             const client = yield* buildClient;
@@ -515,7 +515,7 @@ describe("blog example: relationship endpoints", () => {
         // With it, the identifiers stay the primary data and the tags they name are
         // `included` — the same `(type, id)` in both is no duplicate.
         expect(compound.data).toEqual([{ type: "tags", id: sampleTag.id }]);
-        // The endpoint declares `fields` (#485), so an `included` tag's
+        // The endpoint declares `fields`, so an `included` tag's
         // attributes decode as optional.
         expectTypeOf<NonNullable<typeof compound.included>[number]["attributes"]>().toEqualTypeOf<{
           readonly name?: string;
@@ -540,7 +540,7 @@ describe("blog example: relationship endpoints", () => {
           }),
         );
 
-        // #485: the fieldset narrows the `included` tags; the identifiers, which
+        // The fieldset narrows the `included` tags; the identifiers, which
         // have no fields, are untouched. A client decodes the attributes as
         // optional, since a fieldset may leave any of them out.
         expect(sparse.data).toEqual([{ type: "tags", id: sampleTag.id }]);
@@ -724,7 +724,7 @@ describe("blog example: heterogeneous search", () => {
       expect(types).toEqual(["articles", "people"]);
 
       // the union is discriminated by the `type` tag; the endpoint declares
-      // `fields`, so a client reads each attribute as optional (#322)
+      // `fields`, so a client reads each attribute as optional
       Arr.forEach(document.data, (result) => {
         if (result.type === "articles") {
           expectTypeOf<Pick<typeof result.attributes, "title">>().toEqualTypeOf<{
@@ -762,7 +762,7 @@ describe("blog example: heterogeneous search", () => {
     }),
   );
 
-  it.effect("keeps the request's `include`, `fields` and `filter` on `next` (#447)", () =>
+  it.effect("keeps the request's `include`, `fields` and `filter` on `next`", () =>
     Effect.gen(function* () {
       const document = yield* run(
         Effect.gen(function* () {
@@ -828,7 +828,7 @@ describe("blog example: heterogeneous search", () => {
     }),
   );
 
-  it.effect("keeps an empty `included` when every included author is already a hit (#232)", () =>
+  it.effect("keeps an empty `included` when every included author is already a hit", () =>
     Effect.gen(function* () {
       // "d" hits the article and its author, Dan: the author is primary data, so
       // the dedupe leaves nothing to include — but the request carried

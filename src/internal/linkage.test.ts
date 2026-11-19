@@ -29,9 +29,9 @@ describe("reachable", () => {
     expect(HashSet.size(reachable([], graph({ a: ["b"] })))).toBe(0);
   });
 
-  it("walks a 100,000-level chain without overflowing the stack (#239)", () => {
+  it("walks a 100,000-level chain without overflowing the stack", () => {
     // 0 → 1 → … → 99999: one walk level per key, so a walk that recursed per
-    // level would exhaust the stack (the recursive walk #248 shipped on trunk
+    // level would exhaust the stack (a recursive walk
     // overflowed at about 6,000 levels on Node 22).
     const length = 100_000;
     const linkageOf = (key: string) => {

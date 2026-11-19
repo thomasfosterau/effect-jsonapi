@@ -1,7 +1,6 @@
 /**
  * Declaration-emit test: a consumer compiling with `declaration: true` must be
- * able to export the values this package builds without annotating them
- * (#348).
+ * able to export the values this package builds without annotating them.
  *
  * Declaration emit writes an exported value's inferred type into the
  * consumer's `.d.ts`, so every type that inferred type mentions must be
@@ -9,7 +8,7 @@
  * somewhere": the TypeScript checker does not follow a namespace alias
  * (`export * as Query from "./Query.js"`) when it looks for a name. A type is
  * nameable only through a namespace the consumer's file imports itself, or
- * through a module that exports it directly — since #385, its module's own
+ * through a module that exports it directly: now its module's own
  * subpath (`@thomasfosterau/effect-jsonapi/Query`), and before that the root's
  * type aliases (`src/index.ts`, now deprecated). When neither holds, the
  * checker reports TS2883 / TS4023 — or, worse, inlines the type structurally
@@ -23,7 +22,7 @@
  * which compiles it as a consumer that resolves the package through
  * `node_modules` and its `exports` map — with and without the root aliases —
  * alongside an endpoint, a group and a client over resources imported from
- * another file (#385).
+ * another file.
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -54,7 +53,7 @@ const Article = Resource.make("articles", {
   },
 });
 // A paginated relationship, whose own endpoint derives its paths over
-// `Endpoint.RelationshipIncludeBase` (#483).
+// `Endpoint.RelationshipIncludeBase`.
 const Thread = Resource.make("threads", {
   attributes: { subject: Schema.String },
   relationships: { comments: Relationship.paginated(() => Comment) },

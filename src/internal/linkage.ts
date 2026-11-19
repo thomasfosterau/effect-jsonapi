@@ -4,15 +4,15 @@
  * primary data by following resource linkage, through the primary data's
  * relationships and then through other `included` members'. When the primary
  * data is itself resource linkage (a relationship document's identifiers),
- * those identifiers are where the walk starts ({@link seeds}, #423).
+ * those identifiers are where the walk starts ({@link seeds}).
  *
  * It works on string keys, not on resource values, so the document builders
  * (typed values) and a checker over arbitrary JSON can walk the same graph
  * with their own notion of identity and linkage. The JSON checker
  * ({@link unlinkedIncluded}) is here too: the conformance kit's
  * `spec/document/full-linkage` rule runs it over a response it fetched, and
- * the endpoint middleware runs it over the document the endpoint encoded
- * (#250), so the two judge the wire the same way.
+ * the endpoint middleware runs it over the document the endpoint encoded,
+ * so the two judge the wire the same way.
  *
  * @internal
  */
@@ -143,7 +143,7 @@ export const isLinkageData = (
 /**
  * Where the full-linkage walk starts (JSON:API 1.1 §Compound Documents): the
  * identifiers in the primary resources' relationships, or, when the primary
- * data is resource linkage, the primary identifiers themselves (#423) — an
+ * data is resource linkage, the primary identifiers themselves — an
  * identifier carries no relationships, so it would otherwise seed nothing.
  * `keyOf` and `linkageOf` are the caller's notion of identity and of edges,
  * as for {@link reachable}.
@@ -199,7 +199,7 @@ export const linkageOf = (resource: R.ReadonlyRecord<string, unknown>): Readonly
  * `fields` is the request's sparse fieldsets, by type (`fields[TYPE]`, each
  * set as its names), and carries the spec's one exemption: full linkage is
  * waived "when relationship fields that would otherwise contain linkage data
- * are excluded due to sparse fieldsets" (§Compound Documents, #494). The wire
+ * are excluded due to sparse fieldsets" (§Compound Documents). The wire
  * cannot show what an excluded relationship would have linked, nor which
  * relationships a type has, so once the walk reaches a resource object —
  * primary or `included` — of a type `fields` names, any of its relationships

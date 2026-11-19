@@ -1,6 +1,6 @@
 /**
  * The `filter` URL grammar engine: flat `filter[...]` keys ↔ the filter AST,
- * per `docs/filter-grammar.md` §2 (surface syntax) and §3 (canonical
+ * per the filter profile's §2 (surface syntax) and §3 (canonical
  * encoding). `Filter.ts` and `Query.ts` expose it.
  *
  * @internal
@@ -68,7 +68,7 @@ export type LiteralEncoder = (field: string, value: Compare["value"]) => string;
 /**
  * A `LiteralEncoder` over a declaration's literal codecs. A `null` literal is
  * refused here, ahead of the codec, with a pointer at `isnull`: NULL is never a
- * literal (`docs/filter-grammar.md` F-NULL-1), and the codec's own type check
+ * literal (F-NULL-1), and the codec's own type check
  * would only say what it expected.
  */
 export const literalEncoder =

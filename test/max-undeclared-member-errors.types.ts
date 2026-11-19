@@ -1,5 +1,5 @@
 /**
- * Type-level tests for the `maxUndeclaredMemberErrors` option (#308).
+ * Type-level tests for the `maxUndeclaredMemberErrors` option.
  *
  *   - `Resource.make` and `Resource.extend` take it as `number | undefined`, so
  *     a caller can forward its own optional option (`exactOptionalPropertyTypes`

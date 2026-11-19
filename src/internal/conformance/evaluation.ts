@@ -1,10 +1,10 @@
 /**
  * The filter profile's evaluation rule: what a filtered collection must hold,
  * judged by the kit's own oracle (`./semantics.ts`) over the collection the
- * server serves unfiltered (#161).
+ * server serves unfiltered.
  *
  * No fixture is needed, because the unfiltered collection is the known set:
- * `docs/filter-grammar.md` §6.1 F-EVAL-4 reads `value(resource, field)` from
+ * The filter profile's §6.1 F-EVAL-4 reads `value(resource, field)` from
  * the resource's JSON representation and §6.2 F-ORD-1 defines comparison on
  * it, which is exactly what came back over the wire. So the rule fetches the
  * collection, builds filter trees over attributes it carries, evaluates each
@@ -19,12 +19,12 @@
  * `gte` in the domain of the field's JSON type (F-CMP-2, F-ORD-1), `nin` over
  * NULL (F-IN-2 / F-IN-3), `isnull` (F-ISNULL-1 / F-ISNULL-2), excluded middle
  * (F-CONS-1) — plus the empty groups (F-AND-2), which need no field at all.
- * Beside them (#433): the ordering operators on an attribute the sample never
+ * Beside them: the ordering operators on an attribute the sample never
  * shows NULL, with a pivot that splits it (F-CMP-2, F-ORD-1) and `isnull=true`
  * as the constant F-ISNULL-4 makes it; a to-one relationship field, valued by
  * the related id its linkage shows (F-EVAL-4, F-ORD-5); and a filter beside a
  * sparse fieldset that leaves the filtered field out (F-EVAL-6). And the §6.5
- * corollaries (#458): De Morgan, `Not(In)` and `Not(Not(x))` as trees of their
+ * corollaries: De Morgan, `Not(In)` and `Not(Not(x))` as trees of their
  * own (F-CONS-2 to F-CONS-4), one of them again in a second spelling of its
  * canonical form (F-CONS-7), a filter beside `include` whose `included` must
  * hold what the matched primary data links to (F-CONS-6), and on every
@@ -93,8 +93,7 @@ const rule: Rule = {
   id: "profile/filter/evaluation",
   tier: "profile",
   section: "filter-grammar/v1 §6 Semantics",
-  reference:
-    "https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md#6-semantics",
+  reference: "https://jsonapi.org/format/1.1/#fetching-filtering",
   level: "MUST",
   requirement:
     "A filtered collection MUST hold exactly the resources whose filter tree evaluates to TRUE under §6, read from each resource's complete JSON representation whatever sparse fieldset the request names (F-EVAL-6), a to-one relationship valued by its related id (F-EVAL-4, F-ORD-5): every comparison against NULL is UNKNOWN (F-CMP-1), `lt` / `lte` / `gt` / `gte` order a value in the domain of its JSON type (F-CMP-2, F-ORD-1), `nin` is the negation of `in` (F-IN-2, F-IN-3), `isnull` is total (F-ISNULL-1, F-ISNULL-2, F-ISNULL-4), `Or(x, Not(x))` misses the NULLs (F-CONS-1), De Morgan holds both ways (F-CONS-2), `Not(In)` is `nin` (F-CONS-3), `Not(Not(x))` is `x` (F-CONS-4), a filter changes a response's membership and never its shape — an empty result a 200 collection, each resource as served unfiltered (F-CONS-5, F-ERR-2) — and never `included` (F-CONS-6), two spellings of one canonical form match alike (F-CONS-7), `And([])` matches every resource and `Or([])` none (F-AND-2), and FALSE and UNKNOWN both exclude (F-EVAL-3).",
@@ -1045,7 +1044,7 @@ const sparseProbe =
 /**
  * The F-EVAL-6 family: a fieldset is sent only for the one type the
  * collection serves, and only when the endpoint declares `fields[TYPE]` for it
- * — an undeclared one is a 400 (#261), which would decide nothing.
+ * — an undeclared one is a 400, which would decide nothing.
  */
 const sparseFamily = (
   endpoint: Discovered,

@@ -1,9 +1,9 @@
 /**
- * Compound relationship documents on generated endpoints (#484):
+ * Compound relationship documents on generated endpoints:
  * `Endpoint.resource` / `Group.resource` thread `relationshipInclude` — the
  * top-level default and each relationship's override — into the `include`
  * option of the `getRelationship` endpoints they generate — and
- * `relationshipFields` likewise into their `fields` option (#489).
+ * `relationshipFields` likewise into their `fields` option.
  *
  * The type-level half is the `Endpoint.resource` section of
  * `test/relationship-include.types.ts`.
@@ -153,7 +153,7 @@ const commentIds = [{ type: "comments", id: "5" }];
 const editorId = { type: "people", id: "9" };
 const historyIds = [{ type: "revisions", id: "3" }];
 
-describe("`Endpoint.resource`'s `relationshipInclude` (#484)", () => {
+describe("`Endpoint.resource`'s `relationshipInclude`", () => {
   it.each([
     ["no options", Endpoint.resource(Article)],
     ["a top-level `include`", Endpoint.resource(Article, { include: true })],
@@ -179,7 +179,7 @@ describe("`Endpoint.resource`'s `relationshipInclude` (#484)", () => {
     expect(admitted(editor, editorId)).toEqual(["people", "companies"]);
   });
 
-  it("a `paginated` relationship legalises its own name, as a `many` does (#483)", () => {
+  it("a `paginated` relationship legalises its own name, as a `many` does", () => {
     const endpoints = Endpoint.resource(Article, {
       relationshipInclude: true,
       page: { offset: Schema.optionalKey(Schema.FiniteFromString) },
@@ -230,7 +230,7 @@ describe("`Endpoint.resource`'s `relationshipInclude` (#484)", () => {
   });
 });
 
-describe("`Endpoint.resource`'s `relationshipFields` (#489)", () => {
+describe("`Endpoint.resource`'s `relationshipFields`", () => {
   it.each([
     ["no options", Endpoint.resource(Article)],
     ["`relationshipInclude` alone", Endpoint.resource(Article, { relationshipInclude: true })],
@@ -260,11 +260,11 @@ describe("`Endpoint.resource`'s `relationshipFields` (#489)", () => {
     expect(declaresFieldsets(editor)).toEqual(["people", "companies"]);
     expect(admitsPartial(editor, editorId, "companies")).toBe(true);
     // A `paginated` relationship's paths are rooted at it, as a `many`'s
-    // are (#483), so it declares the types they reach.
+    // are, so it declares the types they reach.
     expect(declaresFieldsets(named(endpoints, "historyRelationship"))).toEqual(["revisions"]);
   });
 
-  it("follows a `paginated` relationship's include paths (#483)", () => {
+  it("follows a `paginated` relationship's include paths", () => {
     // A thread's comments are paginated; on their own relationship endpoint
     // `comments` and `comments.author` are legal, so both types are declared.
     const Thread = Resource.make("threads", {
@@ -336,7 +336,7 @@ describe("`Endpoint.resource`'s `relationshipFields` (#489)", () => {
   });
 });
 
-describe("a `Group.resource` relationship endpoint serving `included` (#484, #489)", () => {
+describe("a `Group.resource` relationship endpoint serving `included`", () => {
   const Api = HttpApi.make("resourceRelationshipInclude").add(
     Group.resource(Article, {
       endpoints: { get: false, list: false, create: false, update: false, delete: false },
@@ -417,7 +417,7 @@ describe("a `Group.resource` relationship endpoint serving `included` (#484, #48
       "/articles/1/relationships/editor?include=editor,editor.employer&fields[people]=name",
     );
     expect(response.status).toBe(200);
-    // `employer` is not named, so it goes (#494), and the company it linked
+    // `employer` is not named, so it goes, and the company it linked
     // is exempt from full linkage (§Compound Documents).
     const { relationships: _employer, ...person } = wire.people;
     expect(response.body).toEqual({

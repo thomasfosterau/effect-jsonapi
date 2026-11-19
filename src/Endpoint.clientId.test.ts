@@ -1,5 +1,5 @@
 /**
- * #450: a create under a client-generated id, through a payload that does not
+ * A create under a client-generated id, through a payload that does not
  * support one, answers JSON:API's 403 Forbidden naming `/data/id`, and the
  * handler never runs — rather than the id being dropped and the resource
  * created under one of the server's own.
@@ -121,7 +121,7 @@ beforeEach(() => {
   created = [];
 });
 
-describe("a client-generated id on a create that does not support one (#450)", () => {
+describe("a client-generated id on a create that does not support one", () => {
   it("answers 403 naming /data/id, and creates nothing", async () => {
     const response = await post("/articles", {
       data: { type: "articles", id: "client-1", attributes: { title: "Hello" } },

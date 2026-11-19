@@ -1,5 +1,5 @@
 /**
- * Type-level tests for a to-one relationship's storage key (#509):
+ * Type-level tests for a to-one relationship's storage key:
  * `Relationship.one(ref, { key })` / `optional(ref, { key })` record the key as
  * an `Option` of the literal passed, `Option<never>` (`Option.none()`) when none
  * is declared, and the lowercase annotation types name it as their third

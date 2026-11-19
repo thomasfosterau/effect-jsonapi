@@ -31,11 +31,6 @@ dist/
 # Output of `pnpm pack` / `npm pack`.
 *.tgz
 
-# Generated API documentation (built by `vp run docgen`); hand-written design
-# notes in docs/ are tracked explicitly.
-/docs/*
-!/docs/filter-grammar.md
-!/docs/conformance.md
-!/docs/idempotency.md
-!/docs/guides/
+# Generated API reference (`vp run docgen`).
+/docs/api/
 .vitest/

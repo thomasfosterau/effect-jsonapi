@@ -135,7 +135,7 @@ export type WireResource<Res extends ResourceLike> = Document.Wire<Res> & {
  * what the registry's loaders return (`Handlers.IncludeTargetResource`).
  * With no registry nothing is walked, so nothing can be included: `never`,
  * which is also what lets such a document (a write's, say) satisfy a success
- * schema whose `included` is an include surface's precise union (#595). A
+ * schema whose `included` is an include surface's precise union. A
  * registry whose loaders' types aren't visible (annotated as
  * `Handlers.IncludeTargets` rather than checked with `satisfies`) gives the
  * loose {@link ResourceLike}.
@@ -162,7 +162,7 @@ export const JSONAPI_MEMBER = { version: "1.1" } as const;
  * `jsonapi` member always present. `I` is the `included` members' type:
  * {@link resource} sets it to what the include registry's loaders return
  * ({@link TargetsIncluded}), so a document is assignable to a success schema
- * whose `included` is the include surface's precise union (#595). Written by
+ * whose `included` is the include surface's precise union. Written by
  * hand, it defaults to the loose {@link ResourceLike}.
  *
  * @since 0.16.0
@@ -379,7 +379,7 @@ export interface Options<V = unknown, Targets extends Handlers.IncludeTargets = 
   readonly viewer?: V;
   /**
    * Sparse fieldsets keyed by resource `type` to the field names —
-   * attributes and relationships (#494) — the caller wants. Missing means the
+   * attributes and relationships — the caller wants. Missing means the
    * full resource; an empty set, no fields. A relationship a set excludes is
    * exempt from the full-linkage check (`Handlers.project`).
    */
@@ -769,7 +769,7 @@ const onResourceFor = <V>(
 ) => {
   // With `capabilitiesOnIncluded: false` only the primary data is stamped. The
   // one transform shapes both slots, so primary membership is by `(type, id)`;
-  // a resource that is both is shaped once, for the primary slot (#567).
+  // a resource that is both is shaped once, for the primary slot.
   const primaryKeys =
     options.capabilitiesOnIncluded === false
       ? HashSet.fromIterable(primary.map((r) => `${r.type}\0${r.id}`))
@@ -801,7 +801,7 @@ const asValue = (resource: ResourceLike): Handlers.ResourceValue =>
  * request carried no `include`, and only that: a request that did — even a
  * bare `?include=`, which decodes to `[]` — gets an array, `[]` when there is
  * no registry to walk through or no path to walk, so the document keeps its
- * `included` key (§Fetching Includes, #232).
+ * `included` key (§Fetching Includes).
  */
 const walk = <V, Targets extends Handlers.IncludeTargets>(
   primary: ReadonlyArray<ResourceLike>,
@@ -895,7 +895,7 @@ export const resource = <
     Effect.map((included) => {
       const built = Handlers.data(asValue(wired), {
         ...definedMember("self", wired.links?.self),
-        // An empty walk keeps the key: the request carried `include` (#232).
+        // An empty walk keeps the key: the request carried `include`.
         ...someMember(
           "included",
           Option.map(included, (resources) => resources.map((r) => asValue(stringifyLinks(r)))),
@@ -959,7 +959,7 @@ const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets, X ext
       // SAFETY: `Handlers.collection` types its value over the builders' loose
       // `ResourceValue`; the value is `D` by construction — the wired, stamped
       // resources, `included` when the request carried `include` (empty if
-      // nothing remains, #232) or when members survive the dedupe against
+      // nothing remains) or when members survive the dedupe against
       // the primary data, exactly the `top` members the caller's `D`
       // declares, and the `jsonapi` member.
       return {
@@ -1191,16 +1191,15 @@ export interface RelationshipInput<Res extends ResourceLike, I extends ResourceL
   /**
    * Resources to carry in `included`, typically the related resources the
    * linkage names. Full linkage applies, and is checked: each must be
-   * reachable from the primary identifiers, or {@link relationship} throws
-   * (#498).
+   * reachable from the primary identifiers, or {@link relationship} throws.
    */
   readonly included?: ReadonlyArray<I>;
   /**
    * Sparse fieldsets keyed by resource `type` to the field names —
-   * attributes and relationships (#494) — the caller wants: the
+   * attributes and relationships — the caller wants: the
    * `query.fields` of an `Endpoint.getRelationship` declaring `fields`.
    * Applied to the `included` members only: the primary data is resource
-   * identifiers, which have no fields to project (#485). Empty / missing
+   * identifiers, which have no fields to project. Empty / missing
    * means the full resources.
    *
    * @since 0.18.0
@@ -1215,16 +1214,16 @@ export interface RelationshipInput<Res extends ResourceLike, I extends ResourceL
  * related link when the parent carries one.
  *
  * Full linkage is checked from the identifiers, as `Handlers.linkage` checks
- * it (`Handlers.buildIncluded`, #498): every `included` member must be
+ * it (`Handlers.buildIncluded`): every `included` member must be
  * reachable from them, directly or through other members' relationships, or
  * the call throws — a programming error in the handler, which surfaces as a
  * defect. The one exemption is the spec's: a relationship `fields` excludes
- * still counts as the linkage it would otherwise carry (§Compound Documents,
- * #494), so `?include=comments.author&fields[comments]=body` passes.
+ * still counts as the linkage it would otherwise carry (§Compound Documents),
+ * so `?include=comments.author&fields[comments]=body` passes.
  *
  * The parent itself is never in `included`: the primary data names the
  * related resources, not the parent, so it would be reachable only through a
- * child linking back to it and the document would fail full linkage (#444).
+ * child linking back to it and the document would fail full linkage.
  * A client that needs the post-mutation parent fetches it.
  *
  * Pass `fields` to apply a request's sparse fieldsets to the `included`
@@ -1269,8 +1268,8 @@ export const relationship = <Res extends ResourceLike, I extends ResourceLike = 
   input: RelationshipInput<Res, I, V>,
 ): RelationshipDocument<Res, I> => {
   // Deduplicated, stamped and projected, and checked for full linkage from
-  // the identifiers, as `Handlers.linkage` checks it (#498) — with the
-  // sparse-fieldset exemption the projection carries (#494).
+  // the identifiers, as `Handlers.linkage` checks it — with the
+  // sparse-fieldset exemption the projection carries.
   const included = Handlers.buildIncluded(
     relationshipRefs(input.parent, input.key),
     (input.included ?? []).map((r) => asValue(stringifyLinks(r))),
@@ -1304,7 +1303,7 @@ export const relationship = <Res extends ResourceLike, I extends ResourceLike = 
  * `input.query` is the rest of the request's query as canonical wire pairs
  * (`Query.canonicalPairs(listQuery)(query)`), exactly as {@link Pagination}'s
  * `query`: every pagination link carries it, so a filtered or sorted edge
- * page's `next` keeps its `filter[…]` and `sort` (#569).
+ * page's `next` keeps its `filter[…]` and `sort`.
  *
  * @example
  * ```ts

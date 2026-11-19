@@ -96,7 +96,7 @@ declare const projectedPerson: Extract<
 assertType<string>(projectedPerson.attributes.firstName);
 assertType<string>(projectedPerson.attributes.lastName);
 
-// …and a relationship is a field (#494): `author` was not requested, so the
+// …and a relationship is a field: `author` was not requested, so the
 // projection drops it, and `relationships` with it.
 // @ts-expect-error -- no relationship was requested, so there is no `relationships` member
 assertType<unknown>(projected.data.relationships);
@@ -111,14 +111,14 @@ assertType<Option.Option<{ readonly type: "people"; readonly id: string }>>(
 assertType<string>(withAuthor.data.attributes.body);
 
 // ---------------------------------------------------------------------------
-// An empty literal fieldset (`?fields[articles]=`) selects no attribute (#488)
+// An empty literal fieldset (`?fields[articles]=`) selects no attribute
 // ---------------------------------------------------------------------------
 
 const none = Handlers.data(article, { onResource: Handlers.project({ articles: [] }) });
 const noneAttributes: Equals<(typeof none)["data"]["attributes"], Record<never, never>> = true;
 // @ts-expect-error -- `title` was projected off with every other attribute
 assertType<string>(none.data.attributes.title);
-// …and no relationship either (#494): `relationships` is omitted, as at runtime.
+// …and no relationship either: `relationships` is omitted, as at runtime.
 // @ts-expect-error -- the empty set drops every relationship
 assertType<unknown>(none.data.relationships);
 // A type with no set at all is untouched, as at runtime.
@@ -145,7 +145,7 @@ const dynamicAttributes: Equals<
 > = true;
 // @ts-expect-error -- and not asserted present
 assertType<string>(dynamic.data.attributes.title);
-// So is each relationship (#494), and the `relationships` member itself,
+// So is each relationship, and the `relationships` member itself,
 // which the projection omits when it keeps none.
 assertType<Option.Option<{ readonly type: "people"; readonly id: string }>>(
   Option.fromUndefinedOr(dynamic.data.relationships?.author?.data),

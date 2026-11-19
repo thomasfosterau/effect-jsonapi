@@ -1,11 +1,11 @@
 /**
- * `Include.included`'s resource form (#342): `Include.included(resource,
+ * `Include.included`'s resource form: `Include.included(resource,
  * { include })`, or `Include.included(members, { include })` for a
  * `collection` / `polymorphic` endpoint, builds the `included` union the
  * matching endpoint's default document binds — so a wire-variant `success`
  * can reuse it rather than list every reachable type by hand, and a type the
  * endpoint's include paths reach is never missing from it (a missing one is a
- * `ResponseEncodeError` on the path that reaches it, #320).
+ * `ResponseEncodeError` on the path that reaches it).
  *
  * Each pin compares the helper's union members with those of the default
  * document's `included` union, by identity. The type-level half is
@@ -104,7 +104,7 @@ const expectSameUnion = (
   expectSameMembers(membersOf(helper), membersOf(union));
 };
 
-describe("Include.included(resource, { include }) is the default document's union (#342)", () => {
+describe("Include.included(resource, { include }) is the default document's union", () => {
   const surface = Include.make(Article, {
     comments: Include.nested(Comment, { author: Person }),
   });
@@ -189,7 +189,7 @@ describe("Include.included(resource, { include }) is the default document's unio
     });
     expect(Include.included(AnyNode.members, { include: nodeSurface })).toBe(nodeSurface.included);
     // Which `collection` and `polymorphic` bind, as `get` / `list` / `related`
-    // do (#336): exactly the surface's union, narrowed to what it names —
+    // do: exactly the surface's union, narrowed to what it names —
     // `Company`, a direct target of `Person.employer`, is dropped.
     const [success] = Endpoint.collection([Article, Person], {
       name: "search",
@@ -222,7 +222,7 @@ describe("Include.included(resource, { include }) is the default document's unio
       Include.included([Article, Person], { include: widen(false) }),
       Endpoint.collection([Article, Person], { name: "search", path: "/search" }),
     );
-    // The members form too, whose type distributes with the endpoints' (#382).
+    // The members form too, whose type distributes with the endpoints'.
     expectSameUnion(
       Include.included([Article, Person], { include: widen(true) }),
       Endpoint.collection([Article, Person], { name: "search", path: "/search", include: true }),

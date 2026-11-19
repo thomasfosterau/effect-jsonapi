@@ -1,7 +1,7 @@
 /**
- * Compound relationship documents (#439): `Endpoint.getRelationship` with
+ * Compound relationship documents: `Endpoint.getRelationship` with
  * `include` accepts `?include=` and serves `included` beside the linkage —
- * and, with `fields` (#485), `?fields[TYPE]=` narrows those members.
+ * and, with `fields`, `?fields[TYPE]=` narrows those members.
  *
  * JSON:API 1.1 §Inclusion of Related Resources: "related resources can be
  * requested from a relationship endpoint: `GET
@@ -137,7 +137,7 @@ const accepts = (endpoint: Pick<HttpApiEndpoint.Top, "query">, paths: string): b
 
 const commentIds = [{ type: "comments", id: "5" }];
 
-describe("`getRelationship`'s `?include=` (#439)", () => {
+describe("`getRelationship`'s `?include=`", () => {
   it("is off by default: no `include` parameter, no `included` member", () => {
     const endpoint = Endpoint.getRelationship(Article, "comments");
     expect(accepts(endpoint, "comments")).toBe(false);
@@ -213,7 +213,7 @@ describe("`getRelationship`'s `?include=` (#439)", () => {
     expect(admitted(endpoint, { type: "people", id: "9" })).toEqual(["people", "companies"]);
   });
 
-  it("a `paginated` relationship's own name is legal on its relationship endpoint (#483)", () => {
+  it("a `paginated` relationship's own name is legal on its relationship endpoint", () => {
     // Never an include path of the parent's own read…
     expect(accepts(Endpoint.get(Article, { include: true }), "history")).toBe(false);
     // …but here its linkage is the primary data, so it can be included.
@@ -223,7 +223,7 @@ describe("`getRelationship`'s `?include=` (#439)", () => {
   });
 
   it("keeps the `included` `Assemble.relationship` returns", () => {
-    // #439: the endpoint schema used to have no `included`, so encoding
+    // The endpoint schema used to have no `included`, so encoding
     // dropped it.
     const endpoint = Endpoint.getRelationship(Article, "comments", { include: true });
     const article = {
@@ -272,8 +272,8 @@ const fieldsets = (endpoint: Parameters<typeof queryOf>[0]): ReadonlyArray<strin
     .toSorted();
 
 // A wire resource object with only the named attributes.
-// A resource narrowed to the fields `names` (attributes and relationships,
-// #494), as `Handlers.project` narrows it: `relationships` omitted when it
+// A resource narrowed to the fields `names` (attributes and relationships),
+// as `Handlers.project` narrows it: `relationships` omitted when it
 // keeps none.
 const narrowed = <
   T extends {
@@ -293,7 +293,7 @@ const narrowed = <
   };
 };
 
-describe("`getRelationship`'s `fields` (#485)", () => {
+describe("`getRelationship`'s `fields`", () => {
   it("declares a fieldset for each type the include paths reach, and no other", () => {
     // Not `articles`: the parent is no resource object of this document.
     // Not `companies`: past depth 2. Not `revisions`: behind `paginated`.
@@ -351,7 +351,7 @@ describe("`getRelationship`'s `fields` (#485)", () => {
     expect(fieldsets(Endpoint.getRelationship(Article, "comments", { include: true }))).toEqual([]);
   });
 
-  it("declares the types a `paginated` relationship's paths reach (#483)", () => {
+  it("declares the types a `paginated` relationship's paths reach", () => {
     expect(
       fieldsets(Endpoint.getRelationship(Article, "history", { include: true, fields: true })),
     ).toEqual(["fields[revisions]"]);
@@ -391,7 +391,7 @@ describe("`getRelationship`'s `fields` (#485)", () => {
   });
 });
 
-describe("a compound relationship document served over HTTP (#439)", () => {
+describe("a compound relationship document served over HTTP", () => {
   const Api = HttpApi.make("relationshipInclude").add(
     Group.make(
       Article,
@@ -427,7 +427,7 @@ describe("a compound relationship document served over HTTP (#439)", () => {
 
   // Every `include` the relationship endpoint was asked for, in order.
   const requested: Array<Option.Option<ReadonlyArray<string>>> = [];
-  // Every fieldset it was asked for, in order (#485).
+  // Every fieldset it was asked for, in order.
   const requestedFields: Array<Handlers.Fields> = [];
 
   const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
@@ -519,7 +519,7 @@ describe("a compound relationship document served over HTTP (#439)", () => {
   it.effect("passes the compound-document rules, which the kit probes it for", () =>
     Effect.gen(function* () {
       // The kit's compound probe asks a relationship endpoint declaring `include`
-      // for its own relationship: `?include=comments` (#439).
+      // for its own relationship: `?include=comments`.
       requested.length = 0;
       const report = yield* verify([
         "spec/document/full-linkage",
@@ -538,7 +538,7 @@ describe("a compound relationship document served over HTTP (#439)", () => {
     }),
   );
 
-  it("answers `fields[comments]` by narrowing the included comments alone (#485)", async () => {
+  it("answers `fields[comments]` by narrowing the included comments alone", async () => {
     const response = await serve(
       "/articles/1/relationships/comments?include=comments.author&fields[comments]=body",
     );
@@ -548,7 +548,7 @@ describe("a compound relationship document served over HTTP (#439)", () => {
     });
   });
 
-  it("answers a fieldset for the parent's type with a 400 (#485)", async () => {
+  it("answers a fieldset for the parent's type with a 400", async () => {
     // The parent is no resource object of a relationship document.
     const response = await serve("/articles/1/relationships/comments?fields[articles]=title");
     expect(response.status).toBe(400);
@@ -561,7 +561,7 @@ describe("a compound relationship document served over HTTP (#439)", () => {
     "passes the sparse-fieldset rule on its `included` members, which the kit probes it for",
     () =>
       Effect.gen(function* () {
-        // #485: the only endpoint declaring `fields`, so the rule can only be
+        // The only endpoint declaring `fields`, so the rule can only be
         // judged here: `?include=comments&fields[comments]=body`.
         requestedFields.length = 0;
         const report = yield* verify([
@@ -578,7 +578,7 @@ describe("a compound relationship document served over HTTP (#439)", () => {
   );
 });
 
-// #483: on a `paginated` relationship's own endpoint, its name and the paths
+// On a `paginated` relationship's own endpoint, its name and the paths
 // rooted at it are legal, as on a `many`. A thread's comments are paginated;
 // the comments themselves are those of the article above.
 const Thread = Resource.make("threads", {
@@ -599,7 +599,7 @@ const threadComments = [
   { type: "comments", id: "6" },
 ];
 
-describe("`getRelationship`'s `?include=` on a `paginated` relationship (#483)", () => {
+describe("`getRelationship`'s `?include=` on a `paginated` relationship", () => {
   it("`include: true` legalises the name and the depth-2 paths rooted at it", () => {
     const endpoint = Endpoint.getRelationship(Thread, "comments", { include: true });
     expect(accepts(endpoint, "comments")).toBe(true);
@@ -653,7 +653,7 @@ describe("`getRelationship`'s `?include=` on a `paginated` relationship (#483)",
     expect(() => Handlers.linkage(page, { included: [offPage] })).toThrow();
     // `Assemble.relationship` reads the linkage off the parent, which for a
     // `paginated` relationship carries none: hand it the page. It checks full
-    // linkage from those identifiers as `Handlers.linkage` does (#498).
+    // linkage from those identifiers as `Handlers.linkage` does.
     const thread = {
       type: "threads",
       id: "1",
@@ -673,7 +673,7 @@ describe("`getRelationship`'s `?include=` on a `paginated` relationship (#483)",
   });
 });
 
-describe("a paginated compound relationship document served over HTTP (#483)", () => {
+describe("a paginated compound relationship document served over HTTP", () => {
   const Api = HttpApi.make("paginatedRelationshipInclude").add(
     Group.make(
       Thread,
@@ -779,7 +779,7 @@ describe("a paginated compound relationship document served over HTTP (#483)", (
       status: 200,
       body: { data: [threadComments[0]], included: [narrowed(wire.comments, "body")] },
     });
-    // An empty fieldset asks for no attributes (#488).
+    // An empty fieldset asks for no attributes.
     const empty = await serve(
       "/threads/1/relationships/comments?include=comments&fields[comments]=&page[limit]=1",
     );

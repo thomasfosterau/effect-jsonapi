@@ -235,7 +235,7 @@ describe("alternates and the fallback", () => {
     ).toBe(true);
   });
 
-  it("wins with media-type parameters of its own, which the JSON:API rule does not govern (#566)", () => {
+  it("wins with media-type parameters of its own, which the JSON:API rule does not govern", () => {
     expect(
       markdown.negotiate(get(`/contests/${UUID}`, "text/markdown;charset=utf-8")).representation,
     ).toBe("text/markdown");
@@ -252,7 +252,7 @@ describe("alternates and the fallback", () => {
   });
 });
 
-describe("extensions (#566)", () => {
+describe("extensions", () => {
   const ATOMIC = "https://jsonapi.org/ext/atomic";
   const UNKNOWN = "https://unknown.example/ext";
   const strict = Negotiation.make({ api: Api, extensions: [ATOMIC] });
@@ -323,7 +323,7 @@ describe("onExplicitRefusal", () => {
     );
   });
 
-  // #234's reproduction: a `q` outside the RFC 9110 qvalue grammar is
+  // the reproduction: a `q` outside the RFC 9110 qvalue grammar is
   // malformed (the default weight), never the explicit `q=0` refusal this
   // option answers with a 406.
   it.each(["", "0x0", "-1", "abc", "2", ".5"])(
@@ -370,7 +370,7 @@ describe("onExplicitRefusal", () => {
     ).toEqual({ representation: MEDIA_TYPE, dispatch: true });
   });
 
-  // Pending an owner decision recorded on #198
+  // Pending an owner decision
   // (https://github.com/thomasfosterau/effect-jsonapi/issues/198#issuecomment-6050059821):
   // this pins today's behaviour, not a settled one. A parameterised JSON:API
   // range with `q > 0` counts as "another acceptable range", so adding the
@@ -451,11 +451,11 @@ describe("errorResponse", () => {
   });
 });
 
-// The JSON:API half of a generic negotiator (#577). The cases are those of
+// The JSON:API half of a generic negotiator. The cases are those of
 // effect-ext's former `tests/web/negotiate.test.ts` 406 / 415 suite, at the
 // parameter rule they reduce to: each instance is parsed as a WHATWG MIME
 // type by effect-ext's `Mime`, as `Negotiate` hands it over.
-describe("representation (#577)", () => {
+describe("representation", () => {
   const ATOMIC = "https://jsonapi.org/ext/atomic";
   // `none` for a header that is not a MIME type, so a typo can't pass as a refusal.
   const accepts = (jsonApi: Negotiation.Representation, header: string): Option.Option<boolean> =>
@@ -503,7 +503,7 @@ describe("representation (#577)", () => {
   });
 });
 
-describe("toApiError (#577)", () => {
+describe("toApiError", () => {
   const jsonApi = Negotiation.representation();
   const markdown = { mediaType: "text/markdown" };
   const firstError = (outcome: Negotiation.Outcome) =>
@@ -538,7 +538,7 @@ describe("toApiError (#577)", () => {
   });
 });
 
-describe("negotiation error codes (#577)", () => {
+describe("negotiation error codes", () => {
   const codeOf = (error: ApiError.Any): Option.Option<string> =>
     Option.flatMap(Arr.head(ApiError.toDocument(error).errors), (e) =>
       Option.fromNullishOr(e.code),

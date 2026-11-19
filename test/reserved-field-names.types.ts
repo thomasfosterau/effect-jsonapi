@@ -1,5 +1,5 @@
 /**
- * Type-level tests for JSON:API 1.1 §Fields (#503): a resource's attributes
+ * Type-level tests for JSON:API 1.1 §Fields: a resource's attributes
  * and relationships share one namespace with each other and with `type` and
  * `id`, so `Resource.make` and `Resource.extend` reject a field named `type` or
  * `id`, and a name declared as both an attribute and a relationship.

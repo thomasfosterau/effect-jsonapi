@@ -4,15 +4,13 @@
  *
  * Three groups:
  *
- *   - **The filter grammar profile** (`docs/filter-grammar.md`, published at
- *     `Filter.PROFILE_URI`). Its §2 surface syntax, §3 canonical encoding, §4
+ *   - **The filter grammar profile** (published at `Filter.PROFILE_URI`). Its §2 surface syntax, §3 canonical encoding, §4
  *     closed operator core, §5 advertisement and §7 error pointers are all
  *     normative today and mechanically checkable over the wire. Its §6
  *     *evaluation* semantics are checked by `./evaluation.ts`, with the kit's
  *     own oracle (`./semantics.ts`) over the collection the server serves
  *     unfiltered.
- *   - **The Idempotency-Key profile** (`docs/idempotency.md`, published at
- *     `Idempotency.PROFILE_URI`). Only its advertisement (§1) is checked, on
+ *   - **The Idempotency-Key profile** (published at `Idempotency.PROFILE_URI`). Only its advertisement (§1) is checked, on
  *     the 2xx a create or update probe gets from the `writes` fixture; delete
  *     and atomic writes, and what a *retried* write does, are declared as a
  *     coverage gap.
@@ -79,8 +77,7 @@ import { quote } from "./crawl.js";
 import { evaluation } from "./evaluation.js";
 import { render } from "../json.js";
 
-const GRAMMAR =
-  "https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md";
+const SPEC = "https://jsonapi.org/format/1.1/";
 
 const filterRule = (
   id: string,
@@ -92,7 +89,7 @@ const filterRule = (
   id,
   tier: "profile",
   section: `filter-grammar/v1 ${section}`,
-  reference: `${GRAMMAR}#${anchor}`,
+  reference: `${SPEC}#${anchor}`,
   level,
   requirement,
 });
@@ -157,7 +154,7 @@ const advertisesProfile: RuleImpl = {
   rule: filterRule(
     "profile/filter/advertises-profile-uri",
     "§5 Profile URI",
-    "5-profile-uri",
+    "profiles",
     "MUST",
     `A server implementing the filter grammar MUST advertise it on the media type of responses from the endpoints that implement it: \`profile="${PROFILE_URI}"\`.`,
   ),
@@ -192,7 +189,7 @@ const rejections: RuleImpl = {
   rule: filterRule(
     "profile/filter/rejections",
     "§2 Surface syntax, §4 Closed operator core, §7 Error pointers",
-    "2-surface-syntax",
+    "fetching-filtering",
     "MUST",
     "An operator outside the closed core, an undeclared field, a malformed key depth, a repeated `filter[…]` key and a literal that fails the attribute's codec MUST each be rejected with 400 Bad Request and one error object whose `source.parameter` names the offending flat key.",
   ),
@@ -279,7 +276,7 @@ const spellingEquivalence: RuleImpl = {
   rule: filterRule(
     "profile/filter/spelling-equivalence",
     "§2.2 Shorthand, §3 Canonical encoding",
-    "3-canonical-encoding",
+    "fetching-filtering",
     "MUST",
     "Shorthand is the desugared spelling of the group form and the canonical string is a function of the AST alone, so every URL that decodes to the same tree — whatever its key order, ids or `[eq]`/bare spelling — MUST produce the same response.",
   ),
@@ -288,7 +285,7 @@ const spellingEquivalence: RuleImpl = {
       const target = grammarEndpoints(ctx)[0];
       if (target === undefined) return skip(spellingEquivalence.rule, NO_GRAMMAR);
       // The first string attribute, not the first attribute: a resource that
-      // leads with a number (`number` on an issue) still has one to spell (#458).
+      // leads with a number (`number` on an issue) still has one to spell.
       const learned = yield* learnField(ctx, target.path, P.isString);
       if (learned === undefined || !P.isString(learned.value)) {
         return skip(
@@ -375,9 +372,6 @@ const spellingEquivalence: RuleImpl = {
 // The Idempotency-Key profile
 // ---------------------------------------------------------------------------
 
-const IDEMPOTENCY =
-  "https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/idempotency.md";
-
 const idempotencyRule = (
   id: string,
   section: string,
@@ -388,7 +382,7 @@ const idempotencyRule = (
   id,
   tier: "profile",
   section: `idempotency/v1 ${section}`,
-  reference: `${IDEMPOTENCY}#${anchor}`,
+  reference: `${SPEC}#${anchor}`,
   level,
   requirement,
 });
@@ -529,7 +523,7 @@ const probeUpdate = (ctx: Context, rule: Rule, target: WriteTarget) =>
   );
 
 /**
- * `docs/idempotency.md` §1: a server advertises the profile in `jsonapi.profile`
+ * The Idempotency-Key profile's §1: a server advertises the profile in `jsonapi.profile`
  * and MAY also name it on the media type, so either place passes. Only a write
  * shows it — the kit cannot read an endpoint's answer to a write without
  * making one — so the rule runs, on the `writes` fixture under
@@ -544,7 +538,7 @@ const advertisesIdempotencyProfile: RuleImpl = {
   rule: idempotencyRule(
     "profile/idempotency/advertises-profile-uri",
     "§1 What the profile is, and is not",
-    "1-what-the-profile-is-and-is-not",
+    "profiles",
     "SHOULD",
     `A server implementing the Idempotency-Key profile SHOULD advertise it: the 2xx response to a create or an update on an endpoint that accepts the \`Idempotency-Key\` header names \`${IDEMPOTENCY_PROFILE_URI}\` in the top-level \`jsonapi.profile\` member (\`Idempotency.jsonapi\`) or in the \`profile\` parameter of its media type.`,
   ),

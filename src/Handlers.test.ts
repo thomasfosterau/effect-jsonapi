@@ -79,7 +79,7 @@ describe("Handlers.data", () => {
     expect(doc.included).toEqual([stranger]);
   });
 
-  it("does not repeat the primary resource in `included` (#147)", () => {
+  it("does not repeat the primary resource in `included`", () => {
     // An article that links to itself: a `related` include resolves back to
     // the primary resource, which a document carries once, as `data`.
     const selfLinked = {
@@ -93,14 +93,14 @@ describe("Handlers.data", () => {
       author,
     ]);
     // …and when it was the only candidate, `included` is still there, empty:
-    // the caller asked for a compound document (#232).
+    // the caller asked for a compound document.
     expect(Handlers.data(selfLinked, { included: [selfLinked] })).toEqual({
       data: selfLinked,
       included: [],
     });
   });
 
-  it("emits `included: []` when the caller passed an empty array (#232)", () => {
+  it("emits `included: []` when the caller passed an empty array", () => {
     // JSON:API 1.1 §Fetching Includes: a response to a request carrying
     // `include` MUST be a compound document with an `included` key, even if it
     // holds an empty array. An array — however empty — is the caller saying so.
@@ -108,7 +108,7 @@ describe("Handlers.data", () => {
     expect(Handlers.data(null, { included: [] })).toEqual({ data: null, included: [] });
   });
 
-  it("omits `included` when the caller passed none (#232)", () => {
+  it("omits `included` when the caller passed none", () => {
     // No `included` is "no include was requested": the document stays bare.
     expect(Handlers.data(article, {})).toEqual({ data: article });
     expect("included" in Handlers.data(article, {})).toBe(false);
@@ -134,7 +134,7 @@ describe("Handlers.collection", () => {
     expect(Handlers.collection([])).toEqual({ data: [] });
   });
 
-  it("does not repeat primary data in `included` for a heterogeneous collection (#147)", () => {
+  it("does not repeat primary data in `included` for a heterogeneous collection", () => {
     // `/search?include=author`: `people:9` is both a search hit (primary data)
     // and the author of another hit. A compound document MUST NOT include more
     // than one resource object for each `(type, id)` pair.
@@ -143,7 +143,7 @@ describe("Handlers.collection", () => {
     expect(doc.included).toEqual([comment]);
   });
 
-  it("keeps an empty `included` when every candidate is already primary data (#147, #232)", () => {
+  it("keeps an empty `included` when every candidate is already primary data", () => {
     // `/search?include=author` where every author is also a hit: the dedupe
     // against primary data leaves nothing, and the request still carried
     // `include`, so the compound document keeps its (empty) `included` key.
@@ -153,7 +153,7 @@ describe("Handlers.collection", () => {
     });
   });
 
-  it("emits `included: []` for an empty array and omits it for `undefined` (#232)", () => {
+  it("emits `included: []` for an empty array and omits it for `undefined`", () => {
     expect(Handlers.collection([article], { included: [] })).toEqual({
       data: [article],
       included: [],
@@ -273,7 +273,7 @@ describe("Handlers.linkage", () => {
     });
   });
 
-  // #439: a compound relationship document — `GET
+  // A compound relationship document — `GET
   // /articles/1/relationships/comments?include=comments.author`.
   describe("with `included`", () => {
     const comment = (id: string, author = "9") => ({
@@ -341,7 +341,7 @@ describe("Handlers.linkage", () => {
       ).toEqual([person("7")]);
     });
 
-    it("projects a sparse fieldset onto the members, not the identifiers (#485)", () => {
+    it("projects a sparse fieldset onto the members, not the identifiers", () => {
       // `?include=comments.author&fields[comments]=body,author&fields[people]=name`:
       // an identifier has no attributes, so projecting it is a no-op.
       const doc = Handlers.linkage(ids("5"), {
@@ -354,7 +354,7 @@ describe("Handlers.linkage", () => {
 
     // §Compound Documents: full linkage is waived "when relationship fields
     // that would otherwise contain linkage data are excluded due to sparse
-    // fieldsets" (#494).
+    // fieldsets".
     it("exempts a member linked only through a relationship the fieldset excludes", () => {
       // `?include=comments.author&fields[comments]=body`: `author` goes, and
       // the person it linked is reachable only through it.
@@ -426,7 +426,7 @@ describe("Handlers.project", () => {
   });
 
   // §Sparse Fieldsets: "An empty value indicates that no fields should be
-  // returned" — an empty `?fields[articles]=` is not the absent parameter (#488).
+  // returned" — an empty `?fields[articles]=` is not the absent parameter.
   it("projects an empty requested set to no attributes", () => {
     expect(Handlers.project(relatedArticle, { articles: [] })).toEqual({
       type: "articles",
@@ -435,7 +435,7 @@ describe("Handlers.project", () => {
     });
   });
 
-  // A relationship is a field (§Resource Object Fields, #494): an empty set
+  // A relationship is a field (§Resource Object Fields): an empty set
   // drops every one, and `relationships` with them; the resource's own
   // `links` and `meta` are no fields, and stay.
   it("drops every relationship under an empty set, keeping `links` and `meta`", () => {
@@ -511,7 +511,7 @@ describe("Handlers.project", () => {
 
   // Attributes parsed from JSON can carry `__proto__` as an own key; a
   // projection that assigned it would drop the member and re-parent the copy
-  // onto its value (#269).
+  // onto its value.
   it("keeps a requested attribute keyed __proto__ as an own data member", () => {
     const Json = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown));
     const resource = {
@@ -648,7 +648,7 @@ describe("the per-resource transform pass", () => {
     assert(document.included !== undefined);
     expect(R.keys(document.data.attributes)).toEqual(R.keys(document.included[0].attributes));
     // …and the relationship that carried the linkage went with the
-    // fieldset, which exempts the member it linked (#494)
+    // fieldset, which exempts the member it linked
     expect("relationships" in document.data).toBe(false);
   });
 
@@ -686,7 +686,7 @@ describe("the per-resource transform pass", () => {
   });
 
   it("runs once for a resource offered as both primary data and an `included` member", () => {
-    // The builders emit it once, as primary data (#147), and shape it once:
+    // The builders emit it once, as primary data, and shape it once:
     // the transform's result for the primary slot is the one the document carries.
     const selfReferential = {
       type: "articles",
@@ -723,7 +723,7 @@ describe("the per-resource transform pass", () => {
     ).toEqual([{ type: "articles", id: "2", attributes: relatedArticle.attributes }]);
   });
 
-  it("checks reachability from the primary data — a cycle the primary data no longer reaches throws (#239)", () => {
+  it("checks reachability from the primary data — a cycle the primary data no longer reaches throws", () => {
     // `people:9` and `articles:2` reference each other, but once the transform
     // strips `articles:1`'s relationships nothing in the primary data reaches
     // either, so neither can be linked to it.
@@ -762,7 +762,7 @@ describe("the per-resource transform pass", () => {
     expect(Handlers.data(primary, { included: [person, other] }).included).toEqual([person, other]);
   });
 
-  it("rejects a member whose only reference is its own (#239)", () => {
+  it("rejects a member whose only reference is its own", () => {
     const manager = {
       type: "people",
       id: "9",
@@ -776,7 +776,7 @@ describe("the per-resource transform pass", () => {
     expect(() => Handlers.buildIncluded([unlinked], [manager])).toThrow(/full linkage/);
   });
 
-  describe("when the primary data is resource linkage (#423)", () => {
+  describe("when the primary data is resource linkage", () => {
     // `GET /articles/1/relationships/comments?include=comments.author`'s
     // document: the primary identifiers are where the walk starts.
     const identifiers = [
@@ -812,7 +812,7 @@ describe("the per-resource transform pass", () => {
     });
   });
 
-  it("rejects every member of a chain the primary data no longer reaches (#239)", () => {
+  it("rejects every member of a chain the primary data no longer reaches", () => {
     // articles:1 → people:9 → companies:3. Stripping articles:1's
     // relationships orphans people:9, and companies:3 with it, though
     // people:9 still references companies:3.
@@ -842,7 +842,7 @@ describe("the per-resource transform pass", () => {
     ).toEqual([company, person]);
   });
 
-  it("walks a long chain of included members without overflowing the stack (#239)", () => {
+  it("walks a long chain of included members without overflowing the stack", () => {
     // articles:1 → people:0 → people:1 → … → people:29999: one walk level per
     // member, so a walk that recursed per level would exhaust the stack.
     const length = 30_000;
@@ -862,7 +862,7 @@ describe("the per-resource transform pass", () => {
     expect(Handlers.data(primary, { included: chain }).included).toHaveLength(length);
   });
 
-  it("buildIncluded drops members already present as primary data (#147)", () => {
+  it("buildIncluded drops members already present as primary data", () => {
     expect(Handlers.buildIncluded([article, author], [author, comment, author])).toEqual([comment]);
   });
 
@@ -901,7 +901,7 @@ describe("the per-resource transform pass", () => {
 
 // §Compound Documents: "The only exception to the full linkage requirement is
 // when relationship fields that would otherwise contain linkage data are
-// excluded due to sparse fieldsets requested by the client" (#494).
+// excluded due to sparse fieldsets requested by the client".
 describe("the sparse-fieldset exemption from full linkage", () => {
   // `?include=author&fields[articles]=title`
   it("passes a member linked only through a relationship the fieldset excludes", () => {

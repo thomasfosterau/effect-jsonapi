@@ -33,9 +33,9 @@ import { Issue, IssueComment, PullRequest, Repository, User } from "./resources.
 /**
  * Advertises the filter grammar's profile on the media type of every answer
  * from an endpoint that speaks it — `Content-Type: application/vnd.api+json;
- * profile="…"` (docs/filter-grammar.md §5). The package declares the grammar
- * but leaves advertising it to the server, since only the server knows that
- * its handler evaluates §6; `FilterProfileLive` in `handlers.ts` implements it.
+ * profile="…"`. The package declares the grammar but leaves advertising it to
+ * the server, since only the server knows that its handler evaluates the
+ * grammar's semantics; `FilterProfileLive` in `handlers.ts` implements it.
  */
 export class FilterProfile extends HttpApiMiddleware.Service<FilterProfile>()(
   "github/FilterProfile",

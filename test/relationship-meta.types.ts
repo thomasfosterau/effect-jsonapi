@@ -1,5 +1,5 @@
 /**
- * Type-level tests for a typed relationship `meta` (#513):
+ * Type-level tests for a typed relationship `meta`:
  *
  * - a relationship's `meta` option types its relationship object's `meta` in
  *   the resource's `Type`, and so in `Document.wire`'s and the flat documents';

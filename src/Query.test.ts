@@ -136,7 +136,7 @@ describe("Query.Fieldset", () => {
     expect(() => Schema.decodeSync(fieldset)("title,publisher")).toThrow();
   });
 
-  it("decodes relationship names, which are fields too (#494)", () => {
+  it("decodes relationship names, which are fields too", () => {
     expect(Schema.decodeSync(fieldset)("title,author")).toEqual(["title", "author"]);
     expect(Schema.decodeSync(fieldset)(["comments"])).toEqual(["comments"]);
   });
@@ -173,7 +173,7 @@ describe("Query.Sort", () => {
   });
 });
 
-describe("an empty vocabulary says so when it rejects a value (#282)", () => {
+describe("an empty vocabulary says so when it rejects a value", () => {
   // `Schema.Literals([])` is `never`; its rejection would read "Expected never".
   const Tag = Resource("tags", { attributes: {} });
 
@@ -195,13 +195,13 @@ describe("an empty vocabulary says so when it rejects a value (#282)", () => {
       "sortable fields",
     ],
     [
-      "Query.Fieldset over no attributes (#261)",
+      "Query.Fieldset over no attributes",
       Query.Fieldset(Tag),
       "name",
       'sparse fieldset for type "tags"',
     ],
     [
-      "Query.schema's fieldset for a type with no attributes (#261)",
+      "Query.schema's fieldset for a type with no attributes",
       Query.schema(Tag, { fields: true }),
       { "fields[tags]": "name" },
       'sparse fieldset for type "tags"',
@@ -350,7 +350,7 @@ describe("Query.schema", () => {
     expect(Schema.decodeSync(empty)({})).toEqual({});
   });
 
-  it("a paginated-only target gets no sparse fieldset; its related endpoint declares one (#311)", () => {
+  it("a paginated-only target gets no sparse fieldset; its related endpoint declares one", () => {
     const feedQuery = Query.schema(Feed, { include: true, fields: true });
     const decoded = Schema.decodeSync(feedQuery)({
       "fields[feeds]": "name",
@@ -372,7 +372,7 @@ describe("Query.schema", () => {
     ]);
   });
 
-  describe("definitions sharing a wire type share one fields[TYPE] vocabulary (#362)", () => {
+  describe("definitions sharing a wire type share one fields[TYPE] vocabulary", () => {
     const Photo = Resource("photos", { attributes: { width: Schema.Finite } });
     const PhotoCard = Resource("photos", { attributes: { caption: Schema.String } });
     const coverFirst = Resource("g2", {
@@ -775,7 +775,7 @@ describe("include: repeated keys", () => {
   });
 });
 
-describe("sort and fields[TYPE]: repeated keys (issue #102)", () => {
+describe("sort and fields[TYPE]: repeated keys", () => {
   const query = Query.schema(Article, {
     include: true,
     fields: true,
@@ -822,7 +822,7 @@ describe("sort and fields[TYPE]: repeated keys (issue #102)", () => {
 
   // §Sparse Fieldsets: "An empty value indicates that no fields should be
   // returned", so an empty `fields[TYPE]=` is an empty set, not the absent
-  // parameter (#488) — through the flat wire record and the nested one alike.
+  // parameter — through the flat wire record and the nested one alike.
   it("?fields[articles]= decodes to the empty set, distinct from the absent parameter", () => {
     expect(decode({ "fields[articles]": "" })).toEqual({ fields: { articles: [] } });
     expect(decode({ "fields[articles]": [""] })).toEqual({ fields: { articles: [] } });
@@ -957,7 +957,7 @@ describe("Query.canonical", () => {
         sort: "-createdAt,title",
       },
       {
-        // repeated keys for `sort` and `fields[articles]` too — issue #102
+        // repeated keys for `sort` and `fields[articles]` too
         "filter[author]": "9",
         "fields[people]": "firstName",
         include: "author,comments.author",
@@ -1079,7 +1079,7 @@ describe("Query.canonical", () => {
     );
   });
 
-  it("omits a JSON object member, which has no flat wire form (#536)", () => {
+  it("omits a JSON object member, which has no flat wire form", () => {
     const wire = Schema.Struct({
       location: Schema.optionalKey(Schema.Struct({ x: Schema.String })),
       flag: Schema.optionalKey(Schema.Boolean),
@@ -1182,7 +1182,7 @@ describe("Query.validateIncludePaths", () => {
   );
 });
 
-describe("Query.schema: undeclared parameters never reach the decoded query (issue #260)", () => {
+describe("Query.schema: undeclared parameters never reach the decoded query", () => {
   // The wire record `UrlParams.toRecord` builds for a query string — what an
   // `HttpApiEndpoint` decodes its `query` schema from.
   const wire = (search: string) =>
@@ -1209,7 +1209,7 @@ describe("Query.schema: undeclared parameters never reach the decoded query (iss
   ];
   // The same shapes under implementation-specific names (a character outside
   // a-z), which the `SchemaErrors` middleware lets through to decoding; an
-  // all-lowercase one it rejects first (#148).
+  // all-lowercase one it rejects first.
   const implementationSpecific = [
     "fooBar=1",
     "fooBar=1&fooBar[x]=2",
@@ -1323,7 +1323,7 @@ describe("Query.schema: undeclared parameters never reach the decoded query (iss
     };
 
     // A base name that is not a legal member name — `__proto__`, or the
-    // empty one of `[x]` — is a 400 since #263 unless the allow-list admits
+    // empty one of `[x]` — is a 400 unless the allow-list admits
     // it. `__proto__` is admitted here, so the reshaper still sees it end to
     // end; an empty base name no entry can admit.
     const illegal = (search: string) => search.startsWith("[") || search.startsWith("__proto__");

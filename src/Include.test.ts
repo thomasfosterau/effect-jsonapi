@@ -414,7 +414,7 @@ describe("endpoint documents", () => {
   it("leaves a `related` endpoint without a surface on its target's graph", () => {
     const decode = successOf(Endpoint.related(Article, "comments", { include: true }));
     // Comment's own graph reaches Person and, through `author.company`,
-    // Company (#320) — but not Tag, which only Article's graph reaches.
+    // Company — but not Tag, which only Article's graph reaches.
     expect(() => decode({ data: [comment], included: [person] })).not.toThrow();
     const company = { type: "companies", id: "co1", attributes: { name: "Acme" } };
     expect(() => decode({ data: [comment], included: [company] })).not.toThrow();
@@ -423,7 +423,7 @@ describe("endpoint documents", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The declaration drives the runtime walk too (#106 / #107)
+// The declaration drives the runtime walk too
 // ---------------------------------------------------------------------------
 
 describe("feeding the resolver", () => {

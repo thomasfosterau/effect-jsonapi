@@ -5,7 +5,7 @@ import * as Query from "../Query.js";
 import * as Resource from "../Resource.js";
 import { declaredNames, declaresName } from "./declaredQuery.js";
 
-// What the support check reads a family's members off (#321): the wire name
+// What the support check reads a family's members off: the wire name
 // of every member a query declares, and a prefix for an open record of them.
 describe("declaredNames", () => {
   const Ticket = Resource.make("tickets", {

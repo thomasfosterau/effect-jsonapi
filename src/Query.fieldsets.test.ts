@@ -1,14 +1,14 @@
 /**
  * `fields: true` declares a sparse fieldset for every type an include path
- * the endpoint legalises can reach (#311), not only for the resource and its
- * direct relationship targets — and for no type the response can never carry
- * (#311, owner decision for 0.17.0): not a direct target a declared
+ * the endpoint legalises can reach, not only for the resource and its
+ * direct relationship targets — and for no type the response can never carry:
+ * not a direct target a declared
  * `Include.Surface` leaves out, nor a target reachable only through a
  * `paginated` relationship.
  *
  * JSON:API 1.1 §Sparse Fieldsets: "A client MAY request that an endpoint
  * return only specific fields in the response on a per-type basis by
- * including a `fields[TYPE]` query parameter." Since #261 a `fields[TYPE]` the
+ * including a `fields[TYPE]` query parameter." A `fields[TYPE]` the
  * endpoint does not declare is a 400, so a type the endpoint can return in
  * `included` must be declared, or a client could include it but never trim it.
  */
@@ -114,7 +114,7 @@ const expectFieldsets = <
   expect(declared(query)).toEqual(Arr.sort(keys, Order.String));
 };
 
-describe("Query.schema `fields: true` — the types the include paths reach (#311)", () => {
+describe("Query.schema `fields: true` — the types the include paths reach", () => {
   it("declares a fieldset for every type a depth-2 path reaches under `include: true`", () => {
     // `revisions` (behind `history` and `comments.revisions`, both paginated)
     // is on no include path and never in `included`.
@@ -134,7 +134,7 @@ describe("Query.schema `fields: true` — the types the include paths reach (#31
     ).toEqual({ include: ["comments.author"], fields: { people: ["name"] } });
   });
 
-  it("gives a reached type with no attribute the empty vocabulary #261 rejects", () => {
+  it("gives a reached type with no attribute the empty vocabulary the middleware rejects", () => {
     // `labels` (via `comments.label`) is declared, but its fieldset has no
     // field to select: the middleware reads it as supporting no value.
     const query = Query.schema(Article, { include: true, fields: true });
@@ -309,11 +309,11 @@ describe("Query.schema `fields: true` — the types the include paths reach (#31
   });
 });
 
-describe("Query.schema `fields: true` — a family's member types (#350)", () => {
+describe("Query.schema `fields: true` — a family's member types", () => {
   // `nodes` is a family name, never a wire type: what the wire carries for a
   // relationship targeting the family are `editors` and `reviewers`. So the
   // family is replaced by its members, and `fields[nodes]` is not declared
-  // (owner decision on #350): the #261 middleware answers it with a 400.
+  // The middleware answers it with a 400.
   const Node = Resource.make("nodes", { attributes: { name: Schema.String } });
   const Editor = Resource.extend(Node, "editors", {
     inheritId: true,
@@ -391,7 +391,7 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
 
   // A name-only family's synthesised relationships are typed as the by-key
   // intersection the runtime computes, so its fieldset keys are exact rather
-  // than an open `string` (#363).
+  // than an open `string`.
   it("declares exactly the members of a name-only family that is the primary resource", () => {
     const Photo = Resource.make("photos", { attributes: { url: Schema.String } });
     const Video = Resource.make("videos", { attributes: { length: Schema.Finite } });
@@ -472,7 +472,7 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
     ).toEqual({ fields: { editors: ["level"], others: ["rank"] } });
     // The outer family as the primary resource. (A name-only family's
     // synthesised relationships are typed as the open record, so its type
-    // declares any key: the runtime keys are compared directly. #363 tracks
+    // declares any key: the runtime keys are compared directly. A follow-up tracks
     // that widening; fixing it should tighten this to an exact type pin.)
     expect(declared(Query.schema(Outer, { fields: true }))).toEqual([
       "fields[editors]",
@@ -482,7 +482,7 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
   });
 });
 
-describe("`fields[TYPE]` for a type an include path reaches, over HTTP (#311)", () => {
+describe("`fields[TYPE]` for a type an include path reaches, over HTTP", () => {
   const surface = Include.make(Article, {
     comments: Include.nested(Comment, { author: Person }),
   });
@@ -495,7 +495,7 @@ describe("`fields[TYPE]` for a type an include path reaches, over HTTP (#311)", 
       // `include` off: the resource and its non-paginated direct targets.
       Endpoint.get(Article, { name: "getShallow", path: "/shallow/:id", fields: true }),
       // A declared surface, whose handler projects the fieldsets: the default
-      // document of an endpoint declaring `fields` admits partial attributes (#322).
+      // document of an endpoint declaring `fields` admits partial attributes.
       Endpoint.list(Article, { include: surface, fields: true }),
     ),
   );
@@ -626,7 +626,7 @@ describe("`fields[TYPE]` for a type an include path reaches, over HTTP (#311)", 
   );
 
   // `labels` is declared (depth 2, `comments.label`) but has no field to
-  // select, so no value of `fields[labels]` decodes: the #261 empty-vocabulary
+  // select, so no value of `fields[labels]` decodes: the empty-vocabulary
   // 400, an empty value included. The response is the same as for an
   // undeclared type, so the endpoint's query is checked to declare
   // `fields[labels]` and to read it as an empty vocabulary: this is that 400,
@@ -650,7 +650,7 @@ describe("`fields[TYPE]` for a type an include path reaches, over HTTP (#311)", 
   );
 });
 
-describe("Query.schema `fields` as an allow-list of types (#485)", () => {
+describe("Query.schema `fields` as an allow-list of types", () => {
   it("declares `fields[TYPE]` for the listed types alone, in both records", () => {
     // `Endpoint.getRelationship`'s query is the parent's, but its document
     // carries only the types its include paths reach.

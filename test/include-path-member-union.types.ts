@@ -1,6 +1,6 @@
 /**
  * Type-level tests for the public include-path resolvers over a union of
- * resource definitions (#347).
+ * resource definitions.
  *
  * `Resource.ResolveIncludePath`, `Resource.IncludedFor`,
  * `Resource.FamilyIncluded` and `Client.narrowIncluded` distribute over the

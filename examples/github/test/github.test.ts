@@ -104,7 +104,7 @@ describe("github example: fetching", () => {
     }),
   );
 
-  it.effect("omits `included` when the request carries no `include` (#232)", () =>
+  it.effect("omits `included` when the request carries no `include`", () =>
     Effect.gen(function* () {
       const { list, one } = yield* run(
         Effect.gen(function* () {
@@ -122,7 +122,7 @@ describe("github example: fetching", () => {
     }),
   );
 
-  it.effect("answers `?include=` with no paths with an empty `included` (#232)", () =>
+  it.effect("answers `?include=` with no paths with an empty `included`", () =>
     Effect.gen(function* () {
       // `include: []` goes on the wire as a bare `?include=`, which decodes to
       // `[]`: the request carried `include`, so the compound document keeps its
@@ -383,7 +383,7 @@ describe("github example: listing", () => {
   );
 });
 
-describe("github example: pagination links carry the request's query (#447)", () => {
+describe("github example: pagination links carry the request's query", () => {
   // A link's query string as the flat record the endpoint's query schema decodes.
   const searchOf = (link: string): Record<string, string> =>
     R.fromEntries(new URL(link, "https://example.test").searchParams);
@@ -1044,7 +1044,7 @@ describe("github example: heterogeneous search", () => {
         expect(types).toEqual(["issues", "repositories", "users"]);
 
         // the union is discriminated by the `type` tag; the endpoint declares
-        // `fields`, so a client reads each attribute as optional (#322)
+        // `fields`, so a client reads each attribute as optional
         Arr.forEach(document.data, (result) => {
           if (result.type === "repositories") {
             expectTypeOf<Pick<typeof result.attributes, "stargazerCount">>().toEqualTypeOf<{

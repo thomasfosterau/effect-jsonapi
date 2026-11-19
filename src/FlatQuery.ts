@@ -20,8 +20,8 @@
  * @since 0.16.0
  */
 // The pure-schema pieces (the page window, UUID and id-list codecs, slugs, the
-// tri-state reader) come from `@thomasfosterau/effect-ext`'s Schema subpaths
-// (#552), which resolve `effect` alone. This module keeps their public names,
+// tri-state reader) come from `@thomasfosterau/effect-ext`'s Schema subpaths,
+// which resolve `effect` alone. This module keeps their public names,
 // plain-value option objects and declared `Schema.*` types, so no
 // effect-ext type reaches the published declarations.
 import * as MutableHashSet from "effect/MutableHashSet";

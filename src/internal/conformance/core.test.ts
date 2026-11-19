@@ -51,7 +51,7 @@ describe("answeredAsDeployed (the in-process transport)", () => {
     expect(Exit.isSuccess(exit) && exit.value.status).toBe(404);
   });
 
-  it("does not answer any other router failure: it dies, as it did before #168", async () => {
+  it("does not answer any other router failure: it dies", async () => {
     // A deployed server's answer to these is not known, so reading one as a
     // 500 (or any status) would put words in the server's mouth.
     const reasons = [
@@ -288,7 +288,7 @@ describe("runner (redirects)", () => {
 
 describe("runner (a client that rewrites the path too)", () => {
   it("adds a path prefix the client adds again to the path an absolute `Location` on its origin names", async () => {
-    // The documented caveat on `resolvedLocation` (#359): the kit reads an
+    // The documented caveat on `resolvedLocation`: the kit reads an
     // absolute `Location` on the rewritten origin as a path on its own, and the
     // client rewrites that path once more, so its prefix is added twice.
     const sent: Array<string> = [];

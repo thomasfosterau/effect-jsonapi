@@ -2,7 +2,7 @@
  * The resource types a create or update endpoint serves, as an endpoint
  * annotation `Middleware.SchemaErrorsLive` reads to answer a payload whose
  * `data.type` is another type with JSON:API's 409 Conflict rather than the
- * generic 400 (#428).
+ * generic 400.
  *
  * @internal
  */

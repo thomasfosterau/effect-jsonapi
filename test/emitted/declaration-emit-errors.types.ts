@@ -3,7 +3,7 @@
  * `errors.ts` would: `declaration-emit-group.types.ts` attaches it to
  * generated endpoints without importing `ApiError`, so the `ApiError.Wire`
  * its endpoints' types carry must be nameable without it: through the
- * `./ApiError` subpath (#385), or the deprecated root alias (#348).
+ * `./ApiError` subpath, or the deprecated root alias.
  */
 import { ApiError } from "@thomasfosterau/effect-jsonapi";
 

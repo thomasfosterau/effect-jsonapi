@@ -307,7 +307,7 @@ describe("the wire contract", () => {
   });
 });
 
-describe("Group.flat / flatReadOnly `toManyMeta` (#513)", () => {
+describe("Group.flat / flatReadOnly `toManyMeta`", () => {
   const Count = Schema.Struct({ totalCount: Schema.Finite });
   const Part = Resource.make("parts", { attributes: { name: Schema.String } });
   const Kit = Resource.make("kits", {

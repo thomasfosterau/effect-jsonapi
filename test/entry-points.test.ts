@@ -2,9 +2,9 @@
  * Mechanical proof that the schema-only entry point keeps its promise: that
  * `@thomasfosterau/effect-jsonapi/schema` resolves `effect`'s core and the
  * pure Schema subpaths of `@thomasfosterau/effect-ext` it takes its helpers
- * from (#552), and nothing else.
+ * from, and nothing else.
  * The same holds for each schema-tier module subpath
- * (`@thomasfosterau/effect-jsonapi/Resource`, …, #385), and every module the
+ * (`@thomasfosterau/effect-jsonapi/Resource`, …), and every module the
  * root re-exports is published as a subpath of its own.
  *
  * The property is a packaging commitment, and a comment asserting it would rot
@@ -49,7 +49,7 @@ const SCHEMA_TIER = [
   "internal/errors.ts",
   "internal/filter.ts",
   // `Include.included(resource, { include })` derives an endpoint's default
-  // `included` union from this walk (#342); it imports neither `Query` nor
+  // `included` union from this walk; it imports neither `Query` nor
   // an `effect` subpath.
   "internal/includeGraph.ts",
   // The JSON text codec (`Schema.fromJsonString`) the diagnostics and the
@@ -59,7 +59,7 @@ const SCHEMA_TIER = [
   "internal/media.ts",
   "internal/operators.ts",
   // `Resource.createPayload` refuses a client-generated `data.id` with the
-  // issue `Middleware.SchemaErrorsLive` answers 403 (#450); pure schema.
+  // issue `Middleware.SchemaErrorsLive` answers 403; pure schema.
   "internal/refusedClientId.ts",
   "internal/schemaExt.ts",
   "schema.ts",
@@ -179,7 +179,7 @@ const parseSpecifiers = (file: string): ReadonlyArray<string> => {
 };
 
 /**
- * Specifiers already read, by file. Parsing is what made this file slow (#465):
+ * Specifiers already read, by file. Parsing is what made this file slow:
  * the cases walk overlapping graphs (every HTTP-tier subpath reaches most of
  * `src/`, every `dist/` entry the same shared chunks), so without a cache each
  * file was re-parsed once per walk that reached it, and under a loaded machine
@@ -265,7 +265,7 @@ const isEffect = (specifier: string): boolean =>
 /**
  * The `@thomasfosterau/effect-ext` subpaths the package may import: its one
  * runtime dependency, and only the pure Schema modules whose helpers replaced
- * local copies (#552). Pinned, like the tiers: a new subpath is a decision,
+ * local copies. Pinned, like the tiers: a new subpath is a decision,
  * and `/Negotiate` (whose optional peer on this package would be a cycle) must
  * never appear. `Issues` is reached only from `ServerErrors` (HTTP tier); the
  * schema tier reaches the other three through `FlatQuery`.
@@ -304,7 +304,7 @@ const beyondEffect = (label: string, graph: Graph): ReadonlyArray<string> =>
 
 /**
  * The namespaces a barrel re-exports, read off its `export * as X from
- * "./X.js"` statements. Each is published as the subpath `./X` (#385), so
+ * "./X.js"` statements. Each is published as the subpath `./X`, so
  * the barrels, not a hand-kept list, say which subpaths must exist.
  */
 const namespacesOf = (barrel: string): ReadonlyArray<string> => {
@@ -354,8 +354,8 @@ const httpSurface = (graph: Graph): ReadonlyArray<string> =>
  * `import()`s of the package (a cold Vite transform of all of `src/` on first
  * use) and the `node` processes spawned against `dist/`. Both are I/O- and
  * process-bound, so their time scales with machine load, not with anything this
- * file controls; the 5 s default fits an idle machine and fails a loaded one
- * (#465). Sized for a cold load on a busy CI runner, not as headroom for a
+ * file controls; the 5 s default fits an idle machine and fails a loaded one.
+ * Sized for a cold load on a busy CI runner, not as headroom for a
  * regression: the graph walks, which this file does control, stay on the
  * default.
  */

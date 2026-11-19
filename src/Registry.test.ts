@@ -286,9 +286,9 @@ describe("the router, over HTTP", () => {
     expect(ok.status).toBe(404);
   });
 
-  // #236: `Endpoint.create` attaches `Middleware.CreatedLocation`, which
+  // `Endpoint.create` attaches `Middleware.CreatedLocation`, which
   // `Options.middleware`'s type does not name — so a custom set built from the
-  // pre-#236 pieces type-checks, and the router supplies the live one.
+  // older pieces type-checks, and the router supplies the live one.
   const createPerson = (
     middleware: Layer.Layer<Middleware.ContentNegotiation | Middleware.SchemaErrors>,
   ) => {

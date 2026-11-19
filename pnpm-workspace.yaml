@@ -1,30 +1,5 @@
-# pnpm workspace — the library at the repo root plus its worked examples.
-#
-# Listing "." makes the root a workspace member so Changesets versions and
-# publishes it (a workspace *root* on its own is not a publishable package).
-# The examples under `examples/*` are private packages alongside it: each is
-# type-checked and tested against the live `src/`, never against `dist/`.
-#
-# The `catalog:` protocol pins versions that MUST be singletons across the
-# workspace. Effect especially: two copies of `effect` break Context / Layer /
-# Schema identity at runtime, so every package references `catalog:`.
-#
-# EVERY external dependency version lives here — package.json files reference
-# only `catalog:` / `catalog:peers` (or `workspace:*` for internal packages).
-# `catalogMode: strict` makes `pnpm add` enforce this at add time and
-# `pnpm install` reject non-catalog specifiers. After editing this catalog,
-# ALWAYS run `pnpm install` and commit the regenerated pnpm-lock.yaml — a stale
-# lockfile fails CI at once with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
-#
-# Versions are kept in lockstep with the consuming applications' catalogs
-# (website / gardeneria / preferenceflow) wherever the two overlap — effect,
-# vite-plus, the TypeScript 6/7 pair, @effect/tsgo, fallow — so the library
-# builds against exactly what they run. Two deliberate deviations:
-# `vite-plus` (with `vitest` and `@effect/tsgo`), moved to 1.6.0 ahead of the
-# applications because every vite-plus up to 1.0.0 is affected by
-# GHSA-587h-7wmj-h5pm, which fails CI's `pnpm audit --audit-level high` (see
-# both notes); and `effect`, which tracks the `latest` dist-tag ahead of the
-# applications' lockstep (see that entry).
+# The library at the root (a member so Changesets publishes it) plus its
+# private examples. Every external version lives in this catalog.
 packages:
   - "."
   - "examples/*"
@@ -33,143 +8,51 @@ catalogMode: strict
 
 catalog:
   "@changesets/cli": ^3.0.3
-  # Compiles AND executes every JSDoc `@example` (`vp run docgen`). 4.x never
-  # loads the `typescript` package: it parses `src/` with the TypeScript 6.0
-  # its `ts-morph` dependency bundles (@ts-morph/common/dist/typescript.js),
-  # type-checks the examples with the `tsc` on PATH (its `tscExecutable`
-  # option, default `tsc`: native TS7 under `vp run`), and runs them under
-  # `tsx` (hence that entry below) only because docgen.json sets
-  # `"runExamples": true` — the default is type-check only. It injects and
-  # rewrites no imports: an example's package imports resolve through the
-  # package's own `exports`, i.e. against `dist/`, which is why the `docgen`
-  # task depends on `build`.
+  # Executes every JSDoc `@example` under `tsx` (below) against `dist/`.
   "@effect/docgen": ^4.1.2
   "@effect/language-service": ^0.87.3
-  # Effect Language Service as a native (TypeScript-Go) binary — the TS7 side
-  # of the 6/7 split. `effect-tsgo patch` overwrites the native `tsc` binary
-  # with an Effect-patched build matched by gitHead, so this pins in lockstep
-  # with `@typescript/native` below (0.67.7 ships against typescript 7.0.2).
-  #
-  # The root `prepare` script runs `effect-tsgo patch --typescript --oxlint`,
-  # so this ALSO pins in lockstep with the `oxlint` that `vite-plus` pulls in
-  # (see that entry). Each @effect/tsgo release ships artifacts for an explicit
-  # set of component versions and hard-errors
-  # (UnsupportedTargetPackageVersionError) on anything else, failing
-  # `pnpm install` itself rather than a later task: 0.67.7 supports typescript
-  # 7.0.2 / 7.1.0-beta / 7.1.0-dev.20261109.1, oxlint 1.89.0 / 1.91.0-1.93.0 and
-  # oxlint-tsgolint 7.0.2004-7.0.2006. 0.47.0 is also the first release with the
-  # `unstableApiUsage` rule that tsconfig.base.json lowers to "suggestion"
-  # (#205). Read the
-  # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
-  # before bumping any of the three.
+  # `prepare` runs `effect-tsgo patch --typescript --oxlint`, which hard-errors
+  # on a `@typescript/native` or vite-plus oxlint version missing from the
+  # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs.
+  # Read it before bumping any of the three.
   "@effect/tsgo": 0.69.0
-  # Effect-aware test runner (`it.effect`, `layer`, `TestClock`): tests run
-  # their Effects through it instead of `Effect.runPromise` in the body
-  # (`effect/effect-run-in-body`, #600). Pinned to the `effect` release below
-  # (it peers `effect` at the same version and `vitest >=5 <6`, which
-  # the `vitest` pin satisfies).
+  # Peers `effect` at its own version.
   "@effect/vitest": 4.1.4
-  # The Effect lint preset (`effect.configs.recommended` in vite.config.ts):
-  # 74 `effect/` rules, including the anti-slop set. Replaced
-  # @mpsuesser/oxlint-plugin-effect (#532). It ranges its oxlint plugin API
-  # (`@oxlint/plugins ^1.85.0`), so Dependabot moves it on its own.
   "@enfect/oxlint": 0.10.0
-  # The pure Schema helpers (`TriState`, `Issues`, `Ids`, `Bounded`) that used
-  # to live in src/internal/schemaExt.ts and src/FlatQuery.ts (#552). A runtime
-  # `dependency`, not a peer: only its Schema subpaths are imported (never
-  # `/Negotiate`), they resolve only `effect` (its `^4.0.0` peer, which ours
-  # `^4.1.0` satisfies), and no type of theirs reaches this package's
-  # declarations, so a consumer never needs to see the same copy.
-  # First-party, so `minimumReleaseAgeExclude` admits a fresh release. The
-  # floor is 0.2.0 (#555): `ServerErrors.schemaIssueToErrors` walks with its
-  # `Issues.leaves` / `Issues.message`, which 0.1.0 lacks. 0.3.0 is accepted
-  # too: the subpaths used here (`Bounded`, `Ids`, `Issues`, `TriState`) are
-  # unchanged apart from `TriState.suppliedValue` / `read` / `toNullOr`
-  # spelling their parameter `field?: Option<A>`, which every 0.2 call
-  # satisfies. 0.3.0 also drops its optional peer on this package, so this
-  # workspace no longer installs a nested copy of the published effect-jsonapi
-  # under it (#577).
+  # Only its Schema subpaths are imported; none of its types reach our
+  # declarations. 0.2.0 is the first with `Issues.leaves` / `Issues.message`.
   "@thomasfosterau/effect-ext": ^0.2.0 || ^0.3.0
   "@types/node": ^26.4.1
-  # `vp run test:coverage`'s provider. Must equal the vitest that vite-plus
-  # bundles (see `vitest` below); vite-plus refuses to run coverage on a
-  # mismatch, so it moves with the vite-plus set.
+  # Must equal the vitest vite-plus bundles.
   "@vitest/coverage-istanbul": 5.1.0
-  # Deliberately tracks the `latest` dist-tag, ahead of the applications'
-  # lockstep, so the gates run against the newest `effect` release. What
-  # consumers may resolve is the `catalogs.peers` range, whose floor is
-  # verified separately.
+  # Tracks `latest`; consumers see the `catalogs.peers` range.
   effect: 4.1.4
   fallow: 3.43.1
-  # Only for `@effect/docgen`: the runtime it executes examples under (a peer
-  # of docgen 4.x, `>=4.19.3 <5.0.0`), whose binary it spawns itself. Scripts
-  # run with `vpx`, never `tsx`.
+  # docgen's example runner; never invoke it directly.
   tsx: ^4.23.13
-  # TypeScript 6/7 side-by-side: TS7 (the native Go compiler) ships no JS API
-  # until 7.1, so JS-API consumers (@effect/language-service, the tsdown
-  # declaration bundler behind `vp pack`, test/entry-points.test.ts) stay on
-  # TS6 while native `tsc` type-checks the sources, the type-level tests, the
-  # emitted declarations and docgen's examples. @effect/docgen is not one of
-  # them: it parses with the copy its `ts-morph` bundles, although its
-  # `typescript` peer range (`>=5.8.2 <7.0.0`) admits this alias. The alias
-  # keeps the package importable as `typescript` name-stable at the TS6 JS
-  # compiler (bin `tsc6`); `@typescript/native` is TS7 (bin `tsc`). Pinned
-  # exact: @typescript/native's gitHead must match @effect/tsgo's bundled
-  # binary.
+  # TypeScript 6/7 side by side: JS-API consumers (the language service, the
+  # tsdown declaration bundler, test/entry-points.test.ts) need TS6 (`tsc6`);
+  # the native TS7 `tsc` runs the type gates. Exact: @effect/tsgo patches it.
   typescript: "npm:@typescript/typescript6@6.0.2"
   "@typescript/native": "npm:typescript@7.0.2"
-  # vite-plus pins `oxlint`, `oxfmt` and `vitest` to exact versions; `vite` is
-  # the same release under its aliased core package, and `vitest` must match
-  # vite-plus's exact pin because the `"vitest@*": "catalog:"` override forces
-  # every resolution to the catalog singleton. 1.6.0 carries oxlint 1.93.0,
-  # oxfmt 0.78.0 and oxlint-tsgolint 7.0.2006, all in @effect/tsgo 0.67.7's
-  # components table, and vitest 5.1.0. Releases up to 1.0.0 are affected by GHSA-587h-7wmj-h5pm.
+  # `vite` must equal `vite-plus`; `vitest` must equal vite-plus's pin.
   vite-plus: 1.6.0
   vite: npm:@voidzero-dev/vite-plus-core@1.6.0
   vitest: 5.1.0
 
-# Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
-# strict catalog mode still governs them while they stay ranges (an exact
-# `4.0.0` peer would reject a consumer on 4.0.1). `pnpm publish`
-# replaces `catalog:peers` with these ranges in the published manifest — which
-# is why the release publishes with pnpm, not npm.
-#
-# The `effect` peer is `^4.1.0` (owner policy): raise it only when a
-# dependency requires a newer `effect`, naming that dependency and its range
-# here. Raised from `^4.0.0` for effect's own HttpApi types (#586): on
-# 4.0.6 a `Group.resource` endpoint's `~Success` resolves to `any` in the
-# published declarations, so a typed `Client.make` consumer loses every
-# response type. The floor is enforced by `vp run typecheck:floor`
-# (test/floor/), which compiles a consumer against effect 4.1.0 exactly.
-# Raising it again means moving `effect` in test/floor/package.json with it.
-# The runtime dependency `@thomasfosterau/effect-ext` peers `effect ^4.0.0`,
-# which 4.1.x satisfies.
+# Published peer ranges. Raise `effect` only when a dependency (or effect's own
+# HttpApi types) needs it; `vp run typecheck:floor` (test/floor/) compiles a
+# consumer against the floor exactly.
 catalogs:
   peers:
     effect: ^4.1.0
 
 overrides:
-  # `effect` MUST be a singleton (see the header): force every resolution to
-  # the catalog version so a hoisting reshuffle cannot introduce a second copy.
+  # `effect` must be a singleton.
   effect: "catalog:"
-  # Advisory floors for transitive dependencies of the dev toolchain, which
-  # `pnpm audit --audit-level high` (a `vp run ci` gate) gates. None is reached
-  # by the published package: `js-yaml` 3.x via
-  # @effect/docgen > @effect/markdown-toc > gray-matter 3 (`^3.10.0`)
-  # (GHSA-52cp-r559-cp3m, GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh — patched
-  # in 3.15.2);
-  # `shell-quote` via @changesets/cli > launch-editor (GHSA-pqg4-j6r4-53mv —
-  # patched in 1.11.0; the locked launch-editor 2.14.2 declares `^1.10.0`,
-  # which still admits the vulnerable 1.10.x); `launch-editor` itself via
-  # @changesets/cli (GHSA-587h-7wmj-h5pm — patched in 2.14.2; @changesets/cli
-  # 3.0.3 declares `^2.14.1`). Each is a caret range on the major its
-  # dependents ask for, never an open `>=` floor, so it cannot lift them onto
-  # a major they were never tested against (an open `js-yaml@3` floor had
-  # resolved gray-matter to js-yaml 5.x, #421), and is scoped to that major so
-  # a consumer of another major elsewhere in the tree keeps its own range.
-  # Drop each once its dependent's own range floor excludes the vulnerable
-  # versions — as `brace-expansion@2` was (#421): minimatch 10 asks for
-  # `^5`, and nothing in the lockfile resolves 2.x any more.
+  # Advisory floors for dev-only transitive dependencies, scoped to the major
+  # their dependents ask for. Drop each once its dependent's range excludes
+  # the vulnerable versions.
   "js-yaml@3": "^3.15.2"
   "launch-editor@2": "^2.14.2"
   "shell-quote@1": "^1.11.0"
@@ -177,8 +60,6 @@ nodeLinker: hoisted
 allowBuilds:
   esbuild: true
   fallow: true
-  # Arrives via vite-plus; an optional native accelerator (same setting as
-  # the applications' catalogs).
   msgpackr-extract: true
 peerDependencyRules:
   allowAny:
@@ -188,11 +69,7 @@ peerDependencyRules:
     vite: "*"
     vitest: "*"
 
-# Supply-chain delay (owner's policy, gardeneria #1149, relaxed to 8 hours on
-# 2026-10-30, #532): hold newly published versions for 480 MINUTES (8 hours)
-# before pnpm will install them. Dependabot's `cooldown` (whole days only) is
-# 1 day, longer than this, so it never proposes a version pnpm still refuses.
-minimumReleaseAge: 480
+# Hold new versions for 24 hours; first-party packages are exempt.
+minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
-  # @thomasfosterau/* is first-party — exempt so our own releases install immediately.
   - "@thomasfosterau/*"

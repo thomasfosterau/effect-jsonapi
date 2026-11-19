@@ -148,7 +148,7 @@ describe("standard errors", () => {
     ).toBeUndefined();
   });
 
-  it("BadRequest omits detail, and an empty meta, when not provided (#565)", () => {
+  it("BadRequest omits detail, and an empty meta, when not provided", () => {
     const wire = Schema.encodeUnknownSync(ApiError.BadRequest.wire)(new ApiError.BadRequest({}));
     expect(wire).toEqual({
       errors: [{ status: "400", code: "bad_request", title: "Bad Request" }],

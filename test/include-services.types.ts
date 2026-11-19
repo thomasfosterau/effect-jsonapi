@@ -1,5 +1,5 @@
 /**
- * Type-level tests for #595: a flat group's include surface must not widen
+ * Type-level tests: a flat group's include surface must not widen
  * its endpoints' decoding services. `Group.flat` / `flatReadOnly` used to infer
  * the documents' `included` from `options.include?.included` while the
  * surface type was still generic, which widened it to `Schema.Top`, whose

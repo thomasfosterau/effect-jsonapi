@@ -295,7 +295,7 @@ const makeWire = <Fields extends Schema.Struct.Fields>(
                 // A `detail` field the error object's own `detail` already
                 // carries is not copied into `meta`, and an empty `meta` —
                 // every field optional and absent — is left out rather than
-                // sent as `{}` (#565). `decode` reads either place.
+                // sent as `{}`. `decode` reads either place.
                 ...definedMember(
                   "meta",
                   Arr.match(

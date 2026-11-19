@@ -1,5 +1,5 @@
 /**
- * The profile's sort rules (`docs/filter-grammar.md` §10), against a canned
+ * The profile's sort rules (§10), against a canned
  * transport: a server that sorts as the profile says must pass, and each way
  * of getting the order wrong — ignoring `sort`, NULLs on the wrong end, a
  * locale collation, a second term ignored, ties broken by reversing the
@@ -260,7 +260,7 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
     const rule = Conformance.rules.find((candidate) => candidate.id === RULE);
     expect(rule?.tier).toBe("profile");
     expect(rule?.level).toBe("MUST");
-    expect(rule?.reference).toMatch(/docs\/filter-grammar\.md#10-sort-order$/);
+    expect(rule?.reference).toBe("https://jsonapi.org/format/1.1/#fetching-sorting");
     expect(Conformance.gaps.map((gap) => gap.area)).not.toContain("Sort ordering correctness");
   });
 
@@ -512,7 +512,7 @@ describe("Conformance: several sort fields (filter-grammar §10.4, S-MULTI-1)", 
   it("is a MUST citing §10.4", () => {
     const rule = Conformance.rules.find((candidate) => candidate.id === MULTI);
     expect(rule).toMatchObject({ tier: "profile", level: "MUST" });
-    expect(rule?.reference).toMatch(/docs\/filter-grammar\.md#104-several-fields$/);
+    expect(rule?.reference).toBe("https://jsonapi.org/format/1.1/#fetching-sorting");
   });
 
   it.effect("passes a server that orders lexicographically, each term in its own direction", () =>
@@ -607,7 +607,7 @@ describe("Conformance: the `id` tiebreak (filter-grammar §10.5, S-TIE-1)", () =
   it("is a SHOULD citing §10.5", () => {
     const rule = Conformance.rules.find((candidate) => candidate.id === TIE);
     expect(rule).toMatchObject({ tier: "profile", level: "SHOULD" });
-    expect(rule?.reference).toMatch(/docs\/filter-grammar\.md#105-ties-and-stability$/);
+    expect(rule?.reference).toBe("https://jsonapi.org/format/1.1/#fetching-sorting");
   });
 
   it.effect("passes a server that breaks ties by `id` whatever the direction", () =>
@@ -679,7 +679,7 @@ describe("Conformance: the order across pages (filter-grammar §10.6, S-PAGE-1)"
   it("is a MUST citing §10.6", () => {
     const rule = Conformance.rules.find((candidate) => candidate.id === PAGES);
     expect(rule).toMatchObject({ tier: "profile", level: "MUST" });
-    expect(rule?.reference).toMatch(/docs\/filter-grammar\.md#106-with-filter-and-page$/);
+    expect(rule?.reference).toBe("https://jsonapi.org/format/1.1/#fetching-sorting");
   });
 
   it.effect("passes a server that sorts the collection before it pages it, walking `next`", () =>

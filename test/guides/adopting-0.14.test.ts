@@ -1,15 +1,8 @@
 /**
- * The "after" code of docs/guides/adopting-0.14.md, executed.
- *
- * The guide shows an existing consumer how to replace the scaffolding the
- * consuming applications wrote around 0.13 (their own include spec, include
- * walk, fieldset projection, error-document decoder and Accept parser) with
- * the 0.14 surfaces. Every snippet the guide presents as the replacement is
- * exercised here against the behaviour the applications' own tests pinned
- * (website's `apps/api/tests/document.test.ts`, `include-targets.test.ts`,
- * `packages/api/tests/negotiate.test.ts`, `jsonapi.test.ts`), so the guide
- * cannot describe a call shape that does not compile or a property that does
- * not hold.
+ * The 0.14 surfaces that replace the scaffolding consuming applications wrote
+ * around 0.13 (their own include spec, include walk, fieldset projection,
+ * error-document decoder and Accept parser), held to the behaviour those
+ * applications' own tests pinned.
  */
 import * as R from "effect/Record";
 import { it } from "@effect/vitest";
@@ -47,7 +40,7 @@ class Boom extends Schema.TaggedError<Boom, { readonly brand: unique symbol }>()
 // related — website's `bibliographies` family.
 // ---------------------------------------------------------------------------
 
-// A cycle needs the explicit annotation the README's "Mutually recursive
+// A cycle needs the explicit annotation docs/resources.md's "Mutually recursive
 // resources" section describes: one interface per resource, naming the
 // relationship record.
 const bibliographyAttributes = { title: Schema.NonEmptyString, note: Schema.String };
@@ -206,7 +199,7 @@ describe("2. Handlers.resolveIncluded replaces planIncludes / include-targets", 
         maxDepth: 3,
       }).pipe(Effect.flip);
       expect(rejected).toBeInstanceOf(ApiError.UnsupportedIncludePath);
-      // the 400 carries the whole legal set — website #1623's `allowed`
+      // the 400 carries the whole legal set — website the `allowed`
       expect(ApiError.toDocument(rejected).errors[0]?.meta).toEqual({
         path: "entries.nope",
         includablePaths: ["entries", "entries.bibliography"],

@@ -35,7 +35,7 @@
  * and the repeated key (`?include=a&include=b`) that `UrlParams.toRecord`
  * decodes to an array, in any mix. Both decode identically; encoding always
  * emits the comma form. `filter[*]` accepts the repeated key too, at the
- * grammar's list-valued positions (`docs/filter-grammar.md` §2). An empty
+ * grammar's list-valued positions. An empty
  * segment from a stray comma (`?include=a,,b`, `?include=a,b,`) is dropped
  * rather than treated as an item: both decode as `["a", "b"]`.
  *
@@ -757,7 +757,7 @@ export const Include = <Res extends Any, const O extends IncludeOptions<Res> | A
       // rejected path carries `meta.includablePaths` — the same set
       // `ApiError.UnsupportedIncludePath` publishes — and a caller learns the
       // legal paths without a second call. An empty set makes `include`
-      // unsupported (#282), and its rejection says so rather than "Expected
+      // unsupported, and its rejection says so rather than "Expected
       // never".
       Schema.Literals(paths).annotate(
         vocabularyAnnotations(
@@ -1072,7 +1072,7 @@ export const validateIncludePaths = (
 /**
  * The decoded sparse-fieldset schema for one resource type: a comma-separated
  * list of field names — attributes and relationships, which JSON:API 1.1
- * counts as fields alike (§Resource Object Fields, #494) — validated against
+ * counts as fields alike (§Resource Object Fields) — validated against
  * the closed set of the resource's fields.
  * Accepts both the comma form and the repeated-key spelling (`["title",
  * "body"]`), and any mix of the two.
@@ -1121,7 +1121,7 @@ export const Fieldset = <Res extends Any>(resource: Res): Fieldset<FieldKeys<Res
 
 // The fieldset schema of the wire type `type` over the vocabulary `fields`.
 // `Query.schema` builds one per wire type from the fields of every
-// definition sharing it (#362); `Fieldset` from one definition's.
+// definition sharing it; `Fieldset` from one definition's.
 const fieldsetOf = <Field extends string>(
   type: string,
   fields: ReadonlyArray<Field>,
@@ -1131,7 +1131,7 @@ const fieldsetOf = <Field extends string>(
       // The fieldset's fields ride on the literal schema as the `fields`
       // vocabulary of this resource type, so `Middleware`'s support check
       // treats a `fields[TYPE]` whose type has no field to select as
-      // unsupported (#261), that type alone. Its rejection says so rather
+      // unsupported, that type alone. Its rejection says so rather
       // than "Expected never".
       Schema.Literals(fields).annotate(
         vocabularyAnnotations(
@@ -1178,7 +1178,7 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
   repeatable(SortCodec(fields));
 
 // ---------------------------------------------------------------------------
-// The filter codec (docs/filter-grammar.md)
+// The filter codec
 // ---------------------------------------------------------------------------
 
 /**
@@ -1369,7 +1369,7 @@ const messageOf = (cause: unknown): string => (P.isError(cause) ? cause.message 
 
 /**
  * Creates the `filter` codec for one resource: the filter grammar
- * (`docs/filter-grammar.md`) over the resource's declaration
+ * over the resource's declaration
  * (`Resource.filterable`), between the flat record of `filter[...]` keys on
  * the wire and one decoded, normal-form AST root.
  *
@@ -1391,7 +1391,7 @@ const messageOf = (cause: unknown): string => (P.isError(cause) ? cause.message 
  * `[value]` member — decoding identically to the comma form, and rejected the
  * same way when the field has no list operator declared. Everywhere else — a
  * group's `[conjunction]`, any `[memberOf]`, a condition's `[path]` /
- * `[operator]` — a repeated key is a 400 (`docs/filter-grammar.md` §2).
+ * `[operator]` — a repeated key is a 400.
  *
  * The record must carry at least one `filter[...]` key — an absent `filter`
  * is `Query.schema`'s concern, not the codec's. Literal codecs are run
@@ -1493,18 +1493,18 @@ export interface Options<Res extends Any> {
    * for those of them alone (an allow-list, as `sort` takes one): a
    * relationship endpoint's query is built over the parent resource but its
    * resource objects are only the `included` members, so it declares the
-   * types its include paths reach and not the parent's own (#485). A type
+   * types its include paths reach and not the parent's own. A type
    * the derivation above does not reach is a programmer error, and throws;
    * an empty array declares none, as `false` does.
    *
    * A fieldset names attributes and relationships alike, which JSON:API 1.1
-   * counts as fields together (§Resource Object Fields, #494):
+   * counts as fields together (§Resource Object Fields):
    * `?fields[articles]=title,author` keeps the `author` relationship and
    * drops every other one.
    *
    * Under the `SchemaErrors` middleware, a `fields[TYPE]` for any other type,
    * or for a type whose resource has no field, is a 400 naming it, as is
-   * every `fields[TYPE]` on an endpoint without this option (#261).
+   * every `fields[TYPE]` on an endpoint without this option.
    */
   readonly fields?: boolean | ReadonlyArray<string>;
   /**
@@ -1519,12 +1519,12 @@ export interface Options<Res extends Any> {
    * Enable `?page[*]=` pagination. Pass one of the {@link Page} strategies or
    * custom `Schema.Struct.Fields` (each key becomes `page[<key>]`). Under the
    * `SchemaErrors` middleware, `?page[…]=` on an endpoint without it, or
-   * with no key (`{}`), is a 400 naming it (#261).
+   * with no key (`{}`), is a 400 naming it.
    */
   readonly page?: Schema.Struct.Fields;
   /**
    * Enable `?filter[*]=` filtering. `true` turns on the filter grammar
-   * (`docs/filter-grammar.md`) over the resource's declared filterable fields
+   * over the resource's declared filterable fields
    * — `filter[f]=v` is `eq`, `filter[f]=a,b` is `in`, `filter[f][gt]=v` any
    * operator, plus the group form for `OR` / `NOT` / nesting — decoding to a
    * {@link FilterAst}; unknown fields, undeclared operators and bad literals
@@ -1537,7 +1537,7 @@ export interface Options<Res extends Any> {
    *
    * Under the `SchemaErrors` middleware, `?filter[…]=` on an endpoint
    * without it — or with `true` over a resource with no filterable field, or
-   * an empty map — is a 400 naming it (#261).
+   * an empty map — is a 400 naming it.
    */
   readonly filter?: FilterOption;
 }
@@ -1563,7 +1563,7 @@ export interface Options<Res extends Any> {
  *   response carries for it are its members', each under its own type. A
  *   relationship targeting a family over `editors` and `reviewers` declares
  *   `fields[editors]` and `fields[reviewers]`, and not `fields[<family
- *   name>]`, which is a 400 like any undeclared type (#350). A real resource
+ *   name>]`, which is a 400 like any undeclared type. A real resource
  *   whose type is the family's name (the base of a base-anchored family,
  *   reached in its own right) is still declared as itself.
  *
@@ -1574,7 +1574,7 @@ export interface Options<Res extends Any> {
  * Distributes over unions of resource definitions, and over a widened `I`:
  * under `include: boolean` (or a surface-or-`true` union) it is what either
  * value declares, since the endpoint built from that value may have turned
- * `include` on (#397).
+ * `include` on.
  *
  * @since 0.1.0 (`I` and family members since 0.17.0)
  * @category type-level
@@ -1600,7 +1600,7 @@ export type FieldsetTypesOf<Res extends Any, O extends Options<Res>> = [O["field
 
 // The nested `fields` member of a query declaring `fields[TYPE]` for `Types`:
 // one optional fieldset per type, its vocabulary the fields (attributes and
-// relationships, #494) of every definition sharing that wire type (#362); no
+// relationships) of every definition sharing that wire type; no
 // member when `Types` is empty.
 type NestedFieldsets<Res extends Any, I, Types extends string> = [Types] extends [never]
   ? Record<never, never>
@@ -1806,11 +1806,11 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
   if (Arr.isReadonlyArrayNonEmpty(fieldsetTargets)) {
     // The resources, then every type their response can carry in `included`:
     // the runtime mirror of `FieldsetResources`, which the default document
-    // of an endpoint declaring `fields` makes partial over (#322) — or those
-    // of them an allow-list names (`FieldsetTypesOf`, #485). Definitions
+    // of an endpoint declaring `fields` makes partial over — or those
+    // of them an allow-list names (`FieldsetTypesOf`). Definitions
     // sharing a wire type share its `fields[TYPE]`, whose vocabulary is the
-    // union of their fields — attributes and relationships (#494) — as
-    // `NestedFields` types it (#362).
+    // union of their fields — attributes and relationships — as
+    // `NestedFields` types it.
     const fieldsetFields = R.map(
       Arr.groupBy(fieldsetTargets, (target) => target.type),
       (targets, type) =>
@@ -1858,8 +1858,8 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
     filterFields = Option.some(declared);
     // The grammar's filterable fields ride on the decoded tree's schema as
     // the `filter` vocabulary, so `Middleware`'s support check treats
-    // `filter: true` over a resource with no filterable field as unsupported
-    // (#261). The grammar's own rejections already name the field.
+    // `filter: true` over a resource with no filterable field as unsupported.
+    // The grammar's own rejections already name the field.
     nestedFields.filter = Schema.optionalKey(
       AstSchema.annotate(
         vocabularyAnnotation({
@@ -1889,7 +1889,7 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
   // it on *unchanged*, where a struct with fields drops the keys it doesn't
   // declare. So an endpoint whose query declares nothing would pass every
   // parameter through to the handler (typed `{}`) and into `nest`. Keeping
-  // only the declared keys makes the empty case drop them too (#260); with
+  // only the declared keys makes the empty case drop them too; with
   // fields it is a no-op, the struct having dropped the rest already.
   const declaredOnly = (values: Values): Values =>
     R.filter(values, (_, key) => R.has(flatFields, key));
@@ -2021,8 +2021,7 @@ export const serialise: (pairs: Iterable<Pair>) => string = serialisePairs;
  *
  * 1. `include`
  * 2. `fields[*]`, sorted by type (code-point order)
- * 3. `filter[*]`, in the filter grammar's canonical order (`docs/filter-grammar.md`
- *    §3.3): shorthand keys sorted by key (code-point order), which is also
+ * 3. `filter[*]`, in the filter grammar's canonical order (§3.3): shorthand keys sorted by key (code-point order), which is also
  *    how the per-key `filter: { … }` escape hatch is ordered; the group form
  *    in the encoder's pre-order, whose ids are meaningful and never re-sorted
  * 4. `sort`
