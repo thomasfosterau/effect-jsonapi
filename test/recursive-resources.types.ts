@@ -130,7 +130,7 @@ assertType<"comments">(Comment.relationships.parent.ref().type);
 const noAuthorOnArticle = Article.relationships.author;
 
 // ---------------------------------------------------------------------------
-// Include-path derivation across the cycle (#105 is where this bites hardest)
+// Include-path derivation across the cycle
 // ---------------------------------------------------------------------------
 
 type ArticlePaths = Resource.IncludePath<Article>;

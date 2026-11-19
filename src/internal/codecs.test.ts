@@ -29,7 +29,7 @@ describe("nest", () => {
     });
   });
 
-  it("keeps a bare key and copies a colliding bracket key flat, in either order (#260)", () => {
+  it("keeps a bare key and copies a colliding bracket key flat, in either order", () => {
     const expected = { x: "1", "x[y]": "2", "x[z]": "3" };
     expect(nest({ x: "1", "x[y]": "2", "x[z]": "3" })).toEqual(expected);
     expect(nest({ "x[y]": "2", x: "1", "x[z]": "3" })).toEqual(expected);
@@ -37,7 +37,7 @@ describe("nest", () => {
     expect(nest({ x: ["1", "2"], "x[y]": "3" })).toEqual({ x: ["1", "2"], "x[y]": "3" });
   });
 
-  it("treats __proto__ as an ordinary key, never touching a prototype (#260)", () => {
+  it("treats __proto__ as an ordinary key, never touching a prototype", () => {
     const grouped = nest(record("__proto__[polluted]", "yes"));
     expect(polluted()).toBe(false);
     expect(Object.getPrototypeOf(grouped)).toBe(Object.prototype);
@@ -77,7 +77,7 @@ describe("flatten", () => {
 // strict mode: the "override mistake". Freezing the prototype the vitest
 // worker shares would break every other test, so one read-only member stands
 // in for it. The codecs define every key, so they still write it as their own.
-describe("under a read-only inherited member, as a frozen prototype gives (#269)", () => {
+describe("under a read-only inherited member, as a frozen prototype gives", () => {
   beforeEach(() => {
     Object.defineProperty(Object.prototype, "readOnlyProbe", {
       value: "inherited",

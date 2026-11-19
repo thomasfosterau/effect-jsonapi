@@ -186,7 +186,7 @@ describe("operation schemas", () => {
   it("excludes `paginated` relationships from add operations", () => {
     // Article's subscribers relationship is paginated — it is not part of the
     // operation's relationships schema, so inline linkage for it is rejected
-    // at its path (the same semantics as create payloads, #292)
+    // at its path (the same semantics as create payloads)
     const data = {
       type: "articles",
       attributes: { title: "Hello", body: "" },
@@ -859,7 +859,7 @@ describe("input-only attributes in operations", () => {
       data: { type: "uploads", id: "1", attributes: { secret: "t" } },
     });
     expect(decoded).toHaveProperty(["data", "attributes"], { secret: "t" });
-    // `file` (update: false) is not an update attribute: rejected at its path (#292)
+    // `file` (update: false) is not an update attribute: rejected at its path
     expect(
       issuesOf(
         Schema.decodeUnknownResult(Atomic.UpdateOperation(Upload))({

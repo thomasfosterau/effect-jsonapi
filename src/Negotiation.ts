@@ -161,7 +161,7 @@ export interface Options {
    *
    * When omitted, `ext` URIs are not checked — any `ext` dispatches, as
    * before — so pass the api's list (`[]` for an api with no extension) to
-   * get §5's behaviour (#566).
+   * get §5's behaviour.
    *
    * @since 0.21.0
    */
@@ -189,7 +189,7 @@ export interface Negotiator {
  * only with disallowed media-type parameters (JSON:API §5). Its `code`,
  * `not_acceptable`, is the one {@link toApiError}'s `ApiError.NotAcceptable`
  * carries: this package's spelling of the negotiation codes, which a host
- * adopts in place of its own (effect-ext's `Negotiate` defines none, #577).
+ * adopts in place of its own (effect-ext's `Negotiate` defines none).
  *
  * @since 0.16.0
  * @category constants
@@ -361,7 +361,7 @@ const cleanParameters =
  * as in `Middleware`'s §5 check, so the same header gets the same verdict
  * under either deployment shape. Only a JSON:API instance can be unclean: the
  * §5 parameter rule is JSON:API's, so another media type's parameters
- * (`text/markdown;charset=utf-8`) never stop it winning (#566).
+ * (`text/markdown;charset=utf-8`) never stop it winning.
  */
 const acceptEntries = (
   header: Option.Option<string>,
@@ -604,7 +604,7 @@ export const requestForRouter = (request: Request): Request => {
 };
 
 // ---------------------------------------------------------------------------
-// The JSON:API representation for a generic negotiator (#577)
+// The JSON:API representation for a generic negotiator
 // ---------------------------------------------------------------------------
 
 /**

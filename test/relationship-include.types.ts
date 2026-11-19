@@ -1,5 +1,5 @@
 /**
- * Type-level tests for compound relationship documents (#439).
+ * Type-level tests for compound relationship documents.
  *
  * `Endpoint.getRelationship` with `include` accepts `?include=` paths rooted
  * at the parent resource — the parent's include paths whose first segment is
@@ -9,7 +9,7 @@
  * `included` member, exactly as before. The runtime half is
  * `src/Endpoint.relationshipInclude.test.ts`. The last section covers the
  * same option on the endpoints `Endpoint.resource` / `Group.resource`
- * generate (#484).
+ * generate.
  *
  * This file is type-checked by `tsconfig.json`; the `@ts-expect-error`
  * annotations are the assertions, each paired with a positive control.
@@ -36,8 +36,8 @@ type Equals<A, B> =
 
 const Play = Resource.make("plays", {
   attributes: { playedAt: Schema.String, seconds: Schema.Finite },
-  // Reached through the paginated `plays` on its own relationship endpoint
-  // (#483). Declared before `Track`, so behind a thunk.
+  // Reached through the paginated `plays` on its own relationship endpoint.
+  // Declared before `Track`, so behind a thunk.
   relationships: { track: Relationship.one(() => Track) },
 });
 const Label = Resource.make("labels", {
@@ -175,7 +175,7 @@ assertType<SuccessOf<typeof curator>>(
 
 // A `paginated` relationship is no include path of its parent, but on its
 // own relationship endpoint its linkage is the primary data, so its name and
-// the paths rooted at it are legal (#483) — as for a `many`.
+// the paths rooted at it are legal — as for a `many`.
 export const plays = Endpoint.getRelationship(Playlist, "plays", { include: true });
 assertType<
   Equals<Endpoint.RelationshipIncludePaths<typeof Playlist, "plays", true>, "plays" | "plays.track">
@@ -237,8 +237,8 @@ assertType<
 >(true);
 
 // ===========================================================================
-// The relationship endpoints `Endpoint.resource` / `Group.resource` generate
-// (#484): the top-level `relationshipInclude` sets `include` on every one, a
+// The relationship endpoints `Endpoint.resource` / `Group.resource` generate:
+// the top-level `relationshipInclude` sets `include` on every one, a
 // relationship's own `relationshipInclude` overrides it, and without either
 // nothing changes. The runtime half is
 // `src/Endpoint.resourceRelationshipInclude.test.ts`.
@@ -288,7 +288,7 @@ const tooDeepResource = Handlers.linkage(trackIds, {
 });
 // @ts-expect-error -- `labels` is not in the endpoint's `included` union
 assertType<SuccessOf<AllTracks>>(tooDeepResource);
-// A `paginated` relationship's paths are rooted at it, as a `many`'s are (#483).
+// A `paginated` relationship's paths are rooted at it, as a `many`'s are.
 assertType<Equals<IncludeOf<AllPlays>, ReadonlyArray<"plays" | "plays.track">>>(true);
 assertType<Equals<IncludedOf<AllPlays>, typeof Play.Type | typeof Track.Type>>(true);
 
@@ -380,7 +380,7 @@ assertType<HasIncluded<Extract<GroupEndpoints, { readonly identifier: "curatorRe
 );
 
 // ---------------------------------------------------------------------------
-// `fields` (#485): sparse fieldsets on the `included` members
+// `fields`: sparse fieldsets on the `included` members
 // ---------------------------------------------------------------------------
 
 // The decoded `fields` of an endpoint's query, and its flat `fields[TYPE]` keys.
@@ -402,7 +402,7 @@ assertType<
 assertType<FieldsOf<typeof sparseTracks>>({ tracks: ["title"], artists: ["stageName"] });
 // @ts-expect-error -- `playlists` is the parent's type: no resource object of this document
 assertType<FieldsOf<typeof sparseTracks>>({ playlists: ["name"] });
-// A relationship is a field too (#494): `tracks`' `artist` may be named.
+// A relationship is a field too: `tracks`' `artist` may be named.
 assertType<FieldsOf<typeof sparseTracks>>({ tracks: ["title", "artist"] });
 // @ts-expect-error -- `label` is neither an attribute nor a relationship of `tracks`
 assertType<FieldsOf<typeof sparseTracks>>({ tracks: ["label"] });
@@ -436,7 +436,7 @@ export const sparseCurator = Endpoint.getRelationship(Playlist, "curator", {
   fields: true,
 });
 assertType<Equals<keyof FieldsOf<typeof sparseCurator>, "artists" | "labels">>(true);
-// A `paginated` relationship declares the types its rooted paths reach (#483).
+// A `paginated` relationship declares the types its rooted paths reach.
 export const sparsePlays = Endpoint.getRelationship(Playlist, "plays", {
   include: true,
   fields: true,
@@ -486,7 +486,7 @@ assertType<"fields" extends keyof typeof noneListed.Type ? true : false>(false);
 
 // ---------------------------------------------------------------------------
 // `relationshipFields` on the endpoints `Endpoint.resource` / `Group.resource`
-// generate (#489): the top-level default sets `fields` on every generated
+// generate: the top-level default sets `fields` on every generated
 // `getRelationship`, a relationship's own overrides it, and without either
 // nothing changes. The runtime half is
 // `src/Endpoint.resourceRelationshipInclude.test.ts`.
@@ -519,8 +519,8 @@ assertType<
 >(true);
 // @ts-expect-error -- `playlists` is the parent's type: no resource object of this document
 assertType<FieldsOf<SparseResourceTracks>>({ playlists: ["name"] });
-// A `paginated` relationship's paths are rooted at it, as a `many`'s are
-// (#483), so it declares the types they reach.
+// A `paginated` relationship's paths are rooted at it, as a `many`'s are,
+// so it declares the types they reach.
 assertType<
   Equals<keyof FieldsOf<Named<typeof sparseResource, "playsRelationship">>, "plays" | "tracks">
 >(true);

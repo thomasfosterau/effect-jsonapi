@@ -5,7 +5,7 @@
  * 409 for a second create under the same id, and the 403 where it does not —
  * each through the type's create endpoint and, where the api declares one,
  * through the atomic operations endpoint as an `add` operation, to which the
- * Atomic Operations extension applies the same rules (#471).
+ * Atomic Operations extension applies the same rules.
  *
  * The kit never makes up a client-generated id. Every probe here sends the id
  * the type's `writes[type].clientId` returns with its `create` payload, and
@@ -370,8 +370,7 @@ const errorPointers = (observation: Observation): ReadonlyArray<string> =>
 /**
  * The 403 refusing a client id, judged on its error objects'
  * `source.pointer`s: one must name the id sent — `/data/id` through the create
- * endpoint, `<operation>/data/id` through an atomic `add` (owner decisions on
- * #471). None at all, or only others — the atomic operation itself, say, or
+ * endpoint, `<operation>/data/id` through an atomic `add`. None at all, or only others — the atomic operation itself, say, or
  * `/data/id` in an atomic document, where it points at nothing — is a finding.
  */
 const judgePointers = (

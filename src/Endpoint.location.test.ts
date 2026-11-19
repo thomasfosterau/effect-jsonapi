@@ -1,5 +1,5 @@
 /**
- * The `Location` header of a 201 create (#236), observed on the wire.
+ * The `Location` header of a 201 create, observed on the wire.
  *
  * JSON:API v1.1 §Creating Resources → 201 Created: the response SHOULD carry
  * a `Location` header identifying the created resource, and when the resource

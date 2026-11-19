@@ -70,9 +70,7 @@
  * implementations wrap their per-request decisions in `Effect.withSpan`,
  * under the stable names collected in {@link Span}. This is the package's
  * whole tracing surface: everything else it exports is either a plain schema
- * or a synchronous helper with no Effect to attach a span to (see
- * {@link https://github.com/thomasfosterau/effect-jsonapi/issues/122 #122}
- * for why the boundary stops here).
+ * or a synchronous helper with no Effect to attach a span to.
  *
  * Spans need no layer or configuration to appear — `Effect.withSpan` reads
  * whatever `Tracer` is already in context and is a no-op when none is
@@ -463,7 +461,7 @@ export const schemaErrorDocument = (
 ): typeof WireDocument.Type => {
   const issue = SchemaIssue.isIssue(error) ? error : error.issue;
   // Each leaf's path in decoded names, and as the request spelled it: a
-  // query parameter (#305), body member, header or path parameter (#316)
+  // query parameter, body member, header or path parameter
   // renamed on the wire is named by its wire name.
   const leaves = wireLeaves(issue);
   // Error `meta` a schema publishes for its own rejections — the include
@@ -505,9 +503,9 @@ const GENERAL_RULE =
 // it: `include` under §Inclusion of Related Resources; `sort` under §Sorting
 // on an endpoint that responds with a resource collection, and under the
 // general rule on any other; `fields[TYPE]`, `page[…]` and `filter[…]` under
-// the general rule (#261), `fields` also because ignoring it would break
+// the general rule, `fields` also because ignoring it would break
 // §Sparse Fieldsets' MUST NOT on additional fields. An endpoint supports a
-// family by declaring it with at least one legal value (#282), and a
+// family by declaring it with at least one legal value, and a
 // `fields[TYPE]` by declaring that very name.
 const UNSUPPORTED: Readonly<Record<Family, (parameter: string) => string>> = {
   include: () =>
@@ -527,7 +525,7 @@ const UNSUPPORTED: Readonly<Record<Family, (parameter: string) => string>> = {
 };
 
 // The detail of the 400 for a parameter of a family on an endpoint that
-// declares other names of the family but not this one (#321): a misspelt
+// declares other names of the family but not this one: a misspelt
 // `filter[stauts]` beside a declared `filter[status]`, a `page[sise]` beside
 // `page[size]`, a bare `include` beside a hand-built `include[x]`, which the
 // query schema would otherwise drop. It names the ones the endpoint does
@@ -542,7 +540,7 @@ const undeclaredMember = (
   GENERAL_RULE;
 
 // The detail of the 400 for a bracketed `include[…]` or `sort[…]` on an
-// endpoint that supports the bare parameter (#329): JSON:API defines only
+// endpoint that supports the bare parameter: JSON:API defines only
 // the bare one, so the query schema would otherwise drop it and the handler
 // would never see it.
 const bracketedBareOnly = (parameter: string, family: Family): string =>
@@ -587,7 +585,7 @@ const PERCENT_ENCODED = /%[0-9A-Fa-f]{2}/;
 // member name with a character outside a-z, which is the only kind a server
 // may process without knowing it; or none of these, a name that "does not
 // follow the naming conventions" (`foo!`, `page.limit`, `_`, an empty base
-// name), which the server must answer 400 as it must the reserved ones (#263).
+// name), which the server must answer 400 as it must the reserved ones.
 type BaseNameKind = "family" | "reserved" | "extension" | "implementation" | "illegal";
 
 const kindOf = (base: string): BaseNameKind =>
@@ -603,7 +601,7 @@ const kindOf = (base: string): BaseNameKind =>
 
 // The allow-list when the options name none: jQuery's `_` cache-buster
 // (`$.ajax({ cache: false })` appends `?_=<timestamp>`), not a legal member
-// name, so otherwise a 400 (owner decision on #263).
+// name, so otherwise a 400.
 const DEFAULT_ALLOWED: ReadonlyArray<string> = ["_"];
 
 // A parameter's family base name: everything before its first `[` — `page`
@@ -632,13 +630,13 @@ export interface QueryParameterOptions {
    * the bare parameter and its bracketed members (`lang` admits `lang` and
    * `lang[x]`); the endpoint never sees them in its decoded query, which
    * keeps only what its `query` schema declares — also when that schema
-   * declares nothing (#260).
+   * declares nothing.
    *
    * Accepting one is a deliberate deviation: prefer renaming the parameter
    * (`langCode`, `x-lang`) when the host controls it. Defaults to `["_"]`,
    * for jQuery's cache-buster (`$.ajax({ cache: false })` appends
    * `?_=<timestamp>`); a list replaces the default, so list `"_"` too to
-   * keep admitting it, and pass `[]` to admit nothing (#263).
+   * keep admitting it, and pass `[]` to admit nothing.
    *
    * An entry that is not such a base name — a bracketed member (`lang[x]`),
    * a legal member name with a character outside a-z (`Lang`, `x-trace`), a
@@ -658,11 +656,10 @@ export interface QueryParameterOptions {
    * how to process it as a query parameter from this specification … MUST
    * return `400 Bad Request`"). JSON:API defines only the bare `include` and
    * `sort`, so a bracketed `include[]` or `sort[title]` is that 400 even
-   * where the endpoint declares the bare parameter (#329), and the refusal
+   * where the endpoint declares the bare parameter, and the refusal
    * says so; a name that only starts like a family's (`page[`, `filter[_]`)
    * is no member of it, and the refusal says that instead. The allow-list
-   * cannot switch that 400 off, so a spec family is never silently ignored
-   * (#261).
+   * cannot switch that 400 off, so a spec family is never silently ignored.
    */
   readonly allowedQueryParameters?: ReadonlyArray<string>;
 }
@@ -677,7 +674,7 @@ export interface QueryParameterOptions {
 export interface SchemaErrorsOptions extends QueryParameterOptions {
   /**
    * `false` skips the full-linkage check on the **encoded** response, which is
-   * on by default (#250). The document builders (`Handlers.data`,
+   * on by default. The document builders (`Handlers.data`,
    * `Handlers.collection`, and the `Assemble` builders over them) check full
    * linkage on the document value they return, but they do not know the
    * endpoint's schema, and encoding through it drops every relationship the
@@ -690,7 +687,7 @@ export interface SchemaErrorsOptions extends QueryParameterOptions {
    * defect, reported at `Error` severity, that the client receives as the
    * opaque JSON:API 500 of `ServerErrors.SERVER_ERROR`. A request's sparse
    * fieldsets exempt what they exclude, as the spec does (see
-   * {@link SchemaErrorsLive}, #494).
+   * {@link SchemaErrorsLive}).
    *
    * A builder's own `checkLinkage: false` cannot reach this check — the
    * encoded document carries no trace of the value it came from — so a
@@ -743,7 +740,7 @@ const CANNOT_SWITCH_OFF =
 // Why an allow-list entry of a family the specification defines is refused:
 // the family itself, a bracketed member of it such as `page[size]` (whose
 // base name would be refused in turn), a bracketed `include[…]` / `sort[…]`,
-// which the specification does not define at all (#329), or a name that
+// which the specification does not define at all, or a name that
 // only starts like one (`page[`, `filter[_]`), which is not a member.
 const familyRefusal = (parameter: string, family: Family): string => {
   const entry = `allowedQueryParameters entry "${parameter}"`;
@@ -783,7 +780,7 @@ const needsNoEntry = (entry: string): string =>
 // Why an allow-list entry is refused, if it is: one that is not a family
 // base name the check rejects could never match a parameter it rejects, and
 // one of a family the specification defines would switch off the 400 the
-// general rule calls for (owner decision on #261).
+// general rule calls for.
 const refusal = (parameter: string): Option.Option<string> => {
   const base = baseName(parameter);
   if (isFamily(base)) return Option.some(familyRefusal(parameter, base));
@@ -829,9 +826,9 @@ const allowedBaseNames = (options?: QueryParameterOptions): ReadonlyArray<string
 
 // Whether a parameter is one the endpoint supports, given the names it
 // declares and the allow-list. Every name of a family the specification
-// defines is its own parameter — a `fields[TYPE]` per resource type (#261),
-// a `page[KEY]` or `filter[KEY]` per declared key (#321), and the bare
-// `include` / `sort`, which admit no bracketed member (#329) — so only that
+// defines is its own parameter — a `fields[TYPE]` per resource type,
+// a `page[KEY]` or `filter[KEY]` per declared key, and the bare
+// `include` / `sort`, which admit no bracketed member — so only that
 // very name, or a declared prefix of its family (`fields[`, `filter[`: an
 // open record of it), admits it (`declaresName`). A declared name of any
 // other base name the check rejects — reserved, an extension's, or not a
@@ -917,9 +914,9 @@ export interface QueryParameterCheck extends QueryParameterOptions {
    * family, except a name of a family the specification defines, which
    * admits only itself: a sparse fieldset is per resource type, so
    * `fields[articles]` does not admit `fields[people]`; a page or filter
-   * key is per key, so `page[limit]` does not admit `page[size]` (#321); and
+   * key is per key, so `page[limit]` does not admit `page[size]`; and
    * JSON:API defines only the bare `include` and `sort`, so a declared
-   * `include` does not admit `include[]` (#329). A name ending in `[`
+   * `include` does not admit `include[]`. A name ending in `[`
    * (`fields[`, `filter[`) admits every name it opens.
    * An endpoint that supports one of the specification's families
    * (`include`, `fields[TYPE]`, `sort`, `page`, `filter`) lists it here:
@@ -937,7 +934,7 @@ export interface QueryParameterCheck extends QueryParameterOptions {
  * that does not know how to process one MUST answer 400 Bad Request, as it
  * must one whose name "does not follow the naming conventions" — a base name
  * that is not a legal member name (`foo!`, `page.limit`, `_`) — or that names
- * an extension's parameter (`ext:param`) it does not process (#263). That
+ * an extension's parameter (`ext:param`) it does not process. That
  * covers a parameter of one of the specification's own families on an
  * endpoint that does not support it, and two sections require the same 400
  * outright: §Inclusion of Related Resources for `include`, and §Sorting for
@@ -963,12 +960,12 @@ export interface QueryParameterCheck extends QueryParameterOptions {
  *   prefix): a sparse fieldset is per resource type, so a declared
  *   `fields[articles]` does not admit `fields[people]`, a bare `fields` or
  *   `fields[articles][x]`. A `page[…]` or `filter[…]`, and a bare `page` or
- *   `filter`, likewise (#321): a declared `page[limit]` does not admit
+ *   `filter`, likewise: a declared `page[limit]` does not admit
  *   `page[size]`, and a declared `filter[status]` does not admit
  *   `filter[stauts]` or `filter[status][eq]`, each of which is answered
  *   naming the members `declared` does list; a `filter[` prefix (the open
  *   `filter: true` grammar) admits every `filter[…]`. A declared `include`
- *   or `sort` admits only the bare parameter (#329): JSON:API defines no
+ *   or `sort` admits only the bare parameter: JSON:API defines no
  *   bracketed member of either, so `include[]` or `sort[title]` is answered
  *   saying so, unless `declared` lists that very name; or
  * - is listed in `allowedQueryParameters`, which defaults to `["_"]` (jQuery's
@@ -1010,8 +1007,7 @@ export const checkQueryParameters = (
 // name of a family it declares with no legal value — `include: { paths: []
 // }`, `sort: true` over no attributes, `filter: true` over no filterable
 // field, a `fields[TYPE]` whose type has no attribute. Such a parameter
-// supports no value, so it counts as undeclared (owner decisions on #282 and
-// #261): every request that carries it gets the same 400 as on an endpoint
+// supports no value, so it counts as undeclared: every request that carries it gets the same 400 as on an endpoint
 // that never declared it. Each name is read off the property its wire
 // parameter decodes into, and no other (`admitsNoValue`); a `fields[TYPE]`
 // off that type's fieldset alone, so a neighbouring type keeps its own.
@@ -1125,7 +1121,7 @@ const isResponsePart = (kind: HttpApiError.HttpApiSchemaError["kind"]): kind is 
 
 // The defect a response-encoding failure dies with — and a wire full-linkage
 // violation, the other way a handler's response can fail its endpoint's
-// encoding (#250), with no `HttpApiSchemaError` behind it. It cannot stay the
+// encoding, with no `HttpApiSchemaError` behind it. It cannot stay the
 // `HttpApiSchemaError` itself: that error is `Respondable` as an empty 400, and
 // HttpApi turns a failure of it into a defect the router answers with exactly
 // that 400. This one answers with the opaque JSON:API 500 `ServerErrors.respond`
@@ -1196,8 +1192,8 @@ const conflictResponse = (type: string, served: ReadonlyArray<string>) =>
 // not support one (§Client-Generated IDs: "A server MUST return 403 Forbidden
 // in response to an unsupported request to create a resource with a
 // client-generated ID"), at the pointer `refusedClientIdPointer` reads off
-// the issue: `/data/id` for `Resource.createPayload` (#450),
-// `/atomic:operations/N/data/id` for an `Atomic.AddOperation` (#464). The
+// the issue: `/data/id` for `Resource.createPayload`,
+// `/atomic:operations/N/data/id` for an `Atomic.AddOperation`. The
 // payload decode stops at its first failure, so an atomic request is answered
 // for the first operation that fails, whatever later ones send.
 const clientIdResponse = (pointer: string) =>
@@ -1265,7 +1261,7 @@ const searchPairs = (
   );
 
 // `fields` is the request's sparse fieldsets: a relationship one excludes is
-// exempt from full linkage (§Compound Documents, #494).
+// exempt from full linkage (§Compound Documents).
 const checkWireLinkage = (
   response: HttpServerResponse.HttpServerResponse,
   fields: Parameters<typeof unlinkedOnWire>[1],
@@ -1419,9 +1415,9 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
  * any endpoint whose payload is `createPayload`. The handler never runs. A
  * `type` or member that fails beside the id is reported instead, with the 409
  * or 400 it earns; a payload of the endpoint's own that declares `data.id`
- * supports client ids, and is not touched (#450). An atomic `add` operation
+ * supports client ids, and is not touched. An atomic `add` operation
  * carrying an `id` is answered the same way, with the 403 naming
- * `/atomic:operations/N/data/id`, so no operation is performed (#464); the
+ * `/atomic:operations/N/data/id`, so no operation is performed; the
  * decode stops at the first operation that fails, which decides the answer.
  *
  * It also answers a query parameter whose family base name is made only of
@@ -1432,7 +1428,7 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
  * base name is not a legal member name (`?foo!=1`, `?page.limit=1`) or names
  * an extension's parameter (`?ext:param=1`), which do not follow the
  * specification's naming conventions — except `?_=`, jQuery's cache-buster,
- * which the default allow-list admits (#263). Implementation-specific names,
+ * which the default allow-list admits. Implementation-specific names,
  * legal member names carrying a character outside a-z (`?fooBar=1`,
  * `?x-trace=1`), are ignored as before. {@link schemaErrorsLayer} accepts
  * extra names a host needs.
@@ -1467,7 +1463,7 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
  * property of that name decides, or failing one, every property whose name
  * the wire does not declare.
  *
- * The same holds for `fields[TYPE]`, `page[…]` and `filter[…]` (#261): on an
+ * The same holds for `fields[TYPE]`, `page[…]` and `filter[…]`: on an
  * endpoint whose `query` schema does not declare the family —
  * `?page[limit]=10` or `?filter[status]=open` on `Endpoint.get(R)`,
  * `?fields[articles]=title` on an endpoint declared without `fields` — the
@@ -1483,7 +1479,7 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
  * endpoint MUST NOT include additional [fields] in resource objects of that
  * type in its response").
  *
- * `page` and `filter` are per member too (#321): on an endpoint that declares
+ * `page` and `filter` are per member too: on an endpoint that declares
  * an explicit `filter: { key: Schema }` map or a set of page keys
  * (`Query.Page.Offset`'s `page[offset]` / `page[limit]`, `Query.Page.Number`,
  * `Query.Page.Cursor`, a `Query.bracketPageKeys` struct), a member it does
@@ -1501,7 +1497,7 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
  * (`Schema.Record(Schema.TemplateLiteral(["filter[", Schema.String, "]"]), …)`),
  * which admits every member it opens.
  *
- * JSON:API defines only the bare `include` and `sort` (#329), so a bracketed
+ * JSON:API defines only the bare `include` and `sort`, so a bracketed
  * one — `?include[]=author`, `?include[x]=author`, `?sort[title]=1`,
  * `?sort[x][y]=1` — is a 400 naming it under the spec's general rule, on an
  * endpoint that declares the bare parameter as on one that does not; the
@@ -1519,14 +1515,14 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
  * `included` member its primary data cannot reach through resource linkage
  * (§Compound Documents). The document builders check the value they build,
  * but encoding drops any relationship the endpoint's schema does not declare,
- * so a member linked only through one passes them and is caught here (#250).
+ * so a member linked only through one passes them and is caught here.
  * The walk is the conformance kit's `spec/document/full-linkage` rule's, over
  * the bytes the client receives; {@link schemaErrorsLayer} turns it off
  * ({@link SchemaErrorsOptions.checkLinkage}).
  *
  * The spec's one exemption is read from the request: full linkage is waived
  * "when relationship fields that would otherwise contain linkage data are
- * excluded due to sparse fieldsets" (§Compound Documents, #494). The encoded
+ * excluded due to sparse fieldsets" (§Compound Documents). The encoded
  * document cannot show what an excluded relationship linked, nor which
  * relationships a type has, so once the walk reaches a resource object of a
  * type the request's `fields[TYPE]` names, no member is reported:

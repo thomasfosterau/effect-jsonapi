@@ -265,7 +265,7 @@ describe("relationship kinds in resource objects", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The canonical order of a paginated relationship (#113)
+// The canonical order of a paginated relationship
 // ---------------------------------------------------------------------------
 
 describe("Relationship.paginated `order`", () => {
@@ -351,7 +351,7 @@ describe("Relationship.paginated `order`", () => {
   });
 });
 
-describe("Relationship.one / optional `key` (#509)", () => {
+describe("Relationship.one / optional `key`", () => {
   const Owner = Resource("owners", { attributes: { name: Schema.NonEmptyString } });
 
   it("records the declared storage key on the descriptor, typed", () => {
@@ -442,7 +442,7 @@ describe("Relationship.one / optional `key` (#509)", () => {
   });
 });
 
-describe("relationship `meta` (#513)", () => {
+describe("relationship `meta`", () => {
   const Count = Schema.Struct({ totalCount: Schema.Finite });
   const Ballot = Resource("ballots", { attributes: { label: Schema.String } });
   const Contest = Resource("contests", {

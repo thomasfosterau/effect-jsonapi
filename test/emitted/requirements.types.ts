@@ -8,7 +8,7 @@
  * constructor with no explicit return type is emitted as whatever declaration
  * emit serialised, which can differ from what the source resolves to.
  *
- * That gap produced a real bug (#104). The `:id` constructors passed a bare
+ * That gap produced a real bug. The `:id` constructors passed a bare
  * field record as `params`, so `HttpApiEndpoint`'s return type stayed a
  * deferred conditional; emit serialised it with the true branch's narrowing
  * baked in, as `Schema.Struct<Schema.Struct.Fields & { id: … }>`. The index

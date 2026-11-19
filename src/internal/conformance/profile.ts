@@ -288,7 +288,7 @@ const spellingEquivalence: RuleImpl = {
       const target = grammarEndpoints(ctx)[0];
       if (target === undefined) return skip(spellingEquivalence.rule, NO_GRAMMAR);
       // The first string attribute, not the first attribute: a resource that
-      // leads with a number (`number` on an issue) still has one to spell (#458).
+      // leads with a number (`number` on an issue) still has one to spell.
       const learned = yield* learnField(ctx, target.path, P.isString);
       if (learned === undefined || !P.isString(learned.value)) {
         return skip(

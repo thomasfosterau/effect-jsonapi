@@ -552,7 +552,7 @@ export function paths(spec: AnySpec): ReadonlyArray<string> {
  * over `Res` with the `include` option `I`: a `Schema.Union` over the
  * non-`paginated` direct targets (unless `I` is a declared {@link Surface})
  * and, when `I` turns `include` on, every resource a legal include path
- * reaches (#320). For a declared surface that is exactly the resources the
+ * reaches. For a declared surface that is exactly the resources the
  * surface declares, its own {@link Included} union.
  *
  * Distributes over a widened `include`, as `Endpoint.get` / `list` /
@@ -577,7 +577,7 @@ export interface Reachable<Res extends Any, I> extends Schema.Union<
  * path reaches from any member.
  *
  * Like {@link Reachable} it distributes over a widened `include`, as
- * `collection` and `polymorphic` do (#382): under `include: boolean` it admits
+ * `collection` and `polymorphic` do: under `include: boolean` it admits
  * what either value admits, since the endpoint built from that value may have
  * turned `include` on.
  *
@@ -594,7 +594,7 @@ export interface MembersReachable<Members extends Any, I> extends Schema.Union<
 // The members form's result. Each declared surface in `I` gives its own
 // `included`; the rest of `I` (a boolean or a `Query.IncludeOptions`) gives
 // `MembersReachable` over it, distributed as `collection` / `polymorphic`
-// type theirs (#382). So `which ? surface : true` is typed as either union,
+// type theirs. So `which ? surface : true` is typed as either union,
 // as the runtime returns one or the other.
 type MembersIncluded<Members extends Any, I> =
   | (I extends { readonly included: infer Declared } ? Declared : never)
@@ -672,7 +672,7 @@ const isMembers = (source: AnySpec | Any | ReadonlyArray<Any>): source is Readon
  * endpoint over `family`, gives the union of their default documents, over
  * every member's direct targets and paths ({@link MembersReachable}). A
  * widened `include: boolean` gives what either value admits, as those
- * endpoints do (#382). A declared surface gives the surface's own
+ * endpoints do. A declared surface gives the surface's own
  * `included`, as `collection` and `polymorphic` bind it, and an `include`
  * that may be a surface or not (`which ? surface : true`) is typed as either
  * union.

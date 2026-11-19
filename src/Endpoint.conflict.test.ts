@@ -1,5 +1,5 @@
 /**
- * #428: a create or update whose resource object names a `type` the endpoint
+ * A create or update whose resource object names a `type` the endpoint
  * does not serve answers JSON:API's 409 Conflict, naming `/data/type`, rather
  * than the generic 400 its payload decode failure would otherwise be.
  *
@@ -126,7 +126,7 @@ const conflict = (type: string, served: string) => ({
   ],
 });
 
-describe("a resource object of another type (#428)", () => {
+describe("a resource object of another type", () => {
   it("POST /<type> answers 409 naming /data/type", async () => {
     const response = await send("POST", "/articles", {
       data: { type: "people", attributes: { title: "Hello" } },
@@ -175,7 +175,7 @@ describe("a resource object of another type (#428)", () => {
   });
 });
 
-describe("a malformed resource object stays a 400 (#428)", () => {
+describe("a malformed resource object stays a 400", () => {
   const badRequest = (pointer: string) =>
     expect.objectContaining({
       errors: [expect.objectContaining({ status: "400", source: { pointer } })],

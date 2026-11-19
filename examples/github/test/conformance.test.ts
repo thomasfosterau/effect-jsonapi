@@ -24,11 +24,11 @@ import { discardIssue, discardRepository, GitHubLive } from "../handlers.js";
 /**
  * The rules this example is known to break, each with the issue tracking it.
  * Remove an entry when its issue is fixed; the test will tell you to. The read
- * rules have been clean since #169: the handlers of the reads that declare
+ * rules have been clean: the handlers of the reads that declare
  * `fields` (`GET /repositories/:id`, `GET /issues/:id` and `/search`) project
  * `?fields[TYPE]=` with `onResource: Handlers.project(query.fields)` and stamp
  * `jsonapi: Document.v1_1` on every `Handlers.data` / `collection` / `linkage`
- * document. The write rules have been clean since #428, which answers a
+ * document. The write rules have been clean, which answers a
  * resource object of another `type` with 409, and #450, which answers a
  * client-generated id `Endpoint.create` does not support with 403.
  */
@@ -82,7 +82,7 @@ const WRITES: Conformance.Options["writes"] = {
     }),
     update: () => ({ attributes: { state: "closed" } }),
     cleanup: discardIssue,
-    // The example mints its own ids, so a client-generated one must be refused (#450).
+    // The example mints its own ids, so a client-generated one must be refused.
     clientId: { supported: false, id: () => `conformance-client-${++sequence}` },
   },
 };
@@ -90,7 +90,7 @@ const WRITES: Conformance.Options["writes"] = {
 /**
  * The rules that died in a run, each as `id: message`. A rule that dies — a
  * defect in the kit or its transport, not a finding about this example — is an
- * `Errored` outcome rather than a failed run (#246), so nothing that filters
+ * `Errored` outcome rather than a failed run, so nothing that filters
  * for `Failed` sees it; every run here is checked with this.
  */
 const died = (run: Conformance.Report): ReadonlyArray<string> =>
@@ -126,8 +126,8 @@ layer(RunLive)("github: JSON:API conformance", (it) => {
     Effect.gen(function* () {
       const report = yield* Run;
       // An `ids` entry the example does not hold fails no rule: its `/:type/:id`
-      // read answers 404, and every rule that resolves it sees less of the api
-      // (#301). `report.samples` records each such read with its status (#319).
+      // read answers 404, and every rule that resolves it sees less of the api.
+      // `report.samples` records each such read with its status.
       // Keyed by type, so a sample that did not resolve shows up under its type.
       // `labels` and `issueComments` have no `GET /:type/:id` endpoint, so their
       // samples key relationship and related reads only, and record no read.
@@ -187,7 +187,7 @@ layer(RunLive)("github: JSON:API conformance", (it) => {
     () =>
       Effect.gen(function* () {
         const report = yield* Run;
-        // #488: `?fields[TYPE]=` asks for no fields, not every field, and
+        // `?fields[TYPE]=` asks for no fields, not every field, and
         // `Handlers.project` answers it with no attributes.
         const ids = [
           "spec/query/sparse-fieldsets-primary",
@@ -203,7 +203,7 @@ layer(RunLive)("github: JSON:API conformance", (it) => {
   it.effect("follows every relationship's and document's `self` link to a verdict", () =>
     Effect.gen(function* () {
       const report = yield* Run;
-      // #309: the relationship `self` link `Handlers.paginatedRelationship`
+      // The relationship `self` link `Handlers.paginatedRelationship`
       // writes for an issue's comments (`/issues/:id/relationships/comments`)
       // is served by a declared `Endpoint.getRelationship`, so both MUSTs pass
       // rather than skip. That relationship is links-only, so the relationship
@@ -233,16 +233,16 @@ layer(RunLive)("github: JSON:API conformance", (it) => {
     () =>
       Effect.gen(function* () {
         const report = yield* Run;
-        // #433: `GET /issues` declares `filter: true` and advertises the profile,
+        // `GET /issues` declares `filter: true` and advertises the profile,
         // so the filter-profile rules run here rather than only against the kit's
         // canned servers. The evaluation rule decides the empty groups, the
         // ordering operators on `number` (never NULL) and `assignee`, a to-one
         // relationship empty on two of the three issues; the §6.5 corollaries on
-        // `assignee` and `include=…` beside a filter (#458) — and says why the
+        // `assignee` and `include=…` beside a filter — and says why the
         // rest went undecided: no attribute is ever NULL, and the endpoint
-        // declares no `fields[issues]` (deliberately, #322) to send beside a
+        // declares no `fields[issues]` (deliberately) to send beside a
         // filter. Spelling equivalence runs on `title`, the first string
-        // attribute, `number` leading it (#458).
+        // attribute, `number` leading it.
         const outcomeOf = (id: string) => report.outcomes.find((outcome) => outcome.rule.id === id);
         expect(outcomeOf("profile/filter/advertises-profile-uri")?._tag).toBe("Passed");
         expect(outcomeOf("profile/filter/rejections")?._tag).toBe("Passed");
@@ -262,31 +262,31 @@ layer(RunLive)("github: JSON:API conformance", (it) => {
       const report = yield* Run;
       const writeRules = [
         "spec/status/create-response-document",
-        // #236: the 201 carries `Location`, copied from the created resource's
+        // The 201 carries `Location`, copied from the created resource's
         // own `links.self`, so the two match.
         "spec/status/create-location",
         "spec/status/create-location-matches-self",
         "spec/status/update-response",
         "spec/status/delete-response",
-        // #237: what each create and update answered reads back through the
+        // What each create and update answered reads back through the
         // resource's own GET.
         "spec/status/create-read-back",
         "spec/status/update-read-back",
-        // #429: a created issue's `labels` replaced with, added to and removed
+        // A created issue's `labels` replaced with, added to and removed
         // from by the `ids` label, each read back through
         // `GET /issues/:id/relationships/labels`. The `assignee` PATCH has no
         // relationship GET to read back through, so is not decided.
         "spec/relationships/update-replaces",
         "spec/relationships/add-appends",
         "spec/relationships/remove-deletes",
-        // #451: what each of those writes, and the `assignee` PATCH, answered.
+        // What each of those writes, and the `assignee` PATCH, answered.
         // `update-to-one-null` is not decided: `assignee` has no relationship
         // GET to read the cleared linkage back through.
         "spec/relationships/write-response",
-        // #461: the `assignee` and `labels` writes answer 404 for a resource
+        // The `assignee` and `labels` writes answer 404 for a resource
         // that does not exist.
         "spec/relationships/absent-related-404",
-        // #477: a `labels` DELETE naming a label that does not exist succeeds —
+        // A `labels` DELETE naming a label that does not exist succeeds —
         // it is already missing from the relationship.
         "spec/relationships/remove-absent-succeeds",
       ];

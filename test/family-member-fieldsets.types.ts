@@ -1,13 +1,13 @@
 /**
- * Type-level tests for the sparse fieldsets of a family's members (#350).
+ * Type-level tests for the sparse fieldsets of a family's members.
  *
  * A `Resource.family`'s `type` is its name, never a wire type: a response
  * carries the family's members, each under its own type. So `fields: true`
  * replaces every family the response can carry by its members (recursively,
  * for a family nested in another), declares `fields[TYPE]` for each, and
- * declares no `fields[<family name>]` (owner decision on #350); the default
- * document of an endpoint declaring `fields` makes those members partial
- * (#322). The runtime half is `src/Query.fieldsets.test.ts` (whose
+ * declares no `fields[<family name>]`; the default
+ * document of an endpoint declaring `fields` makes those members partial.
+ * The runtime half is `src/Query.fieldsets.test.ts` (whose
  * `expectFieldsets` also pins the runtime key set against the type's) and
  * `src/Endpoint.sparse.test.ts`.
  *
@@ -106,7 +106,7 @@ assertType<FieldsOf<typeof gallery>>({ media: ["url"] });
 const primary = Query.schema(AnyNode, { fields: true });
 assertType<Equals<FieldsetTypes<typeof primary>, "editors" | "reviewers">>(true);
 // A name-only family as the primary resource: its members, and no open
-// `string` key (#363). Its synthesised `relationships` are typed as the by-key
+// `string` key. Its synthesised `relationships` are typed as the by-key
 // intersection the runtime computes, so its direct targets are exact.
 const media = Query.schema(Media, { fields: true });
 assertType<Equals<FieldsetTypes<typeof media>, "photos" | "videos">>(true);
@@ -117,7 +117,7 @@ assertType<FieldsOf<typeof media>>({ phtos: ["url"] });
 // @ts-expect-error -- `media` is the family's name
 assertType<FieldsOf<typeof media>>({ media: ["url"] });
 
-// A related endpoint to a name-only family (#363): its members only.
+// A related endpoint to a name-only family: its members only.
 type QueryOf<E> = HttpApiEndpoint.Query<E>;
 export const galleryItems = Endpoint.related(Gallery, "items", { fields: true });
 assertType<Equals<FieldsetTypes<QueryOf<typeof galleryItems>>, "photos" | "videos">>(true);
@@ -212,7 +212,7 @@ assertType<
 >(true);
 
 // The members of a nested family are partial too, the inner family's
-// included: the type and the runtime walk agree (#350).
+// included: the type and the runtime walk agree.
 export const nested = Endpoint.related(Nest, "o", { fields: true });
 assertType<Equals<NonNullable<DataOf<typeof nested>>["type"], "editors" | "reviewers" | "others">>(
   true,

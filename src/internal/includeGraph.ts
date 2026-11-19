@@ -2,8 +2,8 @@
  * The resources a read endpoint's `include` option brings into reach, at the
  * type level and at runtime alike: the legal include paths, the resources
  * those paths reach, and from them the types the endpoint's `included` union
- * admits (`Endpoint`'s default document, #320) and the types `fields: true`
- * declares a sparse fieldset for (`Query.FieldsetResources`, #311).
+ * admits (`Endpoint`'s default document) and the types `fields: true`
+ * declares a sparse fieldset for (`Query.FieldsetResources`).
  *
  * Both consumers derive from this one walk, so the resources a document can
  * carry and the fieldsets a client can request for them cannot drift apart.
@@ -104,7 +104,7 @@ export type IncludedResources<Res extends Any, I> =
  * member that is itself a family by that family's members in turn. A
  * family's `type` is its name, never a wire type: the resource objects a
  * response carries for it are its members', so a sparse fieldset names a
- * member type, and the family itself names none (#350). A plain resource
+ * member type, and the family itself names none. A plain resource
  * definition stays as it is, including one whose `type` is a family's name
  * (the base of a base-anchored family, reached in its own right).
  *

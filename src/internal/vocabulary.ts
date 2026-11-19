@@ -14,8 +14,7 @@
  *   (`meta.includablePaths`, `meta.sortableFields`), so a caller learns the
  *   legal set;
  * - `Middleware`'s support check ({@link admitsNoValue}) treats a parameter
- *   whose vocabulary is empty as one the endpoint does not support (#282,
- *   #261).
+ *   whose vocabulary is empty as one the endpoint does not support.
  *
  * @internal
  */
@@ -60,7 +59,7 @@ export const isFamily = (base: string): base is Family =>
  * resource type, and the `page[…]` / `filter[…]` members an endpoint's
  * strategy or filter map declares. `include` and `sort` are one bare
  * parameter each, so a bracketed `include[…]` / `sort[…]` is a parameter the
- * specification does not define (#329). Every family is supported member by
+ * specification does not define. Every family is supported member by
  * member all the same (`declaresName`): a name is supported only when the
  * endpoint declares that very name or a prefix that opens it.
  *
@@ -139,7 +138,7 @@ export const vocabularyAnnotation = (vocabulary: Vocabulary) =>
  * the family's vocabulary, which the 400 for a rejected value renders as
  * error `meta` and the support check reads, and, when the set is empty, a
  * `message` saying so — `Schema.Literals([])` is `never`, whose rejection
- * would otherwise read "Expected never" (#282).
+ * would otherwise read "Expected never".
  *
  * @internal
  */

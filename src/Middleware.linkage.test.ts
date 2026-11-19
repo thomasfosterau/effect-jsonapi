@@ -1,5 +1,5 @@
 /**
- * #250: the document builders' full-linkage check runs on the document value
+ * The document builders' full-linkage check runs on the document value
  * they build, without the endpoint's schema. Encoding through that schema
  * drops a relationship the resource does not declare, so an `included` member
  * reached only through one passes the builders and then arrives on the wire
@@ -63,7 +63,7 @@ const throughAuthor = Handlers.data(
   { included: [ann] },
 );
 
-describe("the builders' check sees the value, not the wire (#250)", () => {
+describe("the builders' check sees the value, not the wire", () => {
   it("passes a member linked through an undeclared relationship, which encoding orphans", () => {
     const encoded = Schema.encodeUnknownSync(Document.DataDocument(Article, { included: Person }))(
       throughEditor,
@@ -83,7 +83,7 @@ describe("the builders' check sees the value, not the wire (#250)", () => {
 
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
-describe("SchemaErrorsLive re-checks full linkage on the encoded document (#250)", () => {
+describe("SchemaErrorsLive re-checks full linkage on the encoded document", () => {
   const Api = HttpApi.make("linkage").add(
     Group.make(Article, Endpoint.get(Article, { include: true }), Endpoint.list(Article)),
   );
@@ -175,10 +175,10 @@ describe("SchemaErrorsLive re-checks full linkage on the encoded document (#250)
   });
 });
 
-describe("SchemaErrorsLive walks from primary identifiers in a relationship document (#423)", () => {
+describe("SchemaErrorsLive walks from primary identifiers in a relationship document", () => {
   // A relationship endpoint whose schema declares `included`
   // (`?include=comments.author`, as `Endpoint.getRelationship`'s `include`
-  // option declares since #439) carries the members the primary identifiers
+  // option declares) carries the members the primary identifiers
   // name.
   const Comment = Resource.make("comments", {
     attributes: { body: Schema.String },
@@ -243,9 +243,9 @@ describe("SchemaErrorsLive walks from primary identifiers in a relationship docu
 });
 
 // §Compound Documents: full linkage is waived "when relationship fields that
-// would otherwise contain linkage data are excluded due to sparse fieldsets"
-// (#494). The middleware reads `fields[TYPE]` from the request.
-describe("SchemaErrorsLive exempts what the request's sparse fieldsets exclude (#494)", () => {
+// would otherwise contain linkage data are excluded due to sparse fieldsets".
+// The middleware reads `fields[TYPE]` from the request.
+describe("SchemaErrorsLive exempts what the request's sparse fieldsets exclude", () => {
   const Api = HttpApi.make("sparseLinkage").add(
     Group.make(Article, Endpoint.get(Article, { include: true, fields: true })),
   );

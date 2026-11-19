@@ -73,7 +73,7 @@ export type FlatQuery = Readonly<Partial<Record<string, Schema.Json>>>;
 // an array — except `include`, whose comma form is the schema's own encoding
 // of the set (the query schema already joins it; a consumer's flat schema
 // may not have). An absent member, `null` and a JSON object have no flat wire
-// form and are omitted (#536).
+// form and are omitted.
 const pairsOf = (key: string, member: FlatValue): ReadonlyArray<Pair> => {
   if (Option.isNone(member) || member.value === null) return [];
   const value = member.value;

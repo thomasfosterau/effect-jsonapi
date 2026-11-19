@@ -1,5 +1,5 @@
 /**
- * #464: an atomic `add` operation carrying a client-generated id, through a
+ * An atomic `add` operation carrying a client-generated id, through a
  * request document that does not support one, answers JSON:API's 403
  * Forbidden naming `/atomic:operations/N/data/id`, and the handler never runs
  * — no operation is performed — rather than the id being dropped and the
@@ -8,7 +8,7 @@
  * The extension answers a failed operation "as described in the base
  * specification" (§Processing Errors), whose §Client-Generated IDs says: "A
  * server MUST return 403 Forbidden in response to an unsupported request to
- * create a resource with a client-generated ID." It is #450's refusal of a
+ * create a resource with a client-generated ID." It is the refusal of a
  * `data.id` on `Endpoint.create`, applied to the operation.
  *
  * A request document of the endpoint's own whose `add` declares `data.id`
@@ -154,7 +154,7 @@ beforeEach(() => {
   created = [];
 });
 
-describe("a client-generated id on an atomic add that does not support one (#464)", () => {
+describe("a client-generated id on an atomic add that does not support one", () => {
   it("answers 403 naming /atomic:operations/N/data/id, and performs no operation", async () => {
     const response = await post("/operations", {
       "atomic:operations": [addArticle(), addArticle({ id: "client-1" })],

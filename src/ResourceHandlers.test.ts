@@ -334,7 +334,7 @@ describe("create / delete", () => {
 });
 
 /**
- * A write that hides the row from its own writer (pulpit#107): the write
+ * A write that hides the row from its own writer: the write
  * commits, the writer's re-read fails, and the cached public entry must not
  * survive it. The fixtures vary one seam each: a re-read that hides or
  * breaks, a transaction that interrupts after the operation, an operation
@@ -1087,35 +1087,33 @@ describe("related", () => {
     }),
   );
 
-  it.effect(
-    "answers an empty to-one with `included: []` when the request carried `include` (#232)",
-    () =>
-      Effect.gen(function* () {
-        // §Fetching Includes: a request carrying `include` gets the `included` key,
-        // even when there is no related resource to walk from.
-        const empty = ResourceHandlers.related({
-          ...config,
-          key: "polity",
-          cardinality: "one",
-          includable: ["country", "country.capital.mayor"],
-        });
-        const [withPath, threeHops, bareInclude, withoutInclude] = yield* Effect.all(
-          [
-            empty({ params: { id: "c1" }, query: { include: ["country"] } }),
-            // A path at the default depth limit (3 hops) is accepted.
-            empty({ params: { id: "c1" }, query: { include: ["country.capital.mayor"] } }),
-            // `?include=` (no paths) is still a request that carried `include`.
-            empty({ params: { id: "c1" }, query: { include: [] } }),
-            empty({ params: { id: "c1" }, query: {} }),
-          ],
-          { concurrency: 1 },
-        );
-        expect(withPath).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
-        expect(threeHops).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
-        expect(bareInclude).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
-        // Without `include` the key stays absent.
-        expect(withoutInclude).not.toHaveProperty("included");
-      }),
+  it.effect("answers an empty to-one with `included: []` when the request carried `include`", () =>
+    Effect.gen(function* () {
+      // §Fetching Includes: a request carrying `include` gets the `included` key,
+      // even when there is no related resource to walk from.
+      const empty = ResourceHandlers.related({
+        ...config,
+        key: "polity",
+        cardinality: "one",
+        includable: ["country", "country.capital.mayor"],
+      });
+      const [withPath, threeHops, bareInclude, withoutInclude] = yield* Effect.all(
+        [
+          empty({ params: { id: "c1" }, query: { include: ["country"] } }),
+          // A path at the default depth limit (3 hops) is accepted.
+          empty({ params: { id: "c1" }, query: { include: ["country.capital.mayor"] } }),
+          // `?include=` (no paths) is still a request that carried `include`.
+          empty({ params: { id: "c1" }, query: { include: [] } }),
+          empty({ params: { id: "c1" }, query: {} }),
+        ],
+        { concurrency: 1 },
+      );
+      expect(withPath).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
+      expect(threeHops).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
+      expect(bareInclude).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
+      // Without `include` the key stays absent.
+      expect(withoutInclude).not.toHaveProperty("included");
+    }),
   );
 
   it.effect("validates an empty to-one's include paths, as it does a resolved one's", () =>

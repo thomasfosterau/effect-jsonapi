@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Type-checks test/floor/consumer.ts against the PUBLISHED shape of this
-# package and the lowest effect its peer range admits (#586).
+# package and the lowest effect its peer range admits.
 #
 #   test/floor/check.sh              # effect as pinned in package.json (4.1.0)
 #   EFFECT_VERSION=4.0.6 test/floor/check.sh   # must FAIL: the bug it guards

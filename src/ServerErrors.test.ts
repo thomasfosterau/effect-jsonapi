@@ -513,7 +513,7 @@ describe("respond", () => {
     }),
   );
 
-  it.effect("consults the caller's override ahead of the catalogue (#565)", () =>
+  it.effect("consults the caller's override ahead of the catalogue", () =>
     Effect.gen(function* () {
       const override = (cause: unknown) =>
         P.isTagged(cause, "Conflict")

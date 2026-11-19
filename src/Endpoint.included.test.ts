@@ -1,7 +1,7 @@
 /**
  * The default document of a read endpoint whose `include` option is `true` or
  * a `Query.IncludeOptions` admits in `included` every resource its legal
- * include paths reach (#320), not only the resource's direct targets — so an
+ * include paths reach, not only the resource's direct targets — so an
  * advertised path such as `comments.author` can be answered.
  *
  * JSON:API 1.1 §Inclusion of Related Resources: "If a server is unable to
@@ -131,7 +131,7 @@ const admitted = (
   );
 };
 
-describe("the default `included` union reaches every legal include path (#320)", () => {
+describe("the default `included` union reaches every legal include path", () => {
   it("`get` with `include: true` admits the depth-2 `comments.author` target", () => {
     expect(admitted(Endpoint.get(Article, { include: true }), wire.articles, false)).toEqual([
       "comments",
@@ -243,7 +243,7 @@ describe("the default `included` union reaches every legal include path (#320)",
       ).toEqual(["people", "companies"]);
     });
 
-    // The type of `collection`'s `included` agrees (#337,
+    // The type of `collection`'s `included` agrees (
     // `test/include-depth-included.types.ts`).
     it.each([
       ["without `include`", {}, ["people"]],
@@ -330,7 +330,7 @@ describe("the default `included` union reaches every legal include path (#320)",
   });
 });
 
-describe("an endpoint that turns no include path on keeps its union (#320)", () => {
+describe("an endpoint that turns no include path on keeps its union", () => {
   it.each([
     ["get", Endpoint.get(Article), false],
     ["get with `include: false`", Endpoint.get(Article, { include: false }), false],
@@ -363,7 +363,7 @@ describe("an endpoint that turns no include path on keeps its union (#320)", () 
   });
 
   it("the document is unchanged on the wire", () => {
-    // The resource's own `document()`, the default before #320.
+    // The resource's own `document()`, the default before.
     const roundTrip = (endpoint: { readonly success: Iterable<Schema.Top> }) => {
       const success = successOf(endpoint);
       return Schema.encodeUnknownSync(success)(
@@ -376,7 +376,7 @@ describe("an endpoint that turns no include path on keeps its union (#320)", () 
   });
 });
 
-describe("a declared surface on `collection` / `polymorphic` derives their union (#336)", () => {
+describe("a declared surface on `collection` / `polymorphic` derives their union", () => {
   // A depth-2 surface: `comments.author` is advertised, so `people` must be
   // admitted; `companies`, a direct target of `Person.employer` the surface
   // never names, is not — the union narrows to what the surface names, as on
@@ -453,7 +453,7 @@ describe("a declared surface on `collection` / `polymorphic` derives their union
   );
 });
 
-describe("a depth-2 include path answered over HTTP (#320)", () => {
+describe("a depth-2 include path answered over HTTP", () => {
   const Api = HttpApi.make("includeDepthIncluded").add(
     Group.make(
       Article,
@@ -485,8 +485,8 @@ describe("a depth-2 include path answered over HTTP (#320)", () => {
   });
 
   // The handlers return the depth-2 `people` resource the path brings in: a
-  // compile error before #320, and a 500 when forced. They project the
-  // requested fieldsets, which the default document admits (#322).
+  // compile error before, and a 500 when forced. They project the
+  // requested fieldsets, which the default document admits.
   const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     handlers
       .handle("get", ({ query }) =>
@@ -506,8 +506,8 @@ describe("a depth-2 include path answered over HTTP (#320)", () => {
         ),
       ),
   );
-  // `fields[people]=name` omits `email` (§Sparse Fieldsets, #322) and, a
-  // relationship being a field too, `employer` (#494).
+  // `fields[people]=name` omits `email` (§Sparse Fieldsets) and, a
+  // relationship being a field too, `employer`.
   const { relationships: _employer, ...unrelatedPerson } = wire.people;
   const projectedPerson = { ...unrelatedPerson, attributes: { name: "Ada" } };
 

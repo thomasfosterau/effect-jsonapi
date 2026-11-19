@@ -47,7 +47,7 @@ class Boom extends Schema.TaggedError<Boom, { readonly brand: unique symbol }>()
 // related — website's `bibliographies` family.
 // ---------------------------------------------------------------------------
 
-// A cycle needs the explicit annotation the README's "Mutually recursive
+// A cycle needs the explicit annotation docs/resources.md's "Mutually recursive
 // resources" section describes: one interface per resource, naming the
 // relationship record.
 const bibliographyAttributes = { title: Schema.NonEmptyString, note: Schema.String };
@@ -206,7 +206,7 @@ describe("2. Handlers.resolveIncluded replaces planIncludes / include-targets", 
         maxDepth: 3,
       }).pipe(Effect.flip);
       expect(rejected).toBeInstanceOf(ApiError.UnsupportedIncludePath);
-      // the 400 carries the whole legal set — website #1623's `allowed`
+      // the 400 carries the whole legal set — website the `allowed`
       expect(ApiError.toDocument(rejected).errors[0]?.meta).toEqual({
         path: "entries.nope",
         includablePaths: ["entries", "entries.bibliography"],

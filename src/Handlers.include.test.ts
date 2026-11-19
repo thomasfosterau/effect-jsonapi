@@ -133,15 +133,13 @@ describe("Handlers.resolveIncluded — nothing requested", () => {
     }),
   );
 
-  it.effect(
-    "resolves to [] for `?include=` with no paths: the request carried `include` (#232)",
-    () =>
-      Effect.gen(function* () {
-        const db = store(graph);
-        expect(yield* resolveSome(article1, [], db.targets("people"))).toEqual([]);
-        // nothing to walk, so nothing loaded
-        expect(db.calls).toEqual([]);
-      }),
+  it.effect("resolves to [] for `?include=` with no paths: the request carried `include`", () =>
+    Effect.gen(function* () {
+      const db = store(graph);
+      expect(yield* resolveSome(article1, [], db.targets("people"))).toEqual([]);
+      // nothing to walk, so nothing loaded
+      expect(db.calls).toEqual([]);
+    }),
   );
 
   it.effect("resolves to [] — not None — when the walk ran and came back empty", () =>
@@ -738,7 +736,7 @@ describe("Handlers.resolveIncluded — composing a document", () => {
   );
 
   // The by-construction guarantee covers the resolver's output, not what a
-  // transform makes of it: the check runs on the emitted resources (#152).
+  // transform makes of it: the check runs on the emitted resources.
   it.effect("keeps the linkage check live: a transform that strips `relationships` is caught", () =>
     Effect.gen(function* () {
       const db = store(graph);
@@ -796,7 +794,7 @@ describe("Handlers.resolveIncluded — composing a document", () => {
     }),
   );
 
-  it.effect("keeps an empty `included` when the walk resolved to nothing (#232)", () =>
+  it.effect("keeps an empty `included` when the walk resolved to nothing", () =>
     Effect.gen(function* () {
       // §Fetching Includes: a request carrying `include` gets a compound
       // document with an `included` key, even an empty one. `[]` from the walk

@@ -183,7 +183,7 @@ describe("Resource.createPayload", () => {
     expect(decoded.data.lid).toBe("temp-1");
   });
 
-  it("rejects a payload with a client-generated id at /data/id, rather than dropping it (#450)", () => {
+  it("rejects a payload with a client-generated id at /data/id, rather than dropping it", () => {
     const result = Schema.decodeUnknownResult(Article.createPayload)({
       data: {
         type: "articles",
@@ -1226,7 +1226,7 @@ describe("Resource.extend inheritId (subtype ids)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// extend with a custom id: the subtype carries the consumer's own brand (#49)
+// extend with a custom id: the subtype carries the consumer's own brand
 // ---------------------------------------------------------------------------
 
 describe("Resource.extend custom id injection", () => {
@@ -1398,7 +1398,7 @@ describe("Resource.readOnlyAttribute", () => {
       },
     });
     expect(decoded.data.attributes).toEqual({ title: "Hello" });
-    // a stray read-only attribute on the wire is rejected at its path (#292)
+    // a stray read-only attribute on the wire is rejected at its path
     const stray = Schema.decodeUnknownResult(Post.createPayload)({
       data: {
         type: "posts",
@@ -1738,7 +1738,7 @@ describe("Resource.attribute with resource: false (input-only)", () => {
 
     const input = Schema.decodeSync(Upload.updateInput)({ id: "1", secret: "t" });
     expect(input).toEqual({ id: "1", secret: "t" });
-    // `file` on the wire is rejected at its path (#292)
+    // `file` on the wire is rejected at its path
     expect(
       issuesOf(Schema.decodeUnknownResult(Upload.updateInput)({ id: "1", file: bytes })),
     ).toEqual([{ path: ["file"], message: "Expected no excess property" }]);
@@ -2019,7 +2019,7 @@ describe("Resource.attribute `resource` option", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Resource-level annotations (#113)
+// Resource-level annotations
 // ---------------------------------------------------------------------------
 
 describe("Resource.annotate / Resource.annotations", () => {
@@ -2183,7 +2183,7 @@ describe("Resource.annotate / Resource.annotations", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Attribute introspection (#113)
+// Attribute introspection
 // ---------------------------------------------------------------------------
 
 describe("Resource.attributeDescriptors", () => {
@@ -2289,7 +2289,7 @@ describe("Resource.attributeDescriptors", () => {
   });
 });
 
-// JSON:API 1.1 §Fields (#503). The definitions are widened to `string`-keyed
+// JSON:API 1.1 §Fields. The definitions are widened to `string`-keyed
 // records so the compile-time half of the check (asserted in
 // `test/reserved-field-names.types.ts`) steps aside and the throw is reached.
 describe("field names", () => {

@@ -1,6 +1,5 @@
 /**
- * Type-level tests for the "absent" sentinel of the generic option parameters
- * (#533, `effect/prefer-option-over-null`, 2 of 6): an option a caller leaves
+ * Type-level tests for the "absent" sentinel of the generic option parameters: an option a caller leaves
  * out defaults its type parameter to `never`, which the type machinery tests
  * with `[X] extends [never]`. Spelled `undefined` before.
  *

@@ -111,7 +111,7 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
   const item = Schema.Struct({
     // The sortable set rides on the literal schema as the `sort` vocabulary,
     // so the 400 for an unknown field carries `meta.sortableFields` (see
-    // `errorMeta`), and an empty set makes `sort` unsupported (#282). An
+    // `errorMeta`), and an empty set makes `sort` unsupported. An
     // empty set's rejection says so rather than "Expected never".
     field: Schema.Literals(fields).annotate(
       vocabularyAnnotations(

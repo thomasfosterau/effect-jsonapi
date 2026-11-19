@@ -80,7 +80,7 @@ describe("acceptIsAcceptable", () => {
     expect(acceptIsAcceptable(`${MEDIA_TYPE};q=1.0`)).toBe(true);
   });
 
-  // #245: a q outside the RFC 9110 qvalue grammar is the default weight, as
+  // A q outside the RFC 9110 qvalue grammar is the default weight, as
   // in `Negotiation` — never a refusal, so never a 406 on its own.
   it.each(["abc", "", "0x0", "-1", "-0", "1e-9", "2", "1.0001", ".5", '"0"'])(
     "treats q=%s, outside the RFC 9110 qvalue grammar, as the default weight — acceptable",
@@ -146,7 +146,7 @@ describe("Middleware.negotiate", () => {
     expect(NotAcceptable.status).toBe(406);
   });
 
-  it("admits a malformed q (#245) but still 406s a well-formed q=0", () => {
+  it("admits a malformed q but still 406s a well-formed q=0", () => {
     expect(negotiate({ accept: `${MEDIA_TYPE};q=abc` })).toEqual(Option.none());
     expect(negotiate({ accept: `${MEDIA_TYPE};q=2` })).toEqual(Option.none());
     expect(verdict({ accept: `${MEDIA_TYPE};q=0` })).toBeInstanceOf(NotAcceptable);
@@ -416,7 +416,7 @@ const requestTraced = async (
   return { status: response.status, body: await response.json(), spans };
 };
 
-describe("Middleware.layer and a malformed Accept weight (#245)", () => {
+describe("Middleware.layer and a malformed Accept weight", () => {
   const url = "http://localhost/articles/1";
 
   it.each(["", "abc", "2", "-1", ".5"])("answers 200 to a lone range weighted q=%s", async (q) => {
@@ -488,7 +488,7 @@ describe("Middleware.layerHostNegotiated", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tracing (#122): the negotiate and schemaError spans
+// Tracing: the negotiate and schemaError spans
 // ---------------------------------------------------------------------------
 
 describe("tracing", () => {
@@ -560,7 +560,7 @@ describe("tracing", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Response-side schema failures are server bugs, not client 400s (#208)
+// Response-side schema failures are server bugs, not client 400s
 // ---------------------------------------------------------------------------
 
 describe("SchemaErrorsLive and response encoding", () => {

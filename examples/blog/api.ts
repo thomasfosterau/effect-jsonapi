@@ -119,7 +119,7 @@ export const articles = Group.make(
   // identifiers, paginated, and (with `?include=`) the comments on the page and
   // their authors: the spec's own example. `comments` is paginated, so it is
   // no include path of the article, but on its own relationship endpoint its
-  // name and the paths rooted at it are legal (#483).
+  // name and the paths rooted at it are legal.
   Endpoint.getRelationship(Article, "comments", {
     page: Pagination,
     include: true,

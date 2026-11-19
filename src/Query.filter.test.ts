@@ -58,7 +58,7 @@ const Article = Resource("articles", {
 });
 
 // Field names a plain-object lookup would find on `Object.prototype`: each
-// must read as undeclared (#260), as `Resource.filterable` is a plain object.
+// must read as undeclared, as `Resource.filterable` is a plain object.
 const inherited = ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"] as const;
 
 const fields = filterable(Article);
@@ -1061,7 +1061,7 @@ describe(`Query.Filter: generated round trips (seed ${SEED}, ${CASES} cases)`, (
 });
 
 // ---------------------------------------------------------------------------
-// The canonical query string over the grammar (#85)
+// The canonical query string over the grammar
 // ---------------------------------------------------------------------------
 
 const CANONICAL_SEED = 20260985;
@@ -1316,8 +1316,8 @@ describe("Query.schema with filter: true", () => {
   });
 
   // The decode splits the flat record into the filter keys and the rest
-  // before either is read (#275); a key named after an `Object.prototype`
-  // member must land on its own side as an ordinary name (#260, #264).
+  // before either is read; a key named after an `Object.prototype`
+  // member must land on its own side as an ordinary name.
   it.each(inherited)(
     "routes filter[%s] to the grammar and a bare key of that name nowhere",
     (name) => {

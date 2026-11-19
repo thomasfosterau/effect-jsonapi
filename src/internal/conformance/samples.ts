@@ -1,6 +1,6 @@
 /**
  * The fixture's sample reads: the `/:type/:id` URL each `ids` sample resolves
- * a read endpoint to, and the status that URL answered in the run (#319).
+ * a read endpoint to, and the status that URL answered in the run.
  *
  * A sample that names a resource the server does not hold fails no rule, yet
  * every rule that reads it sees less of the api than the run suggests. The

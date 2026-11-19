@@ -1,6 +1,6 @@
 /**
  * A typed `Client.make` consumer, compiled against the lowest `effect` the
- * peer range admits (#586). On effect 4.0.x the `~Success` of a
+ * peer range admits. On effect 4.0.x the `~Success` of a
  * `Group.resource` endpoint resolves to `any`, so every response type is lost
  * without an error at the call site; the assertions below turn that silent
  * loss into a compile error. Never executed.

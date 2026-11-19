@@ -949,8 +949,8 @@ const selected = (options: Options): ReadonlyArray<Core.RuleImpl> => {
   const tiers = options.tiers;
   const only = options.only;
   const skip = options.skip ?? [];
-  // By segment: a prefix is the id itself, or the id continues it with `/`
-  // (#367), so `spec/status/create-location` never reaches
+  // By segment: a prefix is the id itself, or the id continues it with `/`,
+  // so `spec/status/create-location` never reaches
   // `spec/status/create-location-matches-self`.
   const matches = (prefixes: ReadonlyArray<string>, id: string): boolean =>
     prefixes.some(

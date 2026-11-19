@@ -24,13 +24,13 @@ import { BlogLive, discardArticle } from "../handlers.js";
 /**
  * The rules this example is known to break, each with the issue tracking it.
  * Remove an entry when its issue is fixed; the test will tell you to. The read
- * rules have been clean since #169: the handlers of the reads that declare
- * `fields` (`GET /articles/:id`, `/search` and, since #485,
+ * rules have been clean: the handlers of the reads that declare
+ * `fields` (`GET /articles/:id`, `/search` and,
  * `GET /articles/:id/relationships/tags`) project `?fields[TYPE]=` with
  * `onResource: Handlers.project(query.fields)` and stamp `jsonapi:
  * Document.v1_1` on every `Handlers.data` / `collection` / `linkage` document
- * (the `Atomic.results` answer carries none). The write rules have been clean
- * since #428, which answers a resource object of another `type` with 409, and
+ * (the `Atomic.results` answer carries none). The write rules have been clean,
+ * which answers a resource object of another `type` with 409, and
  * #450, which answers a client-generated id `Endpoint.create` does not
  * support with 403 — as #464 does one on an atomic `add`.
  */
@@ -55,7 +55,7 @@ const WRITES: Conformance.Options["writes"] = {
     }),
     update: () => ({ attributes: { title: `conformance probe ${++sequence} (updated)` } }),
     cleanup: discardArticle,
-    // The blog mints its own ids, so a client-generated one must be refused (#450).
+    // The blog mints its own ids, so a client-generated one must be refused.
     clientId: { supported: false, id: () => `conformance-client-${++sequence}` },
   },
 };
@@ -70,7 +70,7 @@ const IDS = { articles: "1", comments: "5", people: "9" };
 /**
  * The rules that died in a run, each as `id: message`. A rule that dies — a
  * defect in the kit or its transport, not a finding about this example — is an
- * `Errored` outcome rather than a failed run (#246), so nothing that filters
+ * `Errored` outcome rather than a failed run, so nothing that filters
  * for `Failed` sees it; every run here is checked with this.
  */
 const died = (run: Conformance.Report): ReadonlyArray<string> =>
@@ -106,8 +106,8 @@ layer(RunLive)("blog: JSON:API conformance", (it) => {
     Effect.gen(function* () {
       const report = yield* Run;
       // An `ids` entry the example does not hold fails no rule: its `/:type/:id`
-      // read answers 404, and every rule that resolves it sees less of the api
-      // (#301). `report.samples` records each such read with its status (#319).
+      // read answers 404, and every rule that resolves it sees less of the api.
+      // `report.samples` records each such read with its status.
       // Keyed by type, so a sample that did not resolve shows up under its type.
       expect(
         R.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
@@ -165,7 +165,7 @@ layer(RunLive)("blog: JSON:API conformance", (it) => {
     () =>
       Effect.gen(function* () {
         const report = yield* Run;
-        // #488: `?fields[TYPE]=` asks for no fields, not every field, and
+        // `?fields[TYPE]=` asks for no fields, not every field, and
         // `Handlers.project` answers it with no attributes.
         const ids = [
           "spec/query/sparse-fieldsets-primary",
@@ -181,7 +181,7 @@ layer(RunLive)("blog: JSON:API conformance", (it) => {
   it.effect("follows every relationship's and document's `self` link to a verdict", () =>
     Effect.gen(function* () {
       const report = yield* Run;
-      // #309: the relationship `self` link `Handlers.paginatedRelationship`
+      // The relationship `self` link `Handlers.paginatedRelationship`
       // writes for an article's comments is served by a declared
       // `Endpoint.getRelationship`, so both MUSTs pass rather than skip. That
       // relationship is links-only, so the relationship SHOULD has no linkage to
@@ -209,14 +209,14 @@ layer(RunLive)("blog: JSON:API conformance", (it) => {
   it.effect("judges the compound relationship document by the compound-document rules", () =>
     Effect.gen(function* () {
       const report = yield* Run;
-      // #439: `GET /articles/:id/relationships/tags` declares `include`, so the
+      // `GET /articles/:id/relationships/tags` declares `include`, so the
       // kit's compound probe asks it for `?include=tags`. Its primary data is
       // the tag identifiers and its `included` the tags they name: full linkage
       // starts from those identifiers, and a tag in both is no duplicate.
-      // #483: `GET /articles/:id/relationships/comments`, paginated, declares
+      // `GET /articles/:id/relationships/comments`, paginated, declares
       // `include` too, so it is asked for `?include=comments` and answers the
       // comments on its page.
-      // #485: it declares `fields` too, so the `included` variant of the
+      // It declares `fields` too, so the `included` variant of the
       // sparse-fieldset rule asks it for `?include=tags&fields[tags]=name`.
       const ids = [
         "spec/document/full-linkage",
@@ -235,18 +235,18 @@ layer(RunLive)("blog: JSON:API conformance", (it) => {
       const report = yield* Run;
       const writeRules = [
         "spec/status/create-response-document",
-        // #236: the 201 carries `Location`, copied from the created resource's
+        // The 201 carries `Location`, copied from the created resource's
         // own `links.self`, so the two match.
         "spec/status/create-location",
         "spec/status/create-location-matches-self",
         "spec/status/update-response",
         "spec/status/delete-response",
-        // #237: what each create and update answered reads back through the
+        // What each create and update answered reads back through the
         // resource's own GET.
         "spec/status/create-read-back",
         "spec/status/update-read-back",
         "spec/atomic/response-ext-parameter",
-        // #164: processing, judged by what the blog stored afterwards. The
+        // Processing, judged by what the blog stored afterwards. The
         // blog's operations endpoint takes articles and comments, and the one
         // fixture here, `articles`, links only to a person, which no fixture
         // creates, so `lid-resolution` runs its update probe rather than its
@@ -257,22 +257,22 @@ layer(RunLive)("blog: JSON:API conformance", (it) => {
         "spec/atomic/all-or-nothing",
         "spec/atomic/lid-resolution",
         "spec/atomic/results-order",
-        // #471: an `add` under the fixture's client id, which the blog does not
-        // support, answered 403 naming `/atomic:operations/0/data/id` (#464).
+        // An `add` under the fixture's client id, which the blog does not
+        // support, answered 403 naming `/atomic:operations/0/data/id`.
         "spec/atomic/add-client-id-unsupported",
-        // #429: a created article's `comments` linked to the `ids` comment and
+        // A created article's `comments` linked to the `ids` comment and
         // unlinked again, each read back through
         // `GET /articles/:id/relationships/comments`. The `author` PATCH has no
         // relationship GET to read back through, so `update-replaces` skips.
         "spec/relationships/add-appends",
         "spec/relationships/remove-deletes",
-        // #451: what each of those writes, and the `author` PATCH, answered —
+        // What each of those writes, and the `author` PATCH, answered —
         // the PATCH's 200 linkage judged by what it replaced the linkage with.
         "spec/relationships/write-response",
-        // #461: the `author` PATCH and `comments` POST answer 404 for a resource
+        // The `author` PATCH and `comments` POST answer 404 for a resource
         // that does not exist.
         "spec/relationships/absent-related-404",
-        // #477: a `comments` DELETE, and an atomic `remove` from a created
+        // A `comments` DELETE, and an atomic `remove` from a created
         // article's `comments`, naming a comment that does not exist succeed —
         // it is already missing from the relationship.
         "spec/relationships/remove-absent-succeeds",

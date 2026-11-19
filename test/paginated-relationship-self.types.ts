@@ -1,6 +1,6 @@
 /**
- * Type-level tests for `Handlers.paginatedRelationship`'s `self` option
- * (issue #381): omitted or a string, the value's `links.self` is a `string`,
+ * Type-level tests for `Handlers.paginatedRelationship`'s `self` option:
+ * omitted or a string, the value's `links.self` is a `string`,
  * exactly as before the option existed; `false`, the value has no `self`
  * member; anything else is rejected.
  *
@@ -26,7 +26,7 @@ const Person = Resource.make("people", {
 
 const byDefault = Handlers.paginatedRelationship("people", "9", "articles");
 const defaultSelf: string = byDefault.links.self;
-// An explicit `undefined` is not "omitted" (#533): leave the key out instead.
+// An explicit `undefined` is not "omitted": leave the key out instead.
 // @ts-expect-error `self` takes a string or `false`, not `undefined`
 export const explicitUndefined = Handlers.paginatedRelationship("people", "9", "articles", {
   self: undefined,

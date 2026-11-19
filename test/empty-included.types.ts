@@ -1,6 +1,6 @@
 /**
  * Type-level tests for the `included` member of the `Handlers` document
- * builders' return type (#232).
+ * builders' return type.
  *
  * `Handlers.data(r, { included: [] })` emits `included: []` on the wire, so the
  * return type must let a caller read `.included` back, even though a literal

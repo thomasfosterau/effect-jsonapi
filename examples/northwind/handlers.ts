@@ -521,7 +521,7 @@ const loadOrder = (id: string): Effect.Effect<Order, OrderNotFound> => {
 // `{ [key]: value }` when `value` is `Some`, and no member at all when it is
 // `None`: spread it to leave an absent option out, as
 // `exactOptionalPropertyTypes` requires (the `Option` form of the helper the
-// migration guide, #620, gives the apps to copy).
+// migration guide gives the apps to copy).
 type SomeMember<K extends string, A> = { readonly [Prop in K]?: A };
 const someMember = <const K extends string, A>(
   key: K,

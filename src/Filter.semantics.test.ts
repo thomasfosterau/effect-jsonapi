@@ -23,7 +23,7 @@ import {
 // really follow from them.
 //
 // Kept deliberately as the specification-coherence check, and not superseded
-// by the conformance kit (#161): it imports the kit's own fold
+// by the conformance kit: it imports the kit's own fold
 // (`src/internal/conformance/semantics.ts`) rather than keeping a copy, so the
 // tables checked here are the very ones `profile/filter/evaluation` runs
 // against a server. That rule is what executes §6 against an implementation;

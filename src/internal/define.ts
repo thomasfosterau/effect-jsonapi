@@ -32,7 +32,7 @@ export const define = <V>(record: Record<string, V>, key: string, value: V): voi
  * member of every resource: only `__proto__` is defined, as effect's own
  * `Record.assignProperty` does, since on a plain object it is the one name
  * whose assignment runs an inherited accessor. Every other key is plainly
- * assigned, which is what keeps those copies as fast as before #269's fix.
+ * assigned, which is what keeps those copies as fast as before's fix.
  *
  * Known limitation, as before that fix: once `Object.prototype` is frozen its
  * members are read-only, so assigning a key such as `toString` or

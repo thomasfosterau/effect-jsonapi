@@ -24,8 +24,8 @@ const orphans = (document: Parameters<typeof unlinkedIncluded>[0]) =>
   );
 
 describe("unlinkedIncluded (spec/document/full-linkage)", () => {
-  it("reports a cycle of members the primary data no longer links to (#239)", () => {
-    // The #239 reproduction: `articles:1`'s relationships stripped, so the
+  it("reports a cycle of members the primary data no longer links to", () => {
+    // The reproduction: `articles:1`'s relationships stripped, so the
     // `people:9` ⇄ `articles:2` cycle links only to itself.
     const included = [
       { ...ref("people", "9"), relationships: { articles: one([ref("articles", "2")]) } },
@@ -61,7 +61,7 @@ describe("unlinkedIncluded (spec/document/full-linkage)", () => {
     expect(orphans({ data: primary, included: [ref("articles", "1")] })).toEqual(["articles:1"]);
   });
 
-  describe("when the primary data is resource linkage (#423)", () => {
+  describe("when the primary data is resource linkage", () => {
     // `GET /articles/1/relationships/comments?include=comments,comments.author`:
     // the primary identifiers are where the walk starts.
     const comment = (id: string, author: string) => ({
@@ -185,8 +185,8 @@ describe("unlinkedIncluded (spec/document/full-linkage)", () => {
   });
 
   // §Compound Documents: full linkage is waived "when relationship fields that
-  // would otherwise contain linkage data are excluded due to sparse fieldsets"
-  // (#494). The wire cannot show what the excluded relationship linked.
+  // would otherwise contain linkage data are excluded due to sparse fieldsets".
+  // The wire cannot show what the excluded relationship linked.
   describe("the sparse-fieldset exemption", () => {
     const person = ref("people", "9");
     const comment = { ...ref("comments", "5"), relationships: { author: one(person) } };

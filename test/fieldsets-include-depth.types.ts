@@ -1,12 +1,12 @@
 /**
- * Type-level tests for the sparse fieldsets `fields: true` declares (#311).
+ * Type-level tests for the sparse fieldsets `fields: true` declares.
  *
  * `fields: true` declares a `fields[TYPE]` for every type the response can
  * carry: the resource, its non-`paginated` direct relationship targets
  * (unless `include` is a declared `Include.Surface`) and, when `include` is
  * on, every type a legal include path reaches. A type reachable only through
  * a `paginated` relationship, or a direct target a surface leaves out, is not
- * declared (owner decision on #311, 0.17.0). The runtime half is
+ * declared. The runtime half is
  * `src/Query.fieldsets.test.ts`, whose `expectFieldsets` also checks each
  * runtime key set against the type's; this file
  * pins the decoded `fields` struct and the flat `fields[TYPE]` keys, so that a

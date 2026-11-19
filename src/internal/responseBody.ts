@@ -4,8 +4,8 @@
  * Three middlewares look at the bytes an endpoint produced rather than at the
  * value its handler returned: `Idempotency.layer` records them for replay,
  * `Middleware.CreatedLocationLive` derives a 201's `Location` from the
- * document's `self` link (#236), and `Middleware.SchemaErrorsLive` re-checks
- * full linkage on the document as encoded (#250). All need the same answer to
+ * document's `self` link, and `Middleware.SchemaErrorsLive` re-checks
+ * full linkage on the document as encoded. All need the same answer to
  * "what text is this body", and all must treat a body they cannot read as
  * "leave it alone".
  */
@@ -123,7 +123,7 @@ const label = (member: Schema.JsonObject): string =>
  * a relationship the resource does not declare, so a member linked only
  * through one is reported here although the builders' check passed it.
  * `fields` is the request's sparse fieldsets, which carry the spec's
- * exemption (`Linkage.unlinkedIncluded`, #494).
+ * exemption (`Linkage.unlinkedIncluded`).
  */
 export const unlinkedOnWire = (
   response: HttpServerResponse.HttpServerResponse,

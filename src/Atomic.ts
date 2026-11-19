@@ -24,7 +24,7 @@
  * managed through their relationship operations instead. And like
  * `createPayload`, an `add` declares no `id`: a client-generated `data.id` is
  * rejected, and `Middleware.SchemaErrorsLive` answers the request with 403
- * Forbidden naming `/atomic:operations/N/data/id` (#464).
+ * Forbidden naming `/atomic:operations/N/data/id`.
  *
  * {@link operationsFor} returns this set as a named, introspectable record of
  * schemas; {@link Operations} / {@link RequestDocument} build the request
@@ -343,8 +343,8 @@ export type UpdateRelationshipFields<Rels extends Relationships> = {
   ]: Schema.optionalKey<RefSchemaFor<Rels[K]>>;
 };
 
-// How many undeclared members each operation member reports at its own path
-// (#308): the resource's own cap, which every definition `Resource.make` builds
+// How many undeclared members each operation member reports at its own path:
+// the resource's own cap, which every definition `Resource.make` builds
 // carries, or the default for a hand-rolled `Any` that carries none. A
 // hand-rolled `Any`'s cap was never through `Resource.make`'s validation, so it
 // is validated here by the same rule, and a bad one throws when the operation
@@ -391,7 +391,7 @@ const updateRelationshipFields = (relationships: Relationships, cap: number): Sc
  * present, `paginated` relationships are excluded). A client-generated
  * `data.id` is rejected rather than dropped, which
  * `Middleware.SchemaErrorsLive` answers with 403 Forbidden naming
- * `/atomic:operations/N/data/id` (#464).
+ * `/atomic:operations/N/data/id`.
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-creating-resources}
  * @since 0.1.0
@@ -428,7 +428,7 @@ export const AddOperation = <Res extends Any>(resource: Res): AddOperation<Res> 
     op: Schema.tag("add"),
     // A `data.id` is a client-generated id, which this operation does not
     // support: rejected at `data/id` rather than dropped, and answered 403 by
-    // `Middleware.SchemaErrorsLive` (#464).
+    // `Middleware.SchemaErrorsLive`.
     data: refusingClientId(
       Schema.Struct({
         type: Schema.tag(resource.type),

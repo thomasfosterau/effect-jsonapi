@@ -1,6 +1,6 @@
 /**
  * Type-level tests for the partial default document of a read endpoint that
- * declares `fields` (#322).
+ * declares `fields`.
  *
  * Its resource objects — primary and `included` alike, over exactly the types
  * `Query.FieldsetResources` names — admit any subset of their attributes, so
@@ -110,7 +110,7 @@ assertType<
     { readonly name?: string; readonly email?: string }
   >
 >(true);
-// Every relationship is optional too: a relationship is a field (#494).
+// Every relationship is optional too: a relationship is a field.
 assertType<
   Equals<
     NonNullable<DataOf<typeof get>["relationships"]>,
@@ -122,7 +122,7 @@ assertType<Equals<DataOf<typeof get>["id"], typeof Article.Type.id>>(true);
 assertType<Equals<DataOf<typeof get>["links"], typeof Article.Type.links>>(true);
 assertType<Equals<IncludedOf<typeof get>["type"], "people" | "tags" | "companies">>(true);
 
-// A fieldset names attributes and relationships alike (#494), and nothing else:
+// A fieldset names attributes and relationships alike, and nothing else:
 // not `type` or `id`, which share the namespace but are no fields.
 type FieldsetsOf<E> = HttpApiEndpoint.Query<E>["Type"] extends { readonly fields?: infer F }
   ? NonNullable<F>
@@ -188,7 +188,7 @@ export const node = Endpoint.polymorphic(AnyNode, { fields: true });
 assertType<Equals<AttributesOf<DataOf<typeof node>>, { readonly name?: string }>>(true);
 assertType<SuccessOf<typeof node>>(Handlers.data(editor, { onResource: project }));
 
-// A type one member reaches only through a paginated relationship (#320):
+// A type one member reaches only through a paginated relationship:
 // `posts.author` is a to-one `people`, `drafts.author` a paginated
 // `revisions`, which no include path may cross. `revisions` is no
 // `fields[TYPE]` type, so it is neither partial nor an `included` member.
@@ -216,7 +216,7 @@ assertType<
 assertType<Equals<AttributesOf<DataOf<typeof entries>>, { readonly title?: string }>>(true);
 
 // A family reached as a relationship target is carried in `included` as its
-// members, each partial under its own type (#350): pinned in
+// members, each partial under its own type: pinned in
 // `test/family-member-fieldsets.types.ts`.
 
 // `Endpoint.resource` / `Group.resource` default `fields` to `true`.
@@ -263,7 +263,7 @@ export const hatchIncluded = Endpoint.get(Article, {
 assertType<Equals<IncludedOf<typeof hatchIncluded>["type"], "people" | "tags">>(true);
 assertType<Equals<IncludedOf<typeof strict>["type"], "people" | "tags" | "companies">>(true);
 assertType<Equals<NonNullable<SuccessOf<typeof hatchIncluded>["meta"]>, typeof Total.Type>>(false);
-// So the override reproduces the union and the `meta` (#342): strict
+// So the override reproduces the union and the `meta`: strict
 // attributes, and the document the strict default with `include` would bind.
 export const hatchUnion = Endpoint.get(Article, {
   include: true,
@@ -293,7 +293,7 @@ assertType<SameSuccess<typeof plainList, typeof list>>(false);
 // `related`, `collection` and `polymorphic` take no `success` override, so
 // their strict documents are pinned through what a client decodes. These pins
 // stand in for a declaration-emit comparison, which a consumer cannot make
-// for an exported endpoint (TS4023, #348).
+// for an exported endpoint (TS4023).
 type StrictPerson = { readonly name: string; readonly email: string };
 export const plainAuthor = Endpoint.related(Article, "author");
 assertType<Equals<AttributesOf<Exclude<DataOf<typeof plainAuthor>, null>>, StrictPerson>>(true);

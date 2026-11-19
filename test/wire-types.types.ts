@@ -1,6 +1,5 @@
 /**
- * Type-level tests for the wire shapes spelled from their schemas (#533, PR 5
- * of the `prefer-option-over-null` series): each exported wire type is
+ * Type-level tests for the wire shapes spelled from their schemas: each exported wire type is
  * `Equals` to what a schema for that wire member decodes, built here
  * independently of the module's own spelling — so the respelling kept the
  * type identical (`null` stays on the wire, a JSON:API-optional member stays a

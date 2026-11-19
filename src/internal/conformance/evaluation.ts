@@ -1,7 +1,7 @@
 /**
  * The filter profile's evaluation rule: what a filtered collection must hold,
  * judged by the kit's own oracle (`./semantics.ts`) over the collection the
- * server serves unfiltered (#161).
+ * server serves unfiltered.
  *
  * No fixture is needed, because the unfiltered collection is the known set:
  * `docs/filter-grammar.md` §6.1 F-EVAL-4 reads `value(resource, field)` from
@@ -19,12 +19,12 @@
  * `gte` in the domain of the field's JSON type (F-CMP-2, F-ORD-1), `nin` over
  * NULL (F-IN-2 / F-IN-3), `isnull` (F-ISNULL-1 / F-ISNULL-2), excluded middle
  * (F-CONS-1) — plus the empty groups (F-AND-2), which need no field at all.
- * Beside them (#433): the ordering operators on an attribute the sample never
+ * Beside them: the ordering operators on an attribute the sample never
  * shows NULL, with a pivot that splits it (F-CMP-2, F-ORD-1) and `isnull=true`
  * as the constant F-ISNULL-4 makes it; a to-one relationship field, valued by
  * the related id its linkage shows (F-EVAL-4, F-ORD-5); and a filter beside a
  * sparse fieldset that leaves the filtered field out (F-EVAL-6). And the §6.5
- * corollaries (#458): De Morgan, `Not(In)` and `Not(Not(x))` as trees of their
+ * corollaries: De Morgan, `Not(In)` and `Not(Not(x))` as trees of their
  * own (F-CONS-2 to F-CONS-4), one of them again in a second spelling of its
  * canonical form (F-CONS-7), a filter beside `include` whose `included` must
  * hold what the matched primary data links to (F-CONS-6), and on every
@@ -1045,7 +1045,7 @@ const sparseProbe =
 /**
  * The F-EVAL-6 family: a fieldset is sent only for the one type the
  * collection serves, and only when the endpoint declares `fields[TYPE]` for it
- * — an undeclared one is a 400 (#261), which would decide nothing.
+ * — an undeclared one is a 400, which would decide nothing.
  */
 const sparseFamily = (
   endpoint: Discovered,

@@ -301,7 +301,7 @@ export const schemaIssueToErrors = (
       code: leaf.issue._tag,
       // A check's own message for the leaves it points at, without the path
       // effect 4.1's default formatter appends (the error carries it as
-      // `source.pointer`, #530).
+      // `source.pointer`).
       detail: Issues.message(leaf),
       ...definedMember("source", pointer === "" ? undefined : { pointer }),
     };
@@ -582,7 +582,7 @@ export interface RespondOptions {
    * application renders a cause the package already maps its own way (an
    * `ApiError.Conflict` with the application's wording, a `NotFound` with
    * its own `code`). `none` hands the cause on to `fromTaggedError`, then
-   * to `materialise` (#565).
+   * to `materialise`.
    *
    * @since 0.21.0
    */

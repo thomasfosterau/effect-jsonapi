@@ -11,10 +11,10 @@ import type { SchemaErrors } from "./Middleware.js";
 import * as Middleware from "./Middleware.js";
 import { platformLayer } from "./Registry.js";
 
-// #316: a body, header or path-parameter schema that renames a key with
+// A body, header or path-parameter schema that renames a key with
 // `Schema.encodeKeys` rejects a value after the rename under its decoded
 // name, which no member, header or parameter of the request carries. The
-// 400's `source` names the key the request sent instead, as #305 does for a
+// 400's `source` names the key the request sent instead, as it does for a
 // query parameter.
 
 // A count the struct-level check below caps, by its decoded name.
@@ -120,7 +120,7 @@ const rejected = (detail: string, source: Record<string, string>) => ({
   },
 });
 
-describe("a 400 for a key renamed on the wire names it as the request sent it (#316)", () => {
+describe("a 400 for a key renamed on the wire names it as the request sent it", () => {
   it("accepts a request that sends every key by its wire name", async () => {
     expect(await post(valid, { "x-trace": "3" })).toEqual({ status: 200, body: "ok" });
   });
@@ -172,7 +172,7 @@ describe("a 400 for a key renamed on the wire names it as the request sent it (#
   });
 });
 
-describe("Middleware.schemaErrorDocument on a renamed body or header (#316)", () => {
+describe("Middleware.schemaErrorDocument on a renamed body or header", () => {
   // The decode failure of a result the test expects to fail.
   const failure = <A>(result: Result.Result<A, Schema.SchemaError>) =>
     Result.match(result, {

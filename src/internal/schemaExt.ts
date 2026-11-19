@@ -1,11 +1,11 @@
 /**
  * Effect Schema helpers with no JSON:API dependency of their own that
- * `@thomasfosterau/effect-ext` does not publish with the same behaviour (#552).
+ * `@thomasfosterau/effect-ext` does not publish with the same behaviour.
  *
  * `suppliedValue` and `pathToJsonPointer` moved to effect-ext's `TriState` and
  * `Issues` subpaths, and `FlatQuery.suppliedValue` / `ServerErrors.pathToJsonPointer`
  * re-export them, and the issue walk behind `ServerErrors.schemaIssueToErrors`
- * is effect-ext's `Issues.leaves` / `Issues.message` since 0.2.0 (#555). What
+ * is effect-ext's `Issues.leaves` / `Issues.message` since 0.2.0. What
  * stays here is `closedStruct`, with its cap helpers: effect-ext has no
  * equivalent. It is used only inside the library's own request-body schemas
  * and the closed identifier of `Endpoint.CommittedDocument`.
@@ -27,7 +27,7 @@ import { declarationError } from "./errors.js";
 
 /**
  * How many undeclared members a closed struct reports at their own paths
- * before it summarises the rest in one issue at the struct (#308).
+ * before it summarises the rest in one issue at the struct.
  */
 export const defaultMaxUndeclaredMemberErrors = 12;
 
@@ -65,7 +65,7 @@ const moreUndeclared = (count: number): string =>
 // issue `onExcessProperty: "error"` reports, so the `SchemaErrors` middleware
 // renders it unchanged ("Expected no excess property"). Any beyond the cap are
 // counted, not reported: one `InvalidValue` at the struct itself says how many
-// more there are (#308), so the issues, and the 400 a server renders from
+// more there are, so the issues, and the 400 a server renders from
 // them, stay bounded however many keys a request sends. The keys are still
 // all read, so the count is exact; only the issues are capped.
 // It reads the enumerable own string keys (`R.keys`), then the enumerable
@@ -142,7 +142,7 @@ const noMembers = (declared: MutableHashSet.MutableHashSet<PropertyKey>, cap: nu
 // `SchemaAST.Objects#getExpected`, which is "object | array" for a struct with
 // no fields ("object" for one with fields). The default formatters read a
 // `message` annotation on that issue's AST before the expected text, so this
-// one renders the `null` the way a struct with fields does (#286). Unlike an
+// one renders the `null` the way a struct with fields does. Unlike an
 // `identifier`, a `message` names no OpenAPI component and is not copied into
 // the JSON Schema, and it changes no parse: only the text of that issue.
 const nullAsObject = { message: "Expected object" } as const;
@@ -172,7 +172,7 @@ const nullAsObject = { message: "Expected object" } as const;
  * What that ordering means for the issues reported:
  * - The first `cap` undeclared members of one struct are reported, each as
  *   its own issue, and the rest by one summary issue at the struct, whatever
- *   the `errors` parse option says (#308). `cap` is a positive integer or
+ *   the `errors` parse option says. `cap` is a positive integer or
  *   `Infinity` (every member reported, the summary never). It is required,
  *   so no write body member can silently fall back to a default its resource
  *   doesn't carry; the caller resolves it ({@link defaultMaxUndeclaredMemberErrors}

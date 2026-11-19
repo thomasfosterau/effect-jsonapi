@@ -283,7 +283,7 @@ assertType<Equals<AdvertisedBy<typeof getArticle>, Paths>>(true);
 assertType<Equals<AdvertisedBy<typeof listArticles>, Paths>>(true);
 
 // Without a surface the document admits every non-`paginated` target and every
-// resource a legal depth-2 path reaches (#320) — `author.company` brings
+// resource a legal depth-2 path reaches — `author.company` brings
 // `Company` in — while `Revision` stays absent.
 export const getByGraph = Endpoint.get(Article, { include: true });
 type GraphIncluded = IncludedOf<typeof getByGraph>;
@@ -379,7 +379,7 @@ assertType<Chain7Untruncated>(true);
 assertType<Chain7Collapsed>(true);
 
 // ---------------------------------------------------------------------------
-// A cyclic resource graph (#118)
+// A cyclic resource graph
 // ---------------------------------------------------------------------------
 
 // The reason this derivation is safe on a cycle: it recurses over the
@@ -467,7 +467,7 @@ export const cyclicPaginated = Include.make(CyclicArticle, { revisions: CyclicAr
 export const cyclicSelfEdge = Include.make(CyclicArticle, { editor: CyclicArticle });
 
 // ---------------------------------------------------------------------------
-// `has` narrows to the whitelist (what #106's resolver validates against)
+// `has` narrows to the whitelist (what the resolver validates against)
 // ---------------------------------------------------------------------------
 
 export const validate = (candidate: string): Option.Option<Paths> =>

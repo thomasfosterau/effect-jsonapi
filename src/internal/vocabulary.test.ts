@@ -3,7 +3,7 @@ import { definesMembers, FAMILIES, isFamilyMember } from "./vocabulary.js";
 
 describe("definesMembers", () => {
   // `fields[TYPE]` per type, `page[KEY]` / `filter[KEY]` per key; `include`
-  // and `sort` are one bare parameter each (#329).
+  // and `sort` are one bare parameter each.
   it("is true for `fields`, `page` and `filter` alone", () => {
     expect(FAMILIES.filter(definesMembers)).toEqual(["fields", "page", "filter"]);
   });

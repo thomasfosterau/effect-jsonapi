@@ -1,6 +1,6 @@
 /**
  * A read endpoint that declares `fields` binds, by default, a document whose
- * resource objects admit any subset of their attributes (#322): the primary
+ * resource objects admit any subset of their attributes: the primary
  * data and every `included` member of a type `?fields[TYPE]=` can name — the
  * set `Query.FieldsetResources` computes.
  *
@@ -57,14 +57,14 @@ const Editor = Resource.extend(Node, "editors", { inheritId: true });
 const Reviewer = Resource.extend(Node, "reviewers", { inheritId: true });
 const AnyNode = Resource.family(Node, [Editor, Reviewer]);
 // A relationship targeting the family: its `included` members are the
-// family's members, each under its own type (#350).
+// family's members, each under its own type.
 const Holder = Resource.make("holders", {
   attributes: { label: Schema.String },
   relationships: { node: Relationship.one(() => AnyNode) },
 });
 // A family nested in another: `outer` is a name-only family over the `nodes`
 // family and `others`, so its wire types are `editors`, `reviewers` and
-// `others` (#350).
+// `others`.
 const Other = Resource.make("others", { attributes: { rank: Schema.String } });
 const Outer = Resource.family("outer", [AnyNode, Other]);
 const Nest = Resource.make("nests", {
@@ -117,7 +117,7 @@ const only = <O extends { readonly attributes: R.ReadonlyRecord<string, unknown>
 });
 
 // A wire resource as `Handlers.project` answers a fieldset naming `names`:
-// the attributes and relationships it names (#494), `relationships` omitted
+// the attributes and relationships it names, `relationships` omitted
 // when it names none of them.
 const projected = <
   O extends {
@@ -159,7 +159,7 @@ const admitsPartial = (
   included: ReadonlyArray<Wire> = [],
 ) => decodes(endpoint, { data: collection ? [primary] : primary, included });
 
-describe("the default document of an endpoint declaring `fields` is partial (#322)", () => {
+describe("the default document of an endpoint declaring `fields` is partial", () => {
   const partialArticle = only(wire.articles, "title");
   const partialPerson = only(wire.people, "name");
 
@@ -174,7 +174,7 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
     expect(admitsPartial(endpoint, wire.articles, many, [wire.people])).toBe(true);
   });
 
-  // A relationship is a field (#494): any subset of them is admitted too, and
+  // A relationship is a field: any subset of them is admitted too, and
   // so is a resource carrying none, as `Handlers.project` answers an empty set.
   it.each([
     ["get", Endpoint.get(Article, { include: true, fields: true }), false],
@@ -279,7 +279,7 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
     expect(admitsPartial(endpoint, draft, false, [wire.companies])).toBe(true);
   });
 
-  describe("a family reached as a relationship target is partial through its members (#350)", () => {
+  describe("a family reached as a relationship target is partial through its members", () => {
     // `holders.node` targets the `nodes` family. `nodes` is a family name,
     // never a wire type: the `included` members are `editors` and
     // `reviewers`, which `fields: true` declares, so they are partial.
@@ -331,7 +331,7 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
     });
   });
 
-  describe("a nested family is partial through its innermost members (#350)", () => {
+  describe("a nested family is partial through its innermost members", () => {
     const nest = only(wire.nests);
     const reviewer = { type: "reviewers", id: "8", attributes: { name: "Rue", note: "second" } };
 
@@ -421,7 +421,7 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
     expect(admits(strict, "author", partialPerson, false)).toEqual([false]);
   });
 
-  describe("a type one member reaches only through a paginated relationship (#320)", () => {
+  describe("a type one member reaches only through a paginated relationship", () => {
     // `posts.author` is a to-one `people`, so `author` is a legal path;
     // `drafts.author` is a paginated `revisions`, which no path may cross. So
     // `revisions` is neither an `included` member nor a `fields[TYPE]` type:
@@ -499,7 +499,7 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
   });
 });
 
-describe("an endpoint without `fields` keeps its document (#322)", () => {
+describe("an endpoint without `fields` keeps its document", () => {
   const partialArticle = only(wire.articles, "title");
 
   it.each([
@@ -570,7 +570,7 @@ describe("an endpoint without `fields` keeps its document (#322)", () => {
   });
 });
 
-describe("a projected answer over HTTP (#322)", () => {
+describe("a projected answer over HTTP", () => {
   const Api = HttpApi.make("sparseDefault")
     .add(
       Group.make(
@@ -708,7 +708,7 @@ describe("a projected answer over HTTP (#322)", () => {
       "/articles/1?fields[articles]=title",
       { data: projected(wire.articles, "title"), included: [wire.people, wire.companies] },
     ],
-    // A relationship is a field (#494): named, it is kept; the others go.
+    // A relationship is a field: named, it is kept; the others go.
     [
       "/articles/1?fields[articles]=title,author",
       {
@@ -747,7 +747,7 @@ describe("a projected answer over HTTP (#322)", () => {
       { data: [projected(wire.articles, "body"), projected(wire.people, "name")] },
     ],
     ["/nodes/7?fields[editors]=note", { data: projected(wire.editors, "note") }],
-    // A family-valued relationship's members are trimmed by their own types (#350).
+    // A family-valued relationship's members are trimmed by their own types.
     [
       "/holders/1?fields[editors]=note",
       { data: wire.holders, included: [projected(wire.editors, "note")] },
@@ -757,8 +757,8 @@ describe("a projected answer over HTTP (#322)", () => {
       { data: projected(wire.holders, "label"), included: [projected(wire.editors, "name")] },
     ],
     ["/holders/1/node?fields[editors]=name", { data: projected(wire.editors, "name") }],
-    // An empty set is "no fields" (#488): no attributes and, a relationship
-    // being a field too (#494), no relationships — the `included` members
+    // An empty set is "no fields": no attributes and, a relationship
+    // being a field too, no relationships — the `included` members
     // they linked are exempt from full linkage (§Compound Documents).
     [
       "/articles/1?fields[articles]=",
@@ -781,7 +781,7 @@ describe("a projected answer over HTTP (#322)", () => {
 
   // A family's name is never a wire type, so `fields[<family name>]` is not
   // declared: like any undeclared type, it is a 400 naming the parameter
-  // (owner decision on #350, the #261 rule) — on a relationship targeting the
+  // — on a relationship targeting the
   // family and on an endpoint whose primary data is the family alike.
   it.each([
     "/holders/1?fields[nodes]=name",

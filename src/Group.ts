@@ -348,7 +348,7 @@ const SHARED_FLAT_OPTIONS = {
 // inferred from `options.include?.included` while `Surface` is still generic,
 // it widened to the constraint's `Schema.Top`, whose `DecodingServices` are
 // `unknown`, so every endpoint's success schema, and a typed client's methods,
-// asked for `unknown` services (#595).
+// asked for `unknown` services.
 type SurfaceIncluded<Surface extends AnySurface> = Surface["included"];
 
 const flatWire = <

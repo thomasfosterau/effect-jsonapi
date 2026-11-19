@@ -7,7 +7,7 @@ import { includePaths, make as Resource } from "./Resource.js";
 import type { IncludePath, Resource as ResourceDefinition } from "./Resource.js";
 
 // ---------------------------------------------------------------------------
-// Mutually-recursive resource definitions (#118)
+// Mutually-recursive resource definitions
 //
 // The runtime graph has always been free to contain cycles — relationship
 // references are thunks. What was missing was the *type*: `Resource.make`'s

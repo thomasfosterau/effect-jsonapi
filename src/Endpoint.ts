@@ -200,7 +200,7 @@ const queryConfig = (options?: {
 // declared `Include.Surface` derives, so the paths the endpoint advertises and
 // the resources its document admits come from one declaration; else, when the
 // `include` option turns the parameter on, every resource its legal paths
-// reach beside the direct targets (#320), so each advertised path can be
+// reach beside the direct targets, so each advertised path can be
 // answered; else the relationship graph's own default.
 type IncludedOf<Res extends Any, Include> = Include extends {
   readonly included: infer U;
@@ -215,9 +215,9 @@ type IncludedOf<Res extends Any, Include> = Include extends {
 /**
  * The `included` union of a read endpoint over `Res` whose `include` option is
  * `true` or a `Query.IncludeOptions`: the direct targets and every resource a
- * legal include path reaches (#320). The default success document of `get`,
+ * legal include path reaches. The default success document of `get`,
  * `list` and `related` carries it, so it is part of their inferred types —
- * and exported so a consumer that emits declarations can name it (#348).
+ * and exported so a consumer that emits declarations can name it.
  *
  * @since 0.17.0
  * @category schemas
@@ -251,7 +251,7 @@ const reachableIncluded = (
 
 // The wire types `?fields[TYPE]=` can name on an endpoint over `Res` with the
 // `include` option `Include`: the types its default document makes partial
-// when it declares `fields` (#322).
+// when it declares `fields`.
 type FieldsetTypes<Res extends Any, Include> = Query.FieldsetResources<Res, Include>["type"];
 
 // The members of a read endpoint's default `included` union (`IncludedOf`): a
@@ -273,7 +273,7 @@ type SparseIncluded<Res extends Any, Include> = SparseUnion<
 // `update`) bind by default — the resource's own `document()` at the effective
 // document `meta`. The default their `success` option replaces. When the
 // endpoint declares `fields` (only `get` can), its resource objects — primary
-// and `included` alike — admit any subset of their fields (#322, #494).
+// and `included` alike — admit any subset of their fields.
 type DefaultDocument<
   Type extends string,
   Attributes extends Schema.Struct.Fields,
@@ -345,7 +345,7 @@ const documentOptions = (
 
 // The default document of `get` (`document()`) or `list` (`collection()`).
 // When the endpoint declares `fields`, the resource and every `included`
-// member whose type a fieldset names become partial (#322); otherwise it is
+// member whose type a fieldset names become partial; otherwise it is
 // the resource's own document, exactly as before.
 const defaultDocument = (
   resource: DocumentSource,
@@ -536,7 +536,7 @@ export const get = <
     /**
      * Enable `?fields[TYPE]=` sparse fieldsets. The default success document
      * then admits any subset of the fields — attributes and relationships
-     * (#494) — of every resource type a fieldset can name, primary and
+     * — of every resource type a fieldset can name, primary and
      * `included` alike, so a handler can answer with
      * `Handlers.project(query.fields)` (§Sparse Fieldsets) — and a client
      * decodes those fields as optional. Pass `fields: false` to keep
@@ -761,7 +761,7 @@ export const list = <
     /**
      * Enable `?fields[TYPE]=` sparse fieldsets. The default success document
      * then admits any subset of the fields — attributes and relationships
-     * (#494) — of every resource type a fieldset can name, primary and
+     * — of every resource type a fieldset can name, primary and
      * `included` alike, so a handler can answer with
      * `Handlers.project(query.fields)` (§Sparse Fieldsets) — and a client
      * decodes those fields as optional. Pass `fields: false` to keep
@@ -1035,7 +1035,7 @@ export const create = <
       // Before `Idempotency.applied`, so inside its middleware: the recorded
       // 201 carries `Location`, and a replay returns it.
       .middleware(CreatedLocation)
-      // `SchemaErrors` answers a `data.type` of another type with 409 (#428).
+      // `SchemaErrors` answers a `data.type` of another type with 409.
       .annotate(ServedTypes, [resource.type]),
     options?.idempotency,
   );
@@ -1192,7 +1192,7 @@ export const update = <
     )
       .middleware(ContentNegotiation)
       .middleware(SchemaErrors)
-      // `SchemaErrors` answers a `data.type` of another type with 409 (#428).
+      // `SchemaErrors` answers a `data.type` of another type with 409.
       .annotate(ServedTypes, [resource.type]),
     options?.idempotency,
   );
@@ -1323,18 +1323,18 @@ export type {
    * targets and, when `I` turns `include` on, every resource a legal include
    * path reaches. The `included` union of a read endpoint that declares
    * `fields` is computed over it, so it is part of that endpoint's inferred
-   * type and exported for declaration emit (#348).
+   * type and exported for declaration emit.
    *
    * @since 0.17.0
    * @category type-level
    */
   IncludedResources,
   /**
-   * The resource object of `Res` with every attribute and relationship optional
-   * (#494): what the default
+   * The resource object of `Res` with every attribute and relationship optional:
+   * what the default
    * success document of a read endpoint that declares `fields` admits for each
-   * resource type a fieldset can name (#322). Part of those endpoints'
-   * inferred types, so exported for declaration emit (#348).
+   * resource type a fieldset can name. Part of those endpoints'
+   * inferred types, so exported for declaration emit.
    *
    * @since 0.17.0
    * @category schemas
@@ -1344,7 +1344,7 @@ export type {
    * A `Schema.Union` of the sparse forms of `Members`: a family's members, or
    * the resources of a heterogeneous endpoint, each a {@link SparseResource}
    * when a fieldset can name its type. Part of the inferred types of
-   * endpoints that declare `fields`, so exported for declaration emit (#348).
+   * endpoints that declare `fields`, so exported for declaration emit.
    *
    * @since 0.17.0
    * @category schemas
@@ -1385,11 +1385,11 @@ export interface CollectionIncluded<Resources extends ReadonlyArray<Any>> extend
 
 // The `included` union of a heterogeneous collection or a polymorphic
 // endpoint: a declared surface's own union, exactly as on `get` / `list` /
-// `related` (#336); else its `Default` union, whose members are
+// `related`; else its `Default` union, whose members are
 // `DefaultMembers` — widened, when the `include` option is `true` or a
 // `Query.IncludeOptions`, by every resource a legal include path reaches from
-// any of `Members` (#320). Distributes over a widened `include`, as
-// `IncludedOf` does (#382): under `include: boolean` it admits what either
+// any of `Members`. Distributes over a widened `include`, as
+// `IncludedOf` does: under `include: boolean` it admits what either
 // value admits, since the endpoint built from that value may have turned
 // `include` on.
 type MembersIncludedOf<
@@ -1411,8 +1411,8 @@ type MembersIncludedOf<
  * The `included` union of a heterogeneous endpoint (`collection`,
  * `polymorphic`) whose `include` option is `true` or a `Query.IncludeOptions`:
  * its default members widened by every resource a legal include path reaches
- * from any of `Members` (#320). Exported, like {@link ReachableIncluded}, so a
- * consumer that emits declarations can name it (#348).
+ * from any of `Members`. Exported, like {@link ReachableIncluded}, so a
+ * consumer that emits declarations can name it.
  *
  * @since 0.17.0
  * @category schemas
@@ -1441,7 +1441,7 @@ type MembersIncludedMembers<
 // The success document of a heterogeneous endpoint (`collection`,
 // `polymorphic`) over `Members`: its `Default` document, or — when the
 // endpoint declares `fields` — the same document with every member of `data`
-// and `included` whose type a fieldset names made partial (#322).
+// and `included` whose type a fieldset names made partial.
 type MembersDocument<
   Kind extends "document" | "collection",
   Members extends Any,
@@ -1610,7 +1610,7 @@ export const collection = <
      * non-`paginated` targets (unless `include` is a declared
      * `Include.Surface`) and every type an `include` path reaches. The
      * document's resource objects of those types then admit any subset of
-     * their fields, attributes and relationships alike (#494), so a handler
+     * their fields, attributes and relationships alike, so a handler
      * can answer with `Handlers.project(query.fields)` — and a client
      * decodes those attributes and relationships as optional.
      */
@@ -1672,7 +1672,7 @@ const polymorphicDocument = (
     readonly meta?: Schema.Top;
   },
 ): Schema.Top => {
-  // A declared surface's own union (#336), else the walk when `include` is on.
+  // A declared surface's own union, else the walk when `include` is on.
   const reachable = isSurface(options?.include)
     ? Option.some(options.include.included)
     : reachableIncluded(family.members, options?.include);
@@ -1754,7 +1754,7 @@ export const polymorphic = <
      * non-`paginated` targets (unless `include` is a declared
      * `Include.Surface`) and every type an `include` path reaches. The
      * document's resource objects of those types then admit any subset of
-     * their fields, attributes and relationships alike (#494), so a handler
+     * their fields, attributes and relationships alike, so a handler
      * can answer with `Handlers.project(query.fields)` — and a client
      * decodes those attributes and relationships as optional.
      */
@@ -1883,7 +1883,7 @@ type ConstructSignature<R> = R extends new (_: never) => infer I ? new (_: never
 /**
  * The resource definition {@link getRelationship} derives its `?include=`
  * paths over: the parent `Res` itself, except that a `paginated` relationship
- * `Name` reads as a `many` (#483). A `paginated` relationship is never an
+ * `Name` reads as a `many`. A `paginated` relationship is never an
  * include path of its parent, because its linkage is never inlined; but on
  * its own relationship endpoint the linkage *is* the primary data, so the
  * resources it names — the current page of them — can be included, and so
@@ -1892,7 +1892,7 @@ type ConstructSignature<R> = R extends new (_: never) => infer I ? new (_: never
  * is read so: a `paginated` relationship further along a path is still never
  * crossed.
  *
- * Exported so a consumer that emits declarations can name it (#348).
+ * Exported so a consumer that emits declarations can name it.
  *
  * @since 0.18.0
  * @category type-level
@@ -1979,7 +1979,7 @@ export type RelationshipIncludePaths<Res extends Any, Name extends string, Inclu
  * The `included` union of a compound relationship document: every resource
  * a legal {@link RelationshipIncludePaths} path reaches from the parent — the
  * relationship's target and every resource further along each path.
- * Exported so a consumer that emits declarations can name it (#348).
+ * Exported so a consumer that emits declarations can name it.
  *
  * @since 0.18.0
  * @category schemas
@@ -2307,7 +2307,7 @@ export const related = <
      * non-`paginated` targets (unless `include` is a declared
      * `Include.Surface`) and every type an `include` path reaches. The
      * document's resource objects of those types then admit any subset of
-     * their fields, attributes and relationships alike (#494), so a handler
+     * their fields, attributes and relationships alike, so a handler
      * can answer with `Handlers.project(query.fields)` — and a client
      * decodes those attributes and relationships as optional.
      */
@@ -2328,7 +2328,7 @@ export const related = <
   // A declared surface over the *target* derives the union its document
   // carries, exactly as it does for `get` / `list`; otherwise the target's own
   // relationship graph does — every resource its legal include paths reach
-  // when `include` is on (#320).
+  // when `include` is on.
   const included = isSurface(options?.include)
     ? options.include.included
     : Option.getOrElse(reachableIncluded([target], options?.include), () =>
@@ -2336,7 +2336,7 @@ export const related = <
       );
   const docMeta = (options?.meta ?? AnyMeta) as DocMeta;
   // Declaring `fields` makes the target and every `included` member whose type
-  // a fieldset names partial (#322).
+  // a fieldset names partial.
   const types = options?.fields === true ? fieldsetTypes([target], options.include) : undefined;
   const data = types === undefined ? target : sparseMember(target, types);
   const includedUnion = types === undefined ? included : sparseUnion(included, types);
@@ -2538,7 +2538,7 @@ export const getRelationship = <
     (include) => include as IncludeArgument,
   );
   const surface = Option.filter(include, isSurface);
-  // The parent, a `paginated` `name` read as a `many` (#483): the paths and
+  // The parent, a `paginated` `name` read as a `many`: the paths and
   // the query derive over it.
   const base = relationshipIncludeBase(resource, name);
   const includable = Option.flatMap(include, (include) =>
@@ -2558,7 +2558,7 @@ export const getRelationship = <
       : [];
   // A declared surface's own union, else the reached resources'. Absent while
   // `include` is off, so the document has no `included` member; with `fields`,
-  // every member a fieldset names is partial (#485).
+  // every member a fieldset names is partial.
   const included = Option.map(reached, (resources) => {
     const union = Option.match(surface, {
       onNone: () => Schema.Union(resources),
@@ -2941,7 +2941,7 @@ export const removeRelationship = <
  * `add` operation carrying a `data.id` is answered with 403 Forbidden,
  * `source.pointer` `/atomic:operations/N/data/id`, and the handler never
  * runs, so no operation is performed (§Client-Generated IDs, which the
- * extension's §Processing Errors applies to an operation; #464). To support
+ * extension's §Processing Errors applies to an operation). To support
  * them, pass a `payload` whose `add` declares an `id` — the default `add`'s
  * fields with one more in `data`, placed ahead of the default operations:
  * `Schema.Struct({ "atomic:operations": Schema.Array(Schema.Union([AddWithId,
@@ -4106,7 +4106,7 @@ const includeOpt = (include?: IncludeArgument): { readonly include?: IncludeArgu
 // A generated `getRelationship`'s compound-document options. Each is off
 // unless asked for: the relationship's own `relationshipInclude` /
 // `relationshipFields`, else the top-level one. On a `paginated` relationship
-// `include` legalises the paths rooted at it, as on a `many` (#483), and never
+// `include` legalises the paths rooted at it, as on a `many`, and never
 // throws; with no include paths `fields` declares no fieldset, so `false`
 // builds exactly the endpoint built without it.
 const compoundOpts = (relConfig: RelationshipConfig, defaults: CompoundDefaults = {}) => ({
@@ -4516,7 +4516,7 @@ export interface FlatDocumentOptions<Included extends Schema.Top, TM extends Sch
 }
 
 // `never` is what a flat group without an include surface passes as
-// `Included` (the `included` of no surface, #595). It reads as `Schema.Top`,
+// `Included` (the `included` of no surface). It reads as `Schema.Top`,
 // the unconstrained `included` such a group always declared, so only a group
 // that has a surface gets the narrower type, and the handlers typed against a
 // surface-less group still match.

@@ -1,6 +1,6 @@
 /**
  * Type-level tests for the `included` union of a read endpoint's default
- * document (#320).
+ * document.
  *
  * An endpoint whose `include` option is `true` or a `Query.IncludeOptions`
  * admits in `included` every resource its legal include paths reach, beside
@@ -8,9 +8,9 @@
  * an advertised depth-2 path such as `comments.author` brings in. An endpoint
  * with `include` off keeps exactly the document it had; one with a declared
  * `Include.Surface` binds the surface's own union (on `collection` and
- * `polymorphic` too, #336). The runtime half is `src/Endpoint.included.test.ts`.
+ * `polymorphic` too). The runtime half is `src/Endpoint.included.test.ts`.
  *
- * `Include.included(resource, { include })` returns that union (#342), so an
+ * `Include.included(resource, { include })` returns that union, so an
  * endpoint that overrides `success` can declare it; the last sections pin it
  * to every endpoint's default here, a widened `include: boolean` included.
  *
@@ -138,7 +138,7 @@ export const search = Endpoint.collection([Article, Person], {
   include: true,
 });
 // The members' non-`paginated` direct targets plus the depth-2
-// `comments.author`; `Article.history`'s paginated `Revision` is not one (#337).
+// `comments.author`; `Article.history`'s paginated `Revision` is not one.
 assertType<
   Equals<IncludedOf<typeof search>, typeof Comment.Type | typeof Person.Type | typeof Company.Type>
 >(true);
@@ -198,7 +198,7 @@ assertType<
 >(true);
 // `collection` admits what `polymorphic` does: `drafts.author`'s paginated
 // `Revision` is no member's includable target, so it is not in `included`,
-// as the runtime document rejects a `revisions` member (#337).
+// as the runtime document rejects a `revisions` member.
 export const entryCollection = Endpoint.collection([Post, Draft], {
   name: "entries",
   path: "/entries",
@@ -236,11 +236,11 @@ assertType<SuccessOf<typeof plainEntryCollection>>(
   Handlers.collection([post], { included: [person] }),
 );
 assertType<SuccessOf<typeof plainEntryCollection>>(
-  // @ts-expect-error -- `revisions` is only behind `drafts.author`, a paginated relationship (#337)
+  // @ts-expect-error -- `revisions` is only behind `drafts.author`, a paginated relationship
   Handlers.collection([post], { included: [revision] }),
 );
 assertType<SuccessOf<typeof entryCollection>>(
-  // @ts-expect-error -- not under `include: true` either (#337)
+  // @ts-expect-error -- not under `include: true` either
   Handlers.collection([post], { included: [person, revision] }),
 );
 // Positive control: the include walk's `people` and `companies` fit.
@@ -294,7 +294,7 @@ assertType<
 // ---------------------------------------------------------------------------
 
 // The resource's own `document()` / `collection()`, passed as `success`, is
-// what the default was before #320.
+// what the default was before.
 export const explicit = Endpoint.get(Article, { success: Article.document() });
 export const plain = Endpoint.get(Article);
 export const off = Endpoint.get(Article, { include: false });
@@ -327,7 +327,7 @@ export const plainSearch = Endpoint.collection([Article, Person], {
   name: "search",
   path: "/search",
 });
-// `Article.history` is paginated, so its `Revision` is not admitted (#337).
+// `Article.history` is paginated, so its `Revision` is not admitted.
 assertType<Equals<IncludedOf<typeof plainSearch>, typeof Comment.Type | typeof Company.Type>>(true);
 // @ts-expect-error -- `revisions` is reached only through a paginated relationship
 assertType<IncludedOf<typeof plainSearch>>(revision);
@@ -342,7 +342,7 @@ export const surface = Endpoint.get(Article, {
 assertType<Equals<IncludedOf<typeof surface>, typeof Comment.Type>>(true);
 
 // ---------------------------------------------------------------------------
-// `Include.included(resource, { include })` is that union (#342)
+// `Include.included(resource, { include })` is that union
 // ---------------------------------------------------------------------------
 
 // What an endpoint that overrides `success` declares in `included` to keep the
@@ -388,7 +388,7 @@ assertType<Equals<(typeof plainCommentUnion)["Type"], IncludedOf<typeof plainRel
 // Negative control: the source resource's union is not the target's.
 assertType<Equals<(typeof onUnion)["Type"], IncludedOf<typeof related>>>(false);
 
-// `collection`: every member's graph, without the paginated targets (#365).
+// `collection`: every member's graph, without the paginated targets.
 const searchUnion = Include.included([Article, Person], { include: true });
 assertType<Equals<(typeof searchUnion)["Type"], IncludedOf<typeof search>>>(true);
 const plainSearchUnion = Include.included([Article, Person], { include: false });
@@ -438,7 +438,7 @@ Include.included(Comment, { include: articleSurface });
 Include.included([Comment, Person], { include: articleSurface });
 
 // The members form under a declared surface: the surface's own union, which
-// `collection` and `polymorphic` bind (#336).
+// `collection` and `polymorphic` bind.
 const surfaceSearchUnion = Include.included([Article, Person], { include: articleSurface });
 assertType<Equals<typeof surfaceSearchUnion, (typeof articleSurface)["included"]>>(true);
 assertType<Equals<(typeof surfaceSearchUnion)["Type"], typeof Comment.Type | typeof Person.Type>>(
@@ -459,7 +459,7 @@ export const surfaceSearch = Endpoint.collection([Article, Person], {
   path: "/search",
   include: articleSurface,
 });
-// The endpoint binds exactly the surface's union (#336), narrowed to what it
+// The endpoint binds exactly the surface's union, narrowed to what it
 // names: not the members' direct targets (`Person.employer`'s `companies`).
 assertType<Equals<(typeof surfaceSearchUnion)["Type"], IncludedOf<typeof surfaceSearch>>>(true);
 assertType<Equals<IncludedOf<typeof surfaceSearch>, IncludedOf<typeof plainSearch>>>(false);
@@ -502,7 +502,7 @@ assertType<Equals<(typeof flagCommentUnion)["Type"], IncludedOf<typeof flagRelat
 // Negative control: not only the direct targets, which `include: false` gives.
 assertType<Equals<(typeof flagUnion)["Type"], (typeof offUnion)["Type"]>>(false);
 
-// `collection` and `polymorphic` distribute too (#382): the endpoint built
+// `collection` and `polymorphic` distribute too: the endpoint built
 // from `true` binds every member's full walk, so a widened `boolean` admits
 // it, and the members form matches them.
 export const flagSearch = Endpoint.collection([Article, Person], {
@@ -525,8 +525,8 @@ const author = Author.make({
 });
 assertType<SuccessOf<typeof flagNode>>(Handlers.data(author, { included: [comment, person] }));
 // The same under `fields: true`, sparse members included: the sparse fieldset
-// types (`Query.FieldsetResources`) distribute over a widened `boolean` too
-// (#397), so a depth-2 resource that is neither a member nor a direct target
+// types (`Query.FieldsetResources`) distribute over a widened `boolean` too,
+// so a depth-2 resource that is neither a member nor a direct target
 // (`people`, trimmed by `fields[people]`) is admitted as under `include: true`.
 // `collection` is pinned over `[Article, Revision]`: with `Person` (or
 // `Comment`) as a member a sparse person is admitted anyway, so the pin could
@@ -622,7 +622,7 @@ assertType<Include.MembersReachable<typeof Article | typeof Person, boolean>>(fl
 
 // An `include` that may be a surface or not is typed as either union, as the
 // runtime returns one or the other: the surface's own, and the members' union
-// for the rest of the option, distributed over a widened `boolean` (#382).
+// for the rest of the option, distributed over a widened `boolean`.
 declare const which: boolean;
 const mixedSearchUnion = Include.included([Article, Person], {
   include: which ? articleSurface : true,
@@ -660,7 +660,7 @@ assertType<
 >(false);
 
 // The endpoints under such an `include`: the surface half binds the surface's
-// own union (#336) and the `true` half the full walk, so the union is either
+// own union and the `true` half the full walk, so the union is either
 // (here `include: true`'s, which covers the surface's) and a handler returning
 // depth-2 `people` type-checks.
 export const mixedSearch = Endpoint.collection([Article, Person], {

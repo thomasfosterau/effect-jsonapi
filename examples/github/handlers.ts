@@ -390,7 +390,7 @@ const loadPull = (id: string): Effect.Effect<PullRequest, PullRequestNotFound> =
 
 // `{ [key]: value }` when `value` is defined, and no member at all when it is
 // `undefined`: spread it to leave an absent option out, as
-// `exactOptionalPropertyTypes` requires (the helper the migration guide, #620,
+// `exactOptionalPropertyTypes` requires (the helper the migration guide
 // gives the apps to copy).
 type DefinedMember<K extends string, A> = { readonly [Prop in K]?: Exclude<A, undefined> };
 const definedMember = <const K extends string, A>(key: K, value: A): DefinedMember<K, A> => {

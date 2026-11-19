@@ -60,7 +60,7 @@ const server = () => {
 const run = (client: HttpClient.HttpClient, options: Conformance.Options) =>
   Conformance.verifyWith(api, { client, baseUrl: BASE_URL, ...options });
 
-describe("Conformance: Report.samples (#319)", () => {
+describe("Conformance: Report.samples", () => {
   it.effect("records every `/:type/:id` read the `ids` resolve, with its status", () =>
     Effect.gen(function* () {
       const { client } = server();

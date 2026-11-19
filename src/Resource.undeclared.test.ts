@@ -1,16 +1,16 @@
 /**
  * Request bodies that send `attributes` / `relationships` members a resource
- * doesn't declare (#270, #292). Every write body member struct, whether it
+ * doesn't declare. Every write body member struct, whether it
  * declares fields or none, answers 400 with a `source.pointer` at each
  * undeclared member, through the real middleware stack, instead of dropping
- * the member (a struct with fields, before #292) or handing it to the handler
- * (a struct with none, before #270). A non-object member answers 400
- * `Expected object` at the member, a `null` included (#286). The members
+ * the member (a struct with fields, before) or handing it to the handler
+ * (a struct with none, before). A non-object member answers 400
+ * `Expected object` at the member, a `null` included. The members
  * JSON:API allows around them (`meta`, `jsonapi`, `links`) are still accepted,
  * the OpenAPI document still describes each member's properties, and encoding
  * (what a client does) rejects an undeclared member as decoding does. A member
  * reports at most `maxUndeclaredMemberErrors` (default 12) of them at their own
- * pointers, and one summary error at the member for the rest (#308).
+ * pointers, and one summary error at the member for the rest.
  */
 import { it } from "@effect/vitest";
 import { describe, expect } from "vite-plus/test";
@@ -43,7 +43,7 @@ const Flag = Resource("flags", {
 const Note = Resource("notes", { attributes: { body: Schema.String } });
 // Served through the flat `createInput` / `updateInput` payloads.
 const Memo = Resource("memos", { attributes: { body: Schema.String } });
-// Reports two undeclared members per member, not the default 12 (#308).
+// Reports two undeclared members per member, not the default 12.
 const Capped = Resource("capped", {
   attributes: { body: Schema.String },
   relationships: { owner: Relationship.optional(() => Owner) },
@@ -168,7 +168,7 @@ const ErrorDocument = Schema.fromJsonString(
         code: Schema.String,
         title: Schema.String,
         detail: Schema.String,
-        // Absent on an error at the body itself: a flat payload's summary (#308).
+        // Absent on an error at the body itself: a flat payload's summary.
         source: Schema.optionalKey(Schema.Struct({ pointer: Schema.String })),
       }),
     ),
@@ -259,7 +259,7 @@ const cases: ReadonlyArray<Case> = [
       ),
     (m) => `/atomic:operations/0/data/relationships/${m}`,
   ],
-  // Members that declare fields (#292): the declared member is sent too.
+  // Members that declare fields: the declared member is sent too.
   [
     "createPayload attributes (attributes declared)",
     "POST",
@@ -348,7 +348,7 @@ const cases: ReadonlyArray<Case> = [
 
 const members = ["isAdmin", "__proto__", "constructor"] as const;
 
-describe("a request body member the resource doesn't declare (#270, #292)", () => {
+describe("a request body member the resource doesn't declare", () => {
   describe.each(cases)("%s", (_, method, path, body, pointer) => {
     it.each(members)("answers 400 at the member %s and never calls the handler", async (m) => {
       received.length = 0;
@@ -376,7 +376,7 @@ describe("a request body member the resource doesn't declare (#270, #292)", () =
     });
   });
 
-  // Below the cap (#308), so every one is reported.
+  // Below the cap, so every one is reported.
   it("reports each undeclared member below the cap at its own pointer", async () => {
     const response = await send(
       "POST",
@@ -391,7 +391,7 @@ describe("a request body member the resource doesn't declare (#270, #292)", () =
     ]);
   });
 
-  it("reports each undeclared member beside a declared one below the cap at its own pointer (#292)", async () => {
+  it("reports each undeclared member beside a declared one below the cap at its own pointer", async () => {
     received.length = 0;
     const response = await send(
       "POST",
@@ -408,7 +408,7 @@ describe("a request body member the resource doesn't declare (#270, #292)", () =
   });
 });
 
-describe("the errors a 400 reports for undeclared members are capped (#308)", () => {
+describe("the errors a 400 reports for undeclared members are capped", () => {
   // `n` undeclared members, `k0` … `k<n-1>`, as the inside of a JSON object.
   const keys = (n: number): string =>
     Array.from({ length: n }, (_, index) => `"k${index}":1`).join(",");
@@ -569,7 +569,7 @@ describe("the errors a 400 reports for undeclared members are capped (#308)", ()
   });
 });
 
-describe("the maxUndeclaredMemberErrors option (#308)", () => {
+describe("the maxUndeclaredMemberErrors option", () => {
   const issuesOf = (result: Result.Result<unknown, Schema.SchemaError>) =>
     Result.match(result, {
       onFailure: (error) => SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues,
@@ -849,13 +849,13 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
   });
 });
 
-describe("a non-object member answers 400 at the member, whether or not it declares fields (#270, #292)", () => {
+describe("a non-object member answers 400 at the member, whether or not it declares fields", () => {
   // A struct that declares no fields parses any non-nullish input in the
   // pinned effect, so a non-object reaches its member check; that check
   // answers it exactly as a struct with fields does: "Expected object" at the
   // member itself. An array is not an object to either. A `null` fails the
   // empty struct's own not-nullish check before that member check runs, and
-  // renders "Expected object" too, not "Expected object | array" (#286).
+  // renders "Expected object" too, not "Expected object | array".
   const values = ['"x"', "5", "true", "[]", '["a"]', "null"] as const;
 
   const sites: ReadonlyArray<
@@ -1004,7 +1004,7 @@ describe("a non-object member answers 400 at the member, whether or not it decla
   });
 });
 
-describe("an empty member the resource declares nothing for is still accepted (#270)", () => {
+describe("an empty member the resource declares nothing for is still accepted", () => {
   it.each([
     ["createPayload attributes", "POST", "/flags", '{"data":{"type":"flags","attributes":{}}}'],
     [
@@ -1051,7 +1051,7 @@ describe("an empty member the resource declares nothing for is still accepted (#
   });
 });
 
-describe("a member struct left empty by write projections (#270)", () => {
+describe("a member struct left empty by write projections", () => {
   // Every attribute excluded from create and update, and every relationship
   // `paginated`: each write member struct declares nothing.
   const Stamp = Resource("stamps", {
@@ -1113,7 +1113,7 @@ describe("a member struct left empty by write projections (#270)", () => {
   });
 });
 
-describe("a null member that declares no fields (#286)", () => {
+describe("a null member that declares no fields", () => {
   // The issue's own reproduction, at the schema: the empty member's `null`
   // renders as the fielded member's does.
   it.each([
@@ -1128,7 +1128,7 @@ describe("a null member that declares no fields (#286)", () => {
   });
 
   // The message names no OpenAPI component: the empty member stays the inline
-  // closed object #270 made it, with no `noMembers` component.
+  // closed object it now is, with no `noMembers` component.
   it("leaves the member an inline closed object in the OpenAPI document", () => {
     const RequestBody = Schema.Struct({
       content: Schema.Record(
@@ -1162,7 +1162,7 @@ describe("a null member that declares no fields (#286)", () => {
   });
 });
 
-describe("the members JSON:API allows around a closed member are still accepted (#292)", () => {
+describe("the members JSON:API allows around a closed member are still accepted", () => {
   // Only `attributes` / `relationships` (and the flat payloads) are closed:
   // the document's `meta` / `jsonapi` / `links`, the resource object's `meta`
   // / `links`, a relationship object's `meta` / `links`, a resource
@@ -1232,7 +1232,7 @@ describe("the members JSON:API allows around a closed member are still accepted 
   });
 });
 
-describe("encoding a closed member, as a client does, rejects an undeclared member (#292)", () => {
+describe("encoding a closed member, as a client does, rejects an undeclared member", () => {
   // `Client` and `HttpBody` encode a payload through `Schema.toCodecJson`.
   const formatted = (result: Result.Result<unknown, Schema.SchemaError>) =>
     Result.match(result, {
@@ -1293,7 +1293,7 @@ describe("encoding a closed member, as a client does, rejects an undeclared memb
   });
 });
 
-describe("a closed member keeps its fields and its OpenAPI properties (#292)", () => {
+describe("a closed member keeps its fields and its OpenAPI properties", () => {
   it("keeps `.fields` on createInput and on each payload member", () => {
     expect(R.keys(Memo.createInput.fields)).toEqual(["body"]);
     expect(R.keys(Memo.updateInput.fields)).toEqual(["body", "id"]);
@@ -1342,7 +1342,7 @@ describe("a closed member keeps its fields and its OpenAPI properties (#292)", (
   });
 });
 
-describe("which own keys of a closed member count as members (#292)", () => {
+describe("which own keys of a closed member count as members", () => {
   const issuesOf = (result: Result.Result<unknown, Schema.SchemaError>) =>
     Result.match(result, {
       onFailure: (error) => SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues,
@@ -1384,7 +1384,7 @@ describe("which own keys of a closed member count as members (#292)", () => {
   });
 });
 
-describe("what a closed member reports, and where it reports nothing (#292)", () => {
+describe("what a closed member reports, and where it reports nothing", () => {
   const issuesOf = (result: Result.Result<unknown, Schema.SchemaError>) =>
     Result.match(result, {
       onFailure: (error) => SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues,

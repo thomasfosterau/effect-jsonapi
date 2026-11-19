@@ -1,6 +1,6 @@
 /**
  * `sparseResource`: the partial-attributes resource object a read endpoint
- * that declares `fields` binds by default (#322). Its contract beyond the
+ * that declares `fields` binds by default. Its contract beyond the
  * attributes being optional: an attribute already optional is the declared
  * schema itself, the definition's annotations carry over to the partial
  * schema, and its `identifier` does not — that names the strict definition,
@@ -59,7 +59,7 @@ const getData = <Data>(data: Data) => ({
   },
 });
 
-describe("sparseResource (#322)", () => {
+describe("sparseResource", () => {
   it("is built once per definition", () => {
     expect(sparseResource(Article)).toBe(sparseResource(Article));
   });
@@ -101,7 +101,7 @@ describe("sparseResource (#322)", () => {
   });
 });
 
-describe("sparseMember (#350)", () => {
+describe("sparseMember", () => {
   const Photo = Resource.make("photos", { attributes: { url: Schema.String } });
   const Media = Resource.family("media", [Article, Photo]);
   // A resource object with no attributes: only a partial schema admits it.

@@ -647,7 +647,7 @@ const fullLinkage: RuleImpl = {
       inapplicable:
         "no endpoint returned a compound document — either none declares `include`, or no resource it returned carries inline relationship linkage to include",
       check: (body, observation, where) => {
-        // The request's `fields[TYPE]` carry the spec's one exemption (#494).
+        // The request's `fields[TYPE]` carry the spec's one exemption.
         const fields = Linkage.requestedFieldsets(new URLSearchParams(where.split("?")[1] ?? ""));
         const orphans = isJsonObject(body) ? Linkage.unlinkedIncluded(body, fields) : [];
         return Arr.isReadonlyArrayEmpty(orphans)
@@ -1113,7 +1113,7 @@ const inSlot = (pointer: string, where: Slot): boolean =>
 /**
  * The field names a resource object carries: its `attributes` keys, then its
  * `relationships` keys — the two are its "fields" together (§Resource Object
- * Fields, #494).
+ * Fields).
  */
 const fieldNamesOf = (resource: R.ReadonlyRecord<string, unknown>): ReadonlyArray<string> => {
   const attributes = resource["attributes"];
@@ -1201,12 +1201,12 @@ const sparseFieldsets = (where: Slot): RuleImpl => {
           : "no endpoint returned a primary resource, of a type it declares `fields[TYPE]` for, carrying two or more fields to project",
         ({ endpoint, path }, tally) =>
           Effect.gen(function* () {
-            // Learn the field names (attributes, then relationships, #494) this
+            // Learn the field names (attributes, then relationships) this
             // endpoint actually emits, then ask for exactly the first one: a
             // projection rule needs a field set the server is known to be able
             // to return. The `included` variant needs a compound document, so
             // the baseline is taken with `include` on — on a relationship
-            // endpoint, its own relationship (#485).
+            // endpoint, its own relationship.
             const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
             tally.probes += 1;
             let source = baseline;
@@ -1262,8 +1262,8 @@ const sparseFieldsets = (where: Slot): RuleImpl => {
 
 // §Sparse Fieldsets: "An empty value indicates that no fields should be
 // returned" — `?fields[TYPE]=` is not the absent parameter, whose fields the
-// server may choose (#488). Judged on `attributes` and `relationships`, as the
-// two rules above are (#494): a resource object of that type in the answer
+// server may choose. Judged on `attributes` and `relationships`, as the
+// two rules above are: a resource object of that type in the answer
 // carries neither.
 const sparseFieldsetsEmpty: RuleImpl = {
   rule: rule(
@@ -1581,7 +1581,7 @@ interface UsableProbe {
  * lost one, or one the run's `requestTimeout` cut short), a rate limit (`429`)
  * or a request timeout (`408`). A server error is not one: a server that
  * answers 5xx to a parameter it does not support mishandled it, and the rule
- * fails (#352). The link and pagination rules draw the line elsewhere:
+ * fails. The link and pagination rules draw the line elsewhere:
  * `crawl.ts`'s `unanswered` counts a server error among the answers that say
  * nothing of the links.
  */
@@ -1709,7 +1709,7 @@ const onSucceeded =
  * A rule that sends a read endpoint one query parameter, `name=1`, whose name
  * alone requires a 400 whatever the endpoint declares. It probes as a refusal
  * rule does — a baseline first, the 400's `source.parameter` matched, a 429,
- * 408 or lost response left not decided (#438) — but over every read
+ * 408 or lost response left not decided — but over every read
  * endpoint, not only those whose query discovery can enumerate: no endpoint
  * can declare a name the specification forbids, so what it declares does not
  * pick the endpoint.
@@ -1808,7 +1808,7 @@ const generalRule = (id: string, applied: string): Rule =>
   rule(id, "Query Parameters", "query-parameters-custom", "MUST", `${GENERAL_RULE} ${applied}`);
 
 // `!` is no member-name character, so the name follows none of the
-// conventions; it is not `_`, the cache-buster a server may admit (#263).
+// conventions; it is not `_`, the cache-buster a server may admit.
 const illegalParameterName: RuleImpl = parameterNameRefused(
   generalRule(
     "spec/query/illegal-parameter-name",
@@ -1950,7 +1950,7 @@ const undeclaredBeside = (member: string, declared: ReadonlyArray<string>): stri
   return past(`${open}${open.endsWith("[") ? "x" : "_x"}]`, declared.length);
 };
 
-/** The undeclared-member rule for `family`: `page` or `filter` (#321). */
+/** The undeclared-member rule for `family`: `page` or `filter`. */
 const undeclaredMember = (family: "page" | "filter", applied: string): RuleImpl =>
   refusalRule({
     rule: generalRule(`spec/query/${family}-undeclared-member`, applied),
@@ -1983,7 +1983,7 @@ const filterUndeclaredMember: RuleImpl = undeclaredMember(
   "An endpoint that declares its `filter` members by name (`filter[status]`) does not know how to process another (`filter[status_x]`); an open `filter[…]` grammar, which validates every member itself, is not probed.",
 );
 
-/** The bracketed-member rule for `family`: `include` or `sort`, which JSON:API defines bare (#329). */
+/** The bracketed-member rule for `family`: `include` or `sort`, which JSON:API defines bare. */
 const bracketed = (
   family: "include" | "sort",
   value: (baseline: Observation) => string,

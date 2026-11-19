@@ -1049,7 +1049,7 @@ export const related = <
     // An empty linkage and a ref that doesn't resolve are the same answer on
     // the wire: `data: null`. There is nothing to walk from, but the request's
     // paths are still validated as a resolved resource's are, and a request
-    // carrying `include` still gets the key, empty (§Fetching Includes, #232).
+    // carrying `include` still gets the key, empty (§Fetching Includes).
     if (resource === undefined) {
       const include = query?.include;
       if (include === undefined) return { data: null, jsonapi: Assemble.JSONAPI_MEMBER } as const;

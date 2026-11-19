@@ -1,5 +1,5 @@
 /**
- * Type-level tests for the two collection assemblers (#223):
+ * Type-level tests for the two collection assemblers:
  *
  * - `Assemble.collection` keeps its call shape and its return type exactly —
  *   `links` and `meta.totalCount` required;
@@ -7,13 +7,13 @@
  *   and **no** `meta` member at all (absent, not optional), so a handler can't
  *   read page math off a document that has none, and the result is not
  *   mistakable for a paginated `CollectionDocument`;
- * - given a `self` (#242), its document has a required `links.self` and still
+ * - given a `self`, its document has a required `links.self` and still
  *   no `meta`; `query` rides on `self` and is rejected without it;
- * - given a `meta` (#253), its document has `meta` typed as passed and
+ * - given a `meta`, its document has `meta` typed as passed and
  *   required, alongside `links` or without it, and still no `meta` member
  *   when none is passed;
  * - a `self` or `meta` that may be `undefined`, or is explicitly `undefined`,
- *   is rejected (#533): the absent sentinel is `never`, and the key is
+ *   is rejected: the absent sentinel is `never`, and the key is
  *   passed only when it is defined.
  *
  * Type-checked by `tsconfig.json`; the `@ts-expect-error` annotations are the
@@ -106,7 +106,7 @@ assertType<unknown>(linkedDocument.meta);
 assertType<Assemble.CollectionDocument<Person>>(linkedDocument);
 
 // A `self` the caller may not have is passed only when it is defined: the
-// option takes no explicit `undefined` (#533), so a maybe-`undefined` value —
+// option takes no explicit `undefined`, so a maybe-`undefined` value —
 // a caller's own bare-optional `o.self` under `exactOptionalPropertyTypes` —
 // is rejected rather than read as "maybe linked".
 declare const callerOptions: { readonly self?: string };

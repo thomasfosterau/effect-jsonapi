@@ -37,11 +37,11 @@ import {
 /**
  * The rules this example is known to break, each with the issue tracking it.
  * Remove an entry when its issue is fixed; the test will tell you to. The read
- * rules have been clean since #169: the handlers of the reads that declare
+ * rules have been clean: the handlers of the reads that declare
  * `fields` (`GET /products/:id`, `GET /orders/:id` and `/search`) project
  * `?fields[TYPE]=` with `onResource: Handlers.project(query.fields)` and stamp
  * `jsonapi: Document.v1_1` on every `Handlers.data` / `collection` / `linkage`
- * document. The write rules have been clean since #428, which answers a
+ * document. The write rules have been clean, which answers a
  * resource object of another `type` with 409, and #450, which answers a
  * client-generated id `Endpoint.create` does not support with 403.
  */
@@ -52,7 +52,7 @@ const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
  * seeded with, so every rule that resolves `/:type/:id` probes a resource the
  * example holds rather than a 404. Northwind's ids are not uniform — orders
  * start at 10248 and territories are zip codes — so a hard-coded `"1"` for
- * every type silently probed absent resources (#301).
+ * every type silently probed absent resources.
  */
 const IDS = {
   categories: beverages.id,
@@ -88,7 +88,7 @@ const WRITES: Conformance.Options["writes"] = {
     }),
     update: () => ({ attributes: { unitsInStock: 10 } }),
     cleanup: discardProduct,
-    // The example mints its own ids, so a client-generated one must be refused (#450).
+    // The example mints its own ids, so a client-generated one must be refused.
     clientId: { supported: false, id: () => `conformance-client-${++sequence}` },
   },
   orders: {
@@ -107,7 +107,7 @@ const WRITES: Conformance.Options["writes"] = {
     }),
     update: () => ({ attributes: { shipCity: "Melbourne" } }),
     cleanup: discardOrder,
-    // The example mints its own ids, so a client-generated one must be refused (#450).
+    // The example mints its own ids, so a client-generated one must be refused.
     clientId: { supported: false, id: () => `conformance-client-${++sequence}` },
   },
 };
@@ -115,7 +115,7 @@ const WRITES: Conformance.Options["writes"] = {
 /**
  * The rules that died in a run, each as `id: message`. A rule that dies — a
  * defect in the kit or its transport, not a finding about this example — is an
- * `Errored` outcome rather than a failed run (#246), so nothing that filters
+ * `Errored` outcome rather than a failed run, so nothing that filters
  * for `Failed` sees it; every run here is checked with this.
  */
 const died = (run: Conformance.Report): ReadonlyArray<string> =>
@@ -201,8 +201,8 @@ layer(RunLive)("northwind: JSON:API conformance", (it) => {
     Effect.gen(function* () {
       const { resolved } = yield* Run;
       // An `ids` entry the example does not hold fails no rule: the read endpoints
-      // answer 404, and the rules that resolve `/:type/:id` see less of the api
-      // (#301). This is the direct guard: each sample fetched through its own
+      // answer 404, and the rules that resolve `/:type/:id` see less of the api.
+      // This is the direct guard: each sample fetched through its own
       // `get` endpoint, independent of how the kit words anything in its report.
       // Keyed by type, so the returned `data.id`s are compared with `IDS` entry by
       // entry and a sample that does not resolve shows up under its type.
@@ -215,7 +215,7 @@ layer(RunLive)("northwind: JSON:API conformance", (it) => {
       const { report } = yield* Run;
       // A second line of defence behind the direct guard above, over what the kit
       // itself read: `report.samples` records every `/:type/:id` read the `ids`
-      // resolve, with its status, as data rather than in a note's wording (#319).
+      // resolve, with its status, as data rather than in a note's wording.
       // Keyed by type, so a sample that did not resolve shows up under its type,
       // and a type the kit resolved no read for is missing.
       expect(
@@ -274,7 +274,7 @@ layer(RunLive)("northwind: JSON:API conformance", (it) => {
     () =>
       Effect.gen(function* () {
         const { report } = yield* Run;
-        // #488: `?fields[TYPE]=` asks for no fields, not every field, and
+        // `?fields[TYPE]=` asks for no fields, not every field, and
         // `Handlers.project` answers it with no attributes.
         const ids = [
           "spec/query/sparse-fieldsets-primary",
@@ -290,7 +290,7 @@ layer(RunLive)("northwind: JSON:API conformance", (it) => {
   it.effect("follows every relationship's and document's `self` link to a verdict", () =>
     Effect.gen(function* () {
       const { report } = yield* Run;
-      // #309: the relationship `self` link `Handlers.paginatedRelationship`
+      // The relationship `self` link `Handlers.paginatedRelationship`
       // writes for an order's line items
       // (`/orders/:id/relationships/lineItems`) is served by a declared
       // `Endpoint.getRelationship`, so both MUSTs pass rather than skip. That
@@ -321,22 +321,22 @@ layer(RunLive)("northwind: JSON:API conformance", (it) => {
       const { report } = yield* Run;
       const writeRules = [
         "spec/status/create-response-document",
-        // #236: the 201 carries `Location`, copied from the created resource's
+        // The 201 carries `Location`, copied from the created resource's
         // own `links.self`, so the two match.
         "spec/status/create-location",
         "spec/status/create-location-matches-self",
         "spec/status/update-response",
         "spec/status/delete-response",
-        // #237: what each create and update answered reads back through the
+        // What each create and update answered reads back through the
         // resource's own GET.
         "spec/status/create-read-back",
         "spec/status/update-read-back",
-        // #429: a created order's `shipper` replaced with the `ids` shipper and
+        // A created order's `shipper` replaced with the `ids` shipper and
         // read back through `GET /orders/:id/relationships/shipper`. A product's
         // `category` / `supplier` PATCH has no relationship GET to read back
         // through, so is not decided.
         "spec/relationships/update-replaces",
-        // #451: the same `shipper` cleared with `{ "data": null }` and read back
+        // The same `shipper` cleared with `{ "data": null }` and read back
         // empty (a product's `category` / `supplier` are required, so their
         // payloads admit no `null`); what each order and product relationship
         // PATCH answered; and the 404 for linking a shipper that does not exist.

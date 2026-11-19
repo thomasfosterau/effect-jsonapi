@@ -1,5 +1,5 @@
 /**
- * Type-level tests for `Document.href`: the acceptance test for issue #110 —
+ * Type-level tests for `Document.href` —
  * a consumer must be able to get a wire string out of a built document
  * without re-declaring the resource's schema.
  *

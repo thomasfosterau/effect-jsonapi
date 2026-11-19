@@ -582,7 +582,7 @@ describe("atomic operations: linkage to an absent resource", () => {
 
   it.effect("a remove naming an unknown tag or comment succeeds, removing the rest", () =>
     Effect.gen(function* () {
-      // #477: a resource that does not exist is already missing from the
+      // A resource that does not exist is already missing from the
       // relationship, so a `remove` naming one is applied, not refused with a
       // 404. The article is the request's own, so the shared sample is untouched.
       const comment = sampleComments[0];

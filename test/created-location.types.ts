@@ -1,5 +1,5 @@
 /**
- * Type-level tests for the `Middleware.CreatedLocation` requirement (#236).
+ * Type-level tests for the `Middleware.CreatedLocation` requirement.
  *
  * `Endpoint.create` attaches the middleware, so its requirement must survive
  * every path that builds a create endpoint — `Endpoint.resource` and
@@ -7,7 +7,7 @@
  * dropped the requirement would let an api type-check and then fail at
  * runtime with `Service not found`. Endpoints that do not create carry none.
  *
- * `Registry.Options.middleware` keeps its pre-#236 type: the router provides
+ * `Registry.Options.middleware` keeps its earlier type: the router provides
  * `Middleware.CreatedLocationLive` itself, so a custom set of the other two
  * still type-checks — and still runs (`src/Registry.test.ts`).
  *
@@ -68,7 +68,7 @@ const fetched = Endpoint.get(Article);
 export const getCarriesNone: (typeof fetched)["~Middleware"] = created;
 
 // ---------------------------------------------------------------------------
-// `Registry` still takes a pre-#236 middleware set
+// `Registry` still takes the earlier middleware set
 // ---------------------------------------------------------------------------
 
 export const registryOptions: Registry.Options<never> = {

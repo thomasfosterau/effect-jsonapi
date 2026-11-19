@@ -1,13 +1,13 @@
 /**
  * The partial resource objects a read endpoint that declares
- * `fields` binds by default (#322).
+ * `fields` binds by default.
  *
  * JSON:API 1.1 §Sparse Fieldsets: when a client asks for a restricted set of
  * fields for a type, the response MUST NOT include any other field of that
  * type. So the resource objects of every type `?fields[TYPE]=` can name — the
  * primary resources and each type their `included` union admits, the set
  * `Query.FieldsetResources` computes — may carry any subset of their fields,
- * attributes and relationships alike (#494). Their default document is built
+ * attributes and relationships alike. Their default document is built
  * here from the strict one: each such resource definition becomes a struct
  * whose `attributes` members and `relationships` members are all optional
  * keys, and everything else (`type`, `id`, `links`, `meta`) stays exactly as
@@ -21,7 +21,7 @@
  * and kept strict otherwise. A family's name is never looked up in `types`:
  * `sparseMember` replaces a family by its members unconditionally, as
  * `Query.FieldsetResources` does, recursively, declaring no
- * `fields[<family name>]` (#350).
+ * `fields[<family name>]`.
  *
  * @internal
  */

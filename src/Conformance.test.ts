@@ -192,7 +192,7 @@ const CLIENT_ID_RULES = [
   "spec/status/create-client-id-unsupported",
 ];
 
-/** The client-generated id rules for an atomic `add` (#471), likewise opt-in. */
+/** The client-generated id rules for an atomic `add`, likewise opt-in. */
 const ATOMIC_CLIENT_ID_RULES = [
   "spec/atomic/add-client-id",
   "spec/atomic/add-conflict-id",
@@ -293,7 +293,7 @@ const FAMILIES = HashSet.make("include", "sort", "page", "filter", "fields");
  * The names of the specification's families `conformantServe` processes: the
  * bare `include` and `sort` (it refuses every `sort`), and a sparse fieldset
  * for each type it serves. It does not paginate or filter, so any other name
- * of a family is one it does not know how to process (#310).
+ * of a family is one it does not know how to process.
  */
 const PROCESSED = HashSet.make("include", "sort", "fields[articles]", "fields[people]");
 
@@ -303,7 +303,7 @@ const PROCESSED = HashSet.make("include", "sort", "fields[articles]", "fields[pe
  * Parameters: an implementation-specific name must carry a non a-z character
  * — a purely a-z name it does not know; or a name that does not follow the
  * naming conventions or is an extension's (it supports none): a base name
- * that is not a legal member name (#425).
+ * that is not a legal member name.
  */
 const refusesParameter = (key: string): boolean => {
   const base = key.split("[")[0] ?? key;
@@ -324,7 +324,7 @@ const includedMember = <A>(
 
 /**
  * The article's `relationships` under the request's `fields[articles]`: a
- * relationship is a field (#494), so `author` is kept only when no fieldset
+ * relationship is a field, so `author` is kept only when no fieldset
  * leaves it out.
  */
 const articleRelationships = (params: URLSearchParams) => {
@@ -795,7 +795,7 @@ describe("Conformance: discovery and selection", () => {
 
   const ids = (report: Conformance.Report) => report.outcomes.map((outcome) => outcome.rule.id);
 
-  // Matching by path segment (#367): the id itself, or ids continuing it with `/`.
+  // Matching by path segment: the id itself, or ids continuing it with `/`.
   const underPrefix = (prefix: string) => (id: string) =>
     id === prefix || id.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`);
 
@@ -1423,7 +1423,7 @@ describe("Conformance: detects a deliberately broken server", () => {
     }),
   );
 
-  // #423: a relationship document's primary data is resource linkage, and
+  // A relationship document's primary data is resource linkage, and
   // its identifiers are where the full-linkage walk starts.
   it.effect("walks a relationship document's included members from its primary identifiers", () =>
     Effect.gen(function* () {
@@ -1460,7 +1460,7 @@ describe("Conformance: detects a deliberately broken server", () => {
     }),
   );
 
-  // #443: a relationship document's primary data is resource linkage, not
+  // A relationship document's primary data is resource linkage, not
   // resource objects, so the full resource for a primary identifier may sit in
   // `included` without duplicating anything.
   it.effect("does not count a relationship document's primary identifiers as resources", () =>
@@ -1569,7 +1569,7 @@ describe("Conformance: detects a deliberately broken server", () => {
         : canned,
   );
 
-  // #494: a relationship is a field, so a fieldset that leaves it out drops it.
+  // A relationship is a field, so a fieldset that leaves it out drops it.
   const withAuthor = (body: R.ReadonlyRecord<string, unknown>) => {
     const data = body["data"];
     return P.isObjectOrArray(data) && "type" in data && data.type === "articles"
@@ -1592,7 +1592,7 @@ describe("Conformance: detects a deliberately broken server", () => {
       /fields\[articles\]=(&|$)/.test(request.path) ? withData(canned, withAuthor) : canned,
   );
 
-  // #488: an empty `fields[TYPE]=` read as the absent parameter.
+  // An empty `fields[TYPE]=` read as the absent parameter.
   broken(
     "an empty sparse fieldset read as every field",
     "spec/query/sparse-fieldsets-empty",
@@ -1680,7 +1680,7 @@ describe("Conformance: detects a deliberately broken server", () => {
   );
 
   // `/articles` declares no `sort`: a server that drops it instead of refusing
-  // it answers the collection as if it had never been sent (#278).
+  // it answers the collection as if it had never been sent.
   broken(
     "a sort on a collection endpoint that does not declare it, ignored",
     "spec/query/sort-unsupported-endpoint",
@@ -1690,7 +1690,7 @@ describe("Conformance: detects a deliberately broken server", () => {
 
   // No endpoint of the fixture paginates or filters, and each declares only
   // the bare `include`: a server that drops a parameter of either family, or a
-  // bracketed `include[]`, answers as if it had never been sent (#310).
+  // bracketed `include[]`, answers as if it had never been sent.
   broken(
     "a `page[…]` on an endpoint that declares no `page`, ignored",
     "spec/query/page-unsupported-endpoint",
@@ -1734,7 +1734,7 @@ describe("Conformance: detects a deliberately broken server", () => {
 });
 
 // ---------------------------------------------------------------------------
-// `include` / `sort` on an endpoint that does not declare them (#278)
+// `include` / `sort` on an endpoint that does not declare them
 // ---------------------------------------------------------------------------
 
 /**
@@ -2029,7 +2029,7 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
     }),
   );
 
-  // #352: a probe that got no response says nothing of whether the server
+  // A probe that got no response says nothing of whether the server
   // refuses the parameter, so neither rule is decided on it — and neither is
   // failed as "not rejected".
   it.effect("does not decide either on a probe that got no response", () =>
@@ -2107,7 +2107,7 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
   );
 
   // A `3xx` the kit reads as the answer itself — one with no `Location`, or a
-  // `304` — is an answer, not silence, so it fails both as before #352.
+  // `304` — is an answer, not silence, so it fails both as before.
   it.effect.each([
     ["a 302 with no `Location`", 302],
     ["a 304", 304],
@@ -2201,7 +2201,7 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
     "stops %s at the refusal rules' budget of 20 requests, skipping rather than passing",
     (id) =>
       Effect.gen(function* () {
-        // The #278 rules share the #310 rules' driver, and with it its budget:
+        // These rules share the undeclared-member rules' driver, and with it its budget:
         // twenty-one candidates, every baseline a 500, and nineteen are tried.
         const seen: Array<string> = [];
         const report = yield* verifyOver(burners)(
@@ -2223,7 +2223,7 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
 });
 
 // ---------------------------------------------------------------------------
-// A parameter whose name alone requires a 400 (#438)
+// A parameter whose name alone requires a 400
 // ---------------------------------------------------------------------------
 
 describe("Conformance: a parameter whose name alone requires a 400", () => {
@@ -2351,7 +2351,7 @@ describe("Conformance: a parameter whose name alone requires a 400", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Discovery of a hand-built endpoint whose query is not a plain struct (#278)
+// Discovery of a hand-built endpoint whose query is not a plain struct
 // ---------------------------------------------------------------------------
 
 /**
@@ -2430,7 +2430,7 @@ describe("Conformance: a hand-built query that is not a plain struct", () => {
 });
 
 // ---------------------------------------------------------------------------
-// A family or member the endpoint does not declare (#310)
+// A family or member the endpoint does not declare
 // ---------------------------------------------------------------------------
 
 /**
@@ -2546,7 +2546,7 @@ describe("Conformance: a family or member the endpoint does not declare", () => 
             _tag: "Skipped",
             reason: expect.stringContaining(
               // The URL the transport ended at is named as it sent it: since
-              // effect 4.1 the HTTP client leaves the brackets unencoded (#530).
+              // effect 4.1 the HTTP client leaves the brackets unencoded.
               `1 of 2 requests the rule sent were answered by a redirect the kit does not follow or read (GET ${url} answered ${followed(url)})`,
             ),
           }),
@@ -2622,7 +2622,7 @@ describe("Conformance: a family or member the endpoint does not declare", () => 
     }),
   );
 
-  // #352: a server that answers 5xx to a parameter it does not support
+  // A server that answers 5xx to a parameter it does not support
   // mishandled it.
   it.effect.each([500, 503])("fails each on a probe answered %i", (status) =>
     Effect.gen(function* () {
@@ -3171,7 +3171,7 @@ describe("Conformance: the filter grammar profile", () => {
     }),
   );
 
-  it.effect("spells equivalent filters on the first string attribute, escaped (#458)", () =>
+  it.effect("spells equivalent filters on the first string attribute, escaped", () =>
     Effect.gen(function* () {
       // The first attribute is a number: the rule moves on to `name`, and
       // escapes the comma §2.3 would otherwise read as a list separator.
@@ -3211,14 +3211,14 @@ describe("Conformance: the filter grammar profile", () => {
 
 /**
  * `profile/filter/evaluation` judges a filtered collection against the kit's
- * own §6 fold over the collection served unfiltered (#161). Its servers decode
+ * own §6 fold over the collection served unfiltered. Its servers decode
  * the filter with the package's own codec and evaluate it with an evaluator of
  * their own — SQL's three-valued reading for the correct one, written here
  * independently of the kit's fold, so the oracle is not checked against itself
  * — and the broken ones are each one familiar way of getting §6 wrong: NULL
- * read as a value (#161), NULL sorted below every value, numbers compared as
+ * read as a value, NULL sorted below every value, numbers compared as
  * text, empty linkage read as a value, and a filter evaluated on the sparse
- * representation rather than the complete one (#433).
+ * representation rather than the complete one.
  */
 describe("Conformance: the filter evaluation oracle", () => {
   const Maker = Resource.make("makers", { attributes: {} });
@@ -3588,7 +3588,7 @@ describe("Conformance: the filter evaluation oracle", () => {
       // Two empty groups; ne, gte, lt, lte, gt, nin, isnull twice and excluded
       // middle on `colour`; lt, lte, gt, gte and isnull on `price`, never NULL;
       // eq, ne, nin and isnull twice on `maker`; the seven §6.5 corollary trees
-      // on `colour` (#458); eq beside a fieldset; and eq beside `include`.
+      // on `colour`; eq beside a fieldset; and eq beside `include`.
       expect(outcomeFor(report, RULE)).toMatchObject({
         _tag: "Passed",
         probes: 30,
@@ -3650,7 +3650,7 @@ describe("Conformance: the filter evaluation oracle", () => {
         "F-CONS-1",
         "F-EVAL-4 / F-ORD-5 / F-CMP-1",
         "F-EVAL-4 / F-ORD-5 / F-IN-2 / F-IN-3",
-        // #458: De Morgan's `Not` over a group, `Not(In)`, and the respelled
+        // De Morgan's `Not` over a group, `Not(In)`, and the respelled
         // De Morgan tree, each negating an UNKNOWN to TRUE.
         "F-CONS-2",
         "F-CONS-2",
@@ -4183,7 +4183,7 @@ describe("Conformance: the write fixture", () => {
       if (route === "POST /articles") return onCreate(request);
       if (route === "POST /operations") return onOperations(request);
       // `writeApi` declares `include` and `fields[TYPE]` on no endpoint, so it
-      // refuses either on every endpoint, as JSON:API requires (#278, #310).
+      // refuses either on every endpoint, as JSON:API requires.
       const refused = Arr.findFirst(
         [...queryOf(request).keys()],
         (key) => key === "include" || key.startsWith("fields["),
@@ -4446,7 +4446,7 @@ describe("Conformance: the write fixture", () => {
         });
         // Only the requests that carry a query leave: the baseline was answered,
         // the `include` probe was not. The rule itself decides nothing on an
-        // answer it could not read (#352), and says so; `runRule` names the redirect.
+        // answer it could not read, and says so; `runRule` names the redirect.
         const queries = yield* run(undefined, undefined, {
           client: redirectingSome((_, url) => url.search !== ""),
         });
@@ -4551,7 +4551,7 @@ describe("Conformance: the write fixture", () => {
         const { report } = yield* run(undefined, undefined, {
           client: followingOffsite((_, url) => url.searchParams.has("unknown"), "refused"),
         });
-        // The rule's baseline is read, so 1 of its 2 requests went unread (#438).
+        // The rule's baseline is read, so 1 of its 2 requests went unread.
         expect(outcomeFor(report, "spec/query/unknown-query-parameter")).toEqual({
           _tag: "Skipped",
           rule: expect.anything(),
@@ -4676,7 +4676,7 @@ describe("Conformance: the write fixture", () => {
   };
 
   it.effect(
-    "reads a client that rewrites every request onto another origin as the server it sends to (#359)",
+    "reads a client that rewrites every request onto another origin as the server it sends to",
     () =>
       Effect.gen(function* () {
         const direct = yield* run();
@@ -6117,7 +6117,7 @@ describe("Conformance: the write fixture", () => {
   );
 
   brokenWrite(
-    // What `Endpoint.create` answered before #428: a foreign type failed its
+    // What `Endpoint.create` answered before: a foreign type failed its
     // `data.type` literal, a 400.
     "a create of a type the endpoint does not serve answered 400, not 409",
     "spec/status/create-conflict-type",
@@ -6260,7 +6260,7 @@ describe("Conformance: the write fixture", () => {
   );
 });
 // ---------------------------------------------------------------------------
-// Atomic operations processing (#164)
+// Atomic operations processing
 // ---------------------------------------------------------------------------
 
 /**
@@ -6810,7 +6810,7 @@ describe("Conformance: atomic operations processing", () => {
   );
 });
 // ---------------------------------------------------------------------------
-// An atomic `remove` naming a resource that does not exist (#477)
+// An atomic `remove` naming a resource that does not exist
 // ---------------------------------------------------------------------------
 
 /**
@@ -6949,7 +6949,7 @@ describe("Conformance: an atomic remove naming an absent resource", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Pagination links enumerate the collection (#166)
+// Pagination links enumerate the collection
 // ---------------------------------------------------------------------------
 
 /**
@@ -7993,7 +7993,7 @@ describe("Conformance: pagination links enumerate the collection", () => {
   });
 });
 // ---------------------------------------------------------------------------
-// `self` and `related` links dereference (#168)
+// `self` and `related` links dereference
 // ---------------------------------------------------------------------------
 
 describe("Conformance: `self` and `related` links dereference", () => {
@@ -9195,7 +9195,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
       reference: "https://jsonapi.org/format/1.1/#fetching-resources",
     });
     // The spec says what a `related` link answers in prose without a keyword,
-    // so the comparison with the linkage is graded SHOULD (owner, #312).
+    // so the comparison with the linkage is graded SHOULD (owner).
     expect(Conformance.rules.find(({ id }) => id === MATCHES)).toMatchObject({
       tier: "spec",
       level: "SHOULD",
@@ -9209,7 +9209,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
       reference: "https://jsonapi.org/format/1.1/#fetching-relationships",
     });
     // A relationship link answering the relationship's own identifiers is
-    // §Relationships' definition, without a keyword: a SHOULD (owner, #309).
+    // §Relationships' definition, without a keyword: a SHOULD (owner).
     expect(Conformance.rules.find(({ id }) => id === RELATIONSHIP_MATCHES)).toMatchObject({
       tier: "spec",
       level: "SHOULD",
@@ -9222,7 +9222,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
       section: "Fetching Resources",
       reference: "https://jsonapi.org/format/1.1/#fetching-resources",
     });
-    // So is a top-level `self` answering the same document (owner, #309).
+    // So is a top-level `self` answering the same document (owner).
     expect(Conformance.rules.find(({ id }) => id === TOP_MATCHES)).toMatchObject({
       tier: "spec",
       level: "SHOULD",
@@ -9233,7 +9233,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
       Conformance.rules.map(({ id }) => id).filter((id) => id.startsWith("spec/links/")),
     ).toEqual(LINK_RULES);
     expect(Conformance.gaps.map(({ area }) => area)).not.toContain("Link dereferenceability");
-    // The narrower gap #168 declared in its place is closed too (#309).
+    // The narrower gap declared in its place is closed too.
     expect(Conformance.gaps.map(({ area }) => area)).not.toContain(
       "Relationship and top-level `self` links",
     );
@@ -9245,7 +9245,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
       const server = recording(linked());
       const report = yield* verifyCanned(server.serve, { skip: ["spec/links/"] }, server.client);
       expect(report.outcomes.filter(({ rule }) => rule.id.startsWith("spec/links/"))).toEqual([]);
-      // Without it, all seven run — the two SHOULDs #309 split off included.
+      // Without it, all seven run — the two SHOULDs included.
       const all = yield* verifyCanned(server.serve, {}, server.client);
       expect(
         all.outcomes.map(({ rule }) => rule.id).filter((id) => id.startsWith("spec/links/")),
@@ -9254,7 +9254,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
   );
 
   // -------------------------------------------------------------------------
-  // A relationship's own `self` link (#309)
+  // A relationship's own `self` link
   // -------------------------------------------------------------------------
 
   /** The relationship-`self` MUST's findings against `serve`. */
@@ -9786,7 +9786,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
   );
 
   // -------------------------------------------------------------------------
-  // A document's top-level `self` link (#309)
+  // A document's top-level `self` link
   // -------------------------------------------------------------------------
 
   /**
@@ -10150,20 +10150,18 @@ describe("Conformance: in-process", () => {
     }),
   );
 
-  it.effect(
-    "holds the middleware to the 400 for `sort` on a collection endpoint without it (#261)",
-    () =>
-      Effect.gen(function* () {
-        // `list` declares `include` and `fields` but no `sort`.
-        const report = yield* run({ only: ["spec/query/sort-unsupported-endpoint"] });
-        expect(outcomeFor(report, "spec/query/sort-unsupported-endpoint")).toMatchObject({
-          _tag: "Passed",
-          probes: 2,
-        });
-      }),
+  it.effect("holds the middleware to the 400 for `sort` on a collection endpoint without it", () =>
+    Effect.gen(function* () {
+      // `list` declares `include` and `fields` but no `sort`.
+      const report = yield* run({ only: ["spec/query/sort-unsupported-endpoint"] });
+      expect(outcomeFor(report, "spec/query/sort-unsupported-endpoint")).toMatchObject({
+        _tag: "Passed",
+        probes: 2,
+      });
+    }),
   );
 
-  it.effect("holds the middleware to the 400 for `include` on an endpoint without it (#261)", () =>
+  it.effect("holds the middleware to the 400 for `include` on an endpoint without it", () =>
     Effect.gen(function* () {
       const undeclared = HttpApi.make("undeclared").add(
         Group.make(Article, Endpoint.get(Article, { fields: true })),
@@ -10184,11 +10182,11 @@ describe("Conformance: in-process", () => {
     }),
   );
 
-  it.effect("holds the middleware to the Accept-weight rule #101 fixed", () =>
+  it.effect("holds the middleware to the Accept-weight rule", () =>
     Effect.gen(function* () {
       // `q` is an Accept-header weight, not a media type parameter (RFC 9110
       // §12.4.2). The kit reported this against the shipped middleware before
-      // #101 was fixed; it now guards the fix against regressing.
+      // A regression guard.
       const report = yield* run({
         only: [
           "spec/content-negotiation/accept-weight-is-not-a-parameter",
@@ -11526,7 +11524,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
         tags(passing.report, ["spec/status/create-client-id", "spec/status/create-conflict-id"]),
       ).toEqual(["Skipped", "Skipped"]);
 
-      // What `Endpoint.create` does (#429): drops the id and answers 201.
+      // What `Endpoint.create` does: drops the id and answers 201.
       const { report, posts, writes } = yield* run({ clientIds: "ignored" }, unsupported);
       expect(failed(report)).toEqual(["spec/status/create-client-id-unsupported"]);
       expect(findingsOf(report, "spec/status/create-client-id-unsupported")).toEqual([
@@ -11844,7 +11842,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
 // ---------------------------------------------------------------------------
 
 /**
- * The client-generated id rules for an atomic `add` (#471), against a canned
+ * The client-generated id rules for an atomic `add`, against a canned
  * operations endpoint over a store of posts, conformant by default, with one
  * switch per deliberate breakage. Each request carries one `add`, so a refusal
  * applies nothing.
