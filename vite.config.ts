@@ -1,26 +1,10 @@
-/**
- * Root workspace config. Owns the repo-wide format / lint / staged passes
- * (read statically by `vp fmt` / `vp lint` / `vp staged`), the library's own
- * task graph (`typecheck`, `build`, `typecheck:dist`, `test:unit`, `docgen`),
- * the root `check` aggregate over every package's type gate, and the `vp pack`
- * build that emits `dist/`.
- *
- * Copied in shape from the consuming applications' root config (via
- * effect-drizzle-ext, the library reference): every comment that explains a
- * load-bearing decision is part of the standard and travels with the config.
- */
-
 import { fileURLToPath } from "node:url";
 import { recommended } from "@effect/tsgo/oxlint-presets";
 import effect from "@enfect/oxlint";
 import { defineConfig } from "vite-plus";
 
-/**
- * Input fingerprint for the cached tasks: auto tracking minus node_modules
- * bookkeeping churn (pnpm rewrites `.modules.yaml` on every install), with the
- * lockfile back explicitly so a dependency upgrade still invalidates a
- * type-check or a test run.
- */
+// Auto tracking minus node_modules churn, with the lockfile back so a
+// dependency upgrade still invalidates a cached task.
 const cacheInputs = [
   { auto: true },
   "!node_modules/**",
@@ -29,22 +13,12 @@ const cacheInputs = [
   { pattern: "pnpm-lock.yaml", base: "workspace" as const },
 ];
 
-/**
- * Vitest's worker cap, from `VITEST_MAX_WORKERS` when it is set (a loaded or
- * memory-bound machine); otherwise Vitest's own default.
- */
 const workerOptions = process.env.VITEST_MAX_WORKERS
   ? { maxWorkers: Number(process.env.VITEST_MAX_WORKERS) }
   : {};
 
 export default defineConfig({
-  // Staged-file checks run by `vp staged` (pre-commit): format with fixes,
-  // then lint WITHOUT fixes. `vp check --fix` would also apply the autofixes
-  // of the type-aware rules, even those at `warn` (`no-unnecessary-type-
-  // assertion` and friends), to the staged files at commit time, so the
-  // commit would differ from the tree the gates verified (#535). The lint
-  // step tolerates a commit that stages only files oxlint does not read
-  // (Markdown, JSON, YAML).
+  // Lint without fixes, so a type-aware autofix never lands unverified.
   staged: {
     "*.{js,mjs,ts,json,md,yml,yaml}": [
       "vp check --fix --no-lint",
@@ -52,10 +26,8 @@ export default defineConfig({
     ],
   },
   fmt: {
-    // CHANGELOG.md is written by `changeset version`; the generated API docs
-    // under docs/ are gitignored (only the three hand-written notes are
-    // tracked) and are docgen's output, not ours to format.
-    ignorePatterns: ["**/dist/**", "CHANGELOG.md", "docs/modules/**", "docs/index.md"],
+    // CHANGELOG.md is written by Changesets; docs/api/ is docgen output.
+    ignorePatterns: ["**/dist/**", "CHANGELOG.md", "docs/api/**"],
     overrides: [
       {
         files: ["**/*.md"],
@@ -66,33 +38,17 @@ export default defineConfig({
     ],
   },
   lint: {
-    // test/emitted/ is type-checked against the BUILT declarations
-    // (`typecheck:dist`, tsconfig.dist.json). tsgolint would read it under the
-    // root tsconfig.json, which excludes it, so it resolves the package through
-    // `exports` to `dist/`: it would fail on a clean tree and pass after a
-    // build, a lint result that depends on build output (#535).
+    // test/emitted/ and test/floor/ resolve the package through `dist/` or a
+    // scratch install, so they are checked by their own tasks.
     ignorePatterns: [
       "**/dist/**",
       "**/node_modules/**",
       "**/coverage/**",
       "test/emitted/**",
-      // A consumer of the packed tarball on effect 4.1.0, type-checked by
-      // `typecheck:floor` against a scratch install; the root has no such
-      // install to resolve it against.
       "test/floor/**",
     ],
     extends: [recommended, effect.configs.recommended],
-    // Type-aware rules and a full type check through oxlint-tsgolint (bundled
-    // with vite-plus, patched by `effect-tsgo patch --oxlint`), so `vp check`
-    // also catches what only type information shows (#535). tsgolint reads
-    // each file's nearest tsconfig.json: the root one maps the package name to
-    // `src/` (as do the examples'), so the result does not depend on `dist/`.
     options: { typeAware: true, typeCheck: true },
-    // oxlint's default plugins (eslint, typescript, unicorn, oxc) plus the
-    // `import`, `promise` and `vitest` rule sets; `correctness`, `suspicious`
-    // and `perf` run at `error` across all of them (#532). The handful of
-    // their rules that cut across this library's conventions are off below,
-    // each with its reason.
     plugins: ["eslint", "typescript", "unicorn", "oxc", "import", "promise", "vitest"],
     categories: {
       correctness: "error",
@@ -108,57 +64,25 @@ export default defineConfig({
         },
       ],
       "eslint/prefer-const": "warn",
-      // `casting-awareness` is an awareness prompt, not a defect rule — it
-      // fires on every `as`, including the narrowings the conditional-type
-      // machinery in Resource.ts / Query.ts / Endpoint.ts structurally
-      // requires (see `AsFields` in AGENTS.md). Stays visible as a warning.
+      // Fires on every `as`, including the narrowings the conditional-type
+      // machinery structurally requires.
       "effect/casting-awareness": "warn",
+      // Never bind effect's `Record` module as `Record` (use `R`): it hides
+      // the built-in from `no-unsafe-dictionary-type`.
 
-      // ---- Effect preset: staged rollout ---------------------------------
-      // `effect.configs.recommended` turns on every rule at `error`. The
-      // modules under src/ predate the preset, so the rules below sit at
-      // `warn`: every site stays reported and countable, but the tree stays
-      // committable while the remaining work lands incrementally. Flip a rule
-      // back to `error` (and delete its line) the moment its count reaches
-      // zero — a new site is a defect, not headroom. Counted on adopting
-      // plugin 0.6.0 (`vp lint`, 2026-10-22): 4,040 warnings, with 813
-      // `require-safety-comment-for-type-assertion`, 626 `casting-awareness`,
-      // 489 `prefer-option-over-null` the largest (that one,
-      // `avoid-non-null-assertion`, at 237, and `avoid-native-object-helpers`,
-      // at 326, have since reached zero and are at `error`; the last
-      // `prefer-option-over-null` sites went in #533's six PRs). Per-rule
-      // remainder and the order to pay it down in: #436. The move to @enfect/oxlint 0.9.0 (#532),
-      // the same rules under the same `effect/` names plus
-      // `no-cause-in-http-response` (no sites), left the count unchanged.
+      // ---- Staged rollout ------------------------------------------------
+      // These sit at `warn` because existing code predates them. A new site
+      // is a defect, not headroom: flip a rule back to `error` (delete its
+      // line) when its count reaches zero.
       "effect/require-safety-comment-for-type-assertion": "warn",
       "effect/no-chained-type-assertions": "warn",
-      // `no-unsafe-dictionary-type` and `no-known-value-widening` (both at
-      // `error`) only check the built-in `Record<K, V>` while no local
-      // binding is named `Record`, so importing effect's `Record` module
-      // under that name hides every such site in the file (#275). Never bind it as `Record`: spell the alias `R`
-      // (`import * as R from "effect/Record"`), the alias
-      // `effect/prefer-namespace-imports` requires. No other binding in a
-      // file may be called `R`, so a resource type parameter is `Res`.
       "effect/prefer-effect-is": "warn",
-      // ---- Type-aware rules (tsgolint): staged rollout (#535) ------------
-      // `typeAware` turned these on. Each sits at `warn` with its count on
-      // adoption (`vp lint`, 2026-10-30); the same rules as the Effect block
-      // above: flip one back (delete its line) when its count reaches zero.
-      // The per-rule plan is #536.
-      // 563 sites: the type-level `as` narrowings `casting-awareness` and
-      // `require-safety-comment-for-type-assertion` already count.
       "typescript/no-unsafe-type-assertion": "warn",
-      // 63 sites, 59 of them in tests (most in the type-level tests under test/).
       "typescript/no-unnecessary-type-parameters": "warn",
-      // 43 sites, 39 in src/ (most in Resource.ts's mapped types).
       "typescript/no-generated-empty-object-type": "warn",
-      // `@effect/tsgo`'s preset sets its rules at `warn`; the `correctness` /
-      // `suspicious` categories above raised these three to `error`. Back at
-      // the preset's level, counted: 23 sites (11 in tests and examples),
-      // and 24 (23 in tests and examples). The tsc gate leaves both off.
       "effecttsgo/any-unknown-in-error-context": "warn",
       "effecttsgo/unsafe-effect-type-assertion": "warn",
-      // At zero sites: the preset's `warn`, raised so a new one fails the gate.
+      // Raised from the preset's `warn` so a new site fails the gate.
       "effecttsgo/multiple-effect-provide": "error",
       "effecttsgo/catch-conditional-refail-to-catch-if": "error",
       "effecttsgo/global-error-in-effect-failure": "error",
@@ -166,13 +90,8 @@ export default defineConfig({
       "effecttsgo/unnecessary-typeof-type": "error",
       "effecttsgo/prefer-typed-schema-decoder": "error",
       "effecttsgo/schema-number": "error",
-      // Outside the categories above, so on only by name; `effect/avoid-any`
-      // (`as any`, `as unknown as T`) is the preset's own `error`.
       "typescript/no-explicit-any": "error",
-      // tsconfig.json keeps `unstableApiUsage` at "suggestion" so the HTTP
-      // surface this library is built on (`effect/http`, `effect/http-api`,
-      // much of it `@stability unstable`) does not flood the gates (#205):
-      // 917 sites, none actionable here. Off in lint for the same reason.
+      // The HTTP surface this library is built on is `@stability unstable`.
       "effecttsgo/unstable-api-usage": "off",
       "typescript/no-empty-object-type": "off",
       "typescript/ban-ts-comment": "off",
@@ -209,9 +128,7 @@ export default defineConfig({
       "vitest/require-to-throw-message": "off",
       // Reports prose comments that mention `expect(` as commented-out tests.
       "vitest/no-commented-out-tests": "off",
-      // `@effect/vitest`'s runners (#600) are test blocks the rule does not
-      // know by default: without them every `expect` in an `it.effect` body
-      // reads as standalone.
+      // `@effect/vitest`'s runners are test blocks too.
       "vitest/no-standalone-expect": [
         "error",
         {
@@ -226,10 +143,7 @@ export default defineConfig({
       ],
     },
     overrides: [
-      // `strict-effect-provide` flags `Effect.provide` outside an
-      // application's entry point. A test and an example program ARE their
-      // own entry points: providing the layers is what they are for. No site
-      // in src/ (78 in tests and examples on adoption, #535).
+      // Tests and example programs are their own entry points.
       {
         files: ["**/*.test.ts", "examples/**"],
         rules: {
@@ -245,29 +159,16 @@ export default defineConfig({
           "effect/avoid-ts-ignore": "off",
         },
       },
-      // effect's `HttpApiEndpoint` constructors guard their `error` option with
-      // a conditional type (`ErrorNoStream`) that no generic error list can
-      // satisfy: TypeScript defers a conditional type over a type parameter,
-      // and `ErrorNoStream` is not exported, so no local type or helper can
-      // prove it either (#436). Our error wires never stream, so each
-      // constructor call in this file carries an expect-error directive on
-      // the `error:` property (and, under TS7, on the properties the failed
-      // overload anchors at: AGENTS.md). Every other file, colocated tests
-      // included, is held to `avoid-ts-ignore` at `error`; a compile-time
-      // negative assertion goes in a `test/*.types.ts` file.
+      // effect's `HttpApiEndpoint` constructors guard `error` with a deferred,
+      // unexported conditional type (`ErrorNoStream`) no generic error list
+      // can satisfy, so each call carries an expect-error directive.
       {
         files: ["src/Endpoint.ts"],
         rules: {
           "effect/avoid-ts-ignore": "off",
         },
       },
-      // Build/test configs and the module-hook fixture are evaluated by Vite /
-      // Vitest / Node in bare Node, before any Effect runtime exists — there
-      // is no `Config` provider to read from and no `FileSystem` or
-      // `ChildProcess` service to call, so `process.env` and `node:*` are the
-      // only things that work there. The two artifact tests drive the built
-      // package from outside, the same way: a module graph walk, and a
-      // consumer project compiled by `tsc` in a temp directory.
+      // Run in bare Node, outside any Effect runtime.
       {
         files: [
           "**/vite.config.ts",
@@ -284,10 +185,7 @@ export default defineConfig({
           "effect/use-command-executor-service": "off",
         },
       },
-      // Tests that send requests one after another on purpose (a case per
-      // malformed key, each answer checked before the next is sent), and the
-      // prototype-pollution probes that define a member on Object.prototype
-      // to prove the codecs ignore it.
+      // Sequential requests on purpose, and prototype-pollution probes.
       {
         files: ["**/*.test.ts"],
         rules: {
@@ -295,9 +193,6 @@ export default defineConfig({
           "eslint/no-extend-native": "off",
         },
       },
-      // The consumer project test/declaration-emit.test.ts compiles lives in
-      // a temp directory made in `beforeAll` and removed in `afterAll`,
-      // around every case, outside any Effect scope.
       {
         files: ["test/declaration-emit.test.ts"],
         rules: {
@@ -314,29 +209,11 @@ export default defineConfig({
   },
   run: {
     tasks: {
-      // The whole CI pipeline, as one task: `.github/workflows/ci.yml` runs
-      // exactly `vp run ci` after its install, on each Node line of its
-      // matrix, so a green local `vp run ci` is a green CI run. It runs the
-      // gates in order and stops at the first failure:
-      //
-      // 1. `pnpm run prepare`: the Effect-patched `tsc` / `oxlint` every gate
-      //    runs on. CI installs with `--ignore-scripts`, so the repository's
-      //    own `prepare` runs here, and locally it is an idempotent re-run.
-      // 2. `build` first, so `check`'s `typecheck:dist`, the entry-point test,
-      //    `docgen` and `typecheck:floor` read a fresh `dist/` (a cache hit
-      //    after this).
-      // 3. `vp check` (format + lint), then `check` (the type gates), the
-      //    unit suites of the root and every example, and `docgen` (every
-      //    JSDoc `@example` compiled and executed).
-      // 4. `pnpm audit --audit-level high`, then `typecheck:floor` (#586);
-      //    both need network.
-      //
-      // A shell chain rather than `dependsOn`, because the order matters and a
-      // graph would run independent gates in parallel.
+      // What CI runs. A shell chain, not `dependsOn`, so the gates run in
+      // order and stop at the first failure.
       ci: {
         command: [
           "node --version",
-          "pnpm run prepare",
           "vp run build",
           "vp check",
           "vp run --concurrency-limit 2 check",
@@ -347,10 +224,8 @@ export default defineConfig({
         ].join(" && "),
         cache: false,
       },
-      // The CI type gate, as one task: the sources + colocated tests + the
-      // type-level tests (`typecheck`), the emitted declarations
-      // (`typecheck:dist`, which builds `dist/` first), and every example.
-      // A pure graph node.
+      // Every type gate: sources and type-level tests, the emitted
+      // declarations, and the examples.
       check: {
         command: "echo 'check: every type gate green'",
         dependsOn: [
@@ -369,9 +244,7 @@ export default defineConfig({
           output: [],
         },
       },
-      // The other type-level tests resolve the package to ./src; this one
-      // resolves it to the built ./dist/index.d.ts, which is what consumers
-      // actually see. See test/emitted/requirements.types.ts.
+      // test/emitted/ against the built declarations consumers see.
       "typecheck:dist": {
         command: "tsc -p tsconfig.dist.json",
         dependsOn: ["build"],
@@ -380,20 +253,14 @@ export default defineConfig({
           output: [],
         },
       },
-      // The peer floor (#586): a typed `Client.make` consumer compiled
-      // against the PACKED package and effect 4.1.0, the lowest the peer range
-      // admits, so the published declarations cannot silently need a newer
-      // effect. Reads `dist/` (via `pnpm pack`), hence `build`. See
-      // test/floor/check.sh. Needs network (a scratch `pnpm install`), so it is
-      // not in `check`; `ci` runs it last.
+      // A consumer of the packed package on the lowest `effect` the peer range
+      // admits (test/floor/check.sh). Needs network.
       "typecheck:floor": {
         command: "bash test/floor/check.sh",
         dependsOn: ["build"],
         cache: false,
       },
-      // Emits `dist/`: the JavaScript with `vp pack` (see the `pack` block
-      // below), then one declaration file per source module with `tsc`
-      // (tsconfig.build.json, which says why the declarations are not bundled).
+      // JavaScript with `vp pack`, then per-module declarations with `tsc`.
       build: {
         command: "vp pack && tsc -p tsconfig.build.json",
         cache: {
@@ -409,25 +276,15 @@ export default defineConfig({
           output: [],
         },
       },
-      // The root unit suite under one Istanbul coverage map
-      // (`coverage/coverage-final.json`), which `fallow audit` reads for exact
-      // per-function CRAP scores (`health.coverage` in .fallowrc.json).
-      // Without it fallow estimates every function as uncovered, and any
-      // function with cyclomatic complexity ≥ 5 fails the gate on its own.
-      // Run this before `fallow audit` (the Claude Code PreToolUse fallow gate
-      // runs the audit on `git commit` / `git push` but never refreshes this
-      // map). Depends on `build` because test/entry-points.test.ts walks
-      // `dist/`.
+      // The coverage map `fallow audit` reads; `build` because
+      // test/entry-points.test.ts walks `dist/`.
       "test:coverage": {
         command: "vp test run --coverage",
         dependsOn: ["build"],
         cache: false,
       },
-      // Type-checks AND executes every JSDoc `@example`, and generates the API
-      // docs under docs/. Not part of `check`: `ci` runs it after the unit
-      // suites, so a broken example names `docgen` as the failing gate. Depends on `build`
-      // because docgen 4.x resolves an example's package imports through the
-      // package's `exports`, i.e. against `dist/`, not `src/`.
+      // Compiles and runs every JSDoc `@example` against `dist/`; writes the
+      // API reference to docs/api/.
       docgen: {
         command: "docgen",
         dependsOn: ["build"],
@@ -436,9 +293,7 @@ export default defineConfig({
     },
   },
   resolve: {
-    // Lets the tests import the library by its package name and subpaths,
-    // exactly like user code does, resolved to the sources. Anchored
-    // patterns, so the root cannot swallow a subpath by prefix.
+    // Tests import the package by name, resolved to `src/`.
     alias: [
       {
         find: /^@thomasfosterau\/effect-jsonapi$/,
@@ -462,19 +317,9 @@ export default defineConfig({
     },
     ...workerOptions,
   },
-  // The published JavaScript: one ESM entry per `package.json` export — the
-  // root barrel, the schema barrel and every public module (`src/[A-Z]*.ts`,
-  // published as `@thomasfosterau/effect-jsonapi/<Module>`, #385) — with the
-  // code they share split into hashed chunks, so each module is evaluated
-  // once whichever entry reaches it, and `Resource.make` from the root and
-  // from `./Resource` is the same function. test/entry-points.test.ts pins
-  // the entries to the exports map. `effect` is a peer and stays external.
-  // `platform: "neutral"` because the library runs wherever Effect does —
-  // Workers included — and must not pick up Node built-ins.
-  //
-  // No `dts` here: bundled declarations put a module's types in a hashed
-  // chunk under mangled names, which a consumer's declaration emit cannot
-  // name. The `build` task emits them per module with `tsc` instead.
+  // One ESM entry per export, shared code in chunks. No `dts`: bundled
+  // declarations put types in hashed chunks a consumer's declaration emit
+  // cannot name, so `build` emits them per module with `tsc`.
   pack: {
     entry: ["src/index.ts", "src/schema.ts", "src/[A-Z]*.ts", "!src/**/*.test.ts"],
     format: "esm",
