@@ -8,7 +8,6 @@
 | [Query parameters](query.md) | `include`, `fields`, `sort`, `page`, `filter`, the canonical query string |
 | [The client](client.md) | `Client.make`, include narrowing, error documents, hydration, page cursors |
 | [The server skeleton](server.md) | Flat contracts, the error seam, negotiation, the assembler and registry |
-| [Spec compliance](compliance.md) | What the constructors guarantee, declaration emit, limitations |
 | [Conformance kit](conformance.md) | Running `Conformance` against a server |
 
 ## Overview
@@ -18,6 +17,7 @@
 - Define each **resource once**; identifiers, create/update payloads, documents, query parameters and endpoints are all derived from that single definition.
 - Declare each **error once**; you get a tagged Effect error whose wire encoding _is_ a spec-compliant JSON:API error document with the right HTTP status.
 - **Endpoints** bake in the conventions: the `application/vnd.api+json` media type, conventional paths, spec status codes (200/201/204), typed `include` / `fields[TYPE]` / `sort` / `page[*]` / `filter[*]` query parameters, and content-negotiation rules (406/415).
+- The spec rules the constructors enforce are executable: [`test/compliance.test.ts`](../test/compliance.test.ts) drives each one on the wire, and [`test/compliance.types.ts`](../test/compliance.types.ts) pins those enforced at compile time.
 - Everything is a plain Effect `Schema` / `HttpApiEndpoint` / `HttpApiGroup`, so it composes with `HttpApi`, `HttpApiBuilder`, `HttpApiClient`, `HttpApiTest` and `OpenApi` untouched.
 
 ## Quick start
@@ -100,7 +100,34 @@ import * as Endpoint from "@thomasfosterau/effect-jsonapi/Endpoint";
 import * as Resource from "@thomasfosterau/effect-jsonapi/Resource";
 ```
 
-Each subpath ships its module's own declaration file, which is what lets declaration emit name a type the inferred type of an exported value mentions — see [Declaration emit](compliance.md#declaration-emit). The root import stays the default; nothing needs to move.
+Each subpath ships its module's own declaration file, which is what lets declaration emit name a type the inferred type of an exported value mentions — see [Declaration emit](#declaration-emit). The root import stays the default; nothing needs to move.
+
+### Declaration emit
+
+A project that compiles with `declaration: true` can export what it builds — an endpoint, a group, an `HttpApi`, a client — with no annotation, wherever the resources it is built over are defined:
+
+```ts
+// endpoints.ts
+import { Endpoint } from "@thomasfosterau/effect-jsonapi";
+import { Person } from "./resources.js";
+
+export const getPerson = Endpoint.get(Person);
+```
+
+Declaration emit writes the value's inferred type into the `.d.ts`, so it must be able to name every type that type mentions, such as `Resource.Resource` and `Resource.Id` here. The TypeScript checker names a type only through a namespace the file imports itself or through a module that exports the type directly, never through a namespace alias like the root's `Resource`, and the module subpaths are those modules: it writes `import("@thomasfosterau/effect-jsonapi/Resource").Resource<"people", …>`.
+
+The type-only aliases at the package root (`QuerySchema`, `ContentNegotiation`, `ApiErrorWire`, `BadRequest`, …) served the same purpose for the single-file case. Declaration emit no longer needs them, and they are **deprecated** in favour of the subpaths: write `Query.QuerySchema`, or import it from `@thomasfosterau/effect-jsonapi/Query`. They remain exported for now. The checker still prefers a direct root export when it names a type, so your own emitted `.d.ts` may reference them (`import("@thomasfosterau/effect-jsonapi").ContentNegotiation`), which is why removing them later will be a breaking change for downstream published declarations.
+
+## Limitations
+
+- **Conformance coverage is partial, and says so**: the kit's rules and its declared gaps (`Conformance.gaps`) are listed in [the conformance guide](conformance.md).
+- **Sparse fieldsets are opt-in, not automatic**: `?fields[TYPE]=` is decoded, validated and handed to your handler, and the builders project it when you ask them to — `Handlers.data(article, { included, onResource: Handlers.project(query.fields) })` ([the per-resource transform pass](handlers.md#the-per-resource-transform-pass-onresource)). Nothing is projected behind your back; the builders don't post-process responses against request state on their own. The default document of an endpoint declaring `fields` admits the projected answer, so its clients read those attributes as optional ([sparse fieldsets and the default document](handlers.md#sparse-fieldsets-and-the-default-document)). A fieldset names relationships as well as attributes (`?fields[articles]=title,author`), and `Handlers.project` drops the relationships it does not name, the spec's sparse-fieldset exemption from full linkage covering the `included` members they linked.
+- **Graph-derived include paths are typed to a depth of 2 hops** (`"comments.author"` works, `"comments.author.employer"` doesn't) — a TypeScript recursion-depth trade-off; `{ depth: 3 }` raises it one hop, and the runtime validation matches the same set. Declaring the surface explicitly with `Include.make` lifts the ceiling altogether (up to `Include.MAX_DEPTH`), because the derivation then recurses over the declaration rather than the graph.
+- **Server-side `included` narrowing is not possible**: a handler's return type cannot depend on the runtime value of `?include=` (that's dependent typing). Client-side narrowing is provided via `Client.narrowIncluded`.
+- **Relationship and identifier `meta` are untyped** (free-form records); resource and document meta are typed via options.
+- **Mutually recursive resources** (A ↔ B) need one interface annotation per resource in the cycle — `Resource.make`'s return type is inferred, and two inferred types cannot reference each other. See [Mutually recursive resources](resources.md#mutually-recursive-resources) for the pattern; everything derived from the definitions is unaffected.
+- **`narrowIncluded` over a heterogeneous response narrows by the whole union, not per primary resource**: pass the union of the response's resource definitions (a family's members, say) and each path resolves against every member that declares it, never crossing a member's `paginated` relationship. `included` is document-wide, so it narrows to everything any member reaches; which primary resource reached a given entry is not tracked.
+- **Atomic operations requests are accepted with or without the `ext` media type parameter**: spec-compliant clients send `application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"` (accepted once the middleware declares the extension), but the bare media type is not rejected. Responses always carry the parameter.
 
 ## API
 
