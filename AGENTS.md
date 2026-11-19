@@ -1,154 +1,18 @@
 # AGENTS.md
 
-Claude Code-specific guidance (session hooks, worktree paths) is in [.claude/CLAUDE.md](.claude/CLAUDE.md), which imports this file. `@thomasfosterau/effect-jsonapi` is a publishable library (entry points `.`, `./schema` and one subpath per module, `./Resource`, `./Endpoint`, …), consumed by the website, gardeneria and preferenceflow apps. Its toolchain is the programme's library standard (checklist: [CONTRIBUTING.md](CONTRIBUTING.md#library-template-programme-standard)), with deviations listed at the top of `pnpm-workspace.yaml`. A `gardeneria #NNN` citation in a copied comment names an issue in that app, not this tracker.
+Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) first.
 
-## Common pitfalls
+- You may open pull requests in this repository. Use the GitHub MCP tools or `gh`, and pass `-R thomasfosterau/effect-jsonapi` when the cwd might be another checkout. Write only to this repository.
+- Out-of-scope work you notice: file an issue and move on. Non-idiomatic Effect code (hand-rolled utilities Effect provides, Promise chains, `null` where `Option` fits, …) gets an issue listing the sites and the idiomatic replacement; fix it in your PR only if it's trivial.
+- The issue is the spec; later comments override the body. Re-check its claims against `trunk`.
+- Report each gate you ran with its result, and say which couldn't run and why.
 
-- **Versions live only in the `pnpm-workspace.yaml` catalog** (`catalogMode: strict`; peer ranges under `catalogs.peers`). After editing it, run `pnpm install` and commit `pnpm-lock.yaml` — a stale lockfile fails CI with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`.
-- **`@effect/tsgo`, `@typescript/native` and `vite-plus` bump as a set** (with `vite`, `vitest`, `@vitest/coverage-istanbul` and `typescript`; Dependabot's `toolchain` group holds `vite-plus`, `vitest`, `@vitest/*` and `@effect/tsgo`) — read the comment on `@effect/tsgo` in `pnpm-workspace.yaml` first; an unsupported pairing fails `pnpm install` (the `prepare` script's `effect-tsgo patch` hard-errors). The lockstep sets are the `groups` in `.github/dependabot.yml` (`toolchain`, and `effect` with `@effect/docgen`); every other dependency, `@enfect/oxlint` included, gets its own PR. Dependabot cannot bump the npm aliases (`vite`, which must equal `vite-plus`; `typescript` and `@typescript/native`, to a pairing `@effect/tsgo` supports) or the transitive floors under `overrides` (`js-yaml`, `launch-editor`, `shell-quote`): move them by hand in the toolchain PR, as `.github/dependabot.yml`'s header lists. Its `cooldown` is 1 day, longer than pnpm's `minimumReleaseAge` of 480 minutes (8 hours).
-- **The type checker of record is TypeScript 7** (`tsc`, the native compiler, via `vp run check`). It anchors a failed overload at the _properties_ that fail against the last overload rather than at the one the TS6 checker elaborated, which is why the `@ts-expect-error` markers on effect's `ErrorNoStream` guard in `src/Endpoint.ts` sit on `params:` / `query:` lines as well as `error:`. TS6 (`tsc6`, the JS compiler) is only what the JS-API consumers — `test/entry-points.test.ts`, the tsdown declaration bundler, the editor language service — load. `@effect/docgen` is not one of them: it parses with a compiler bundled in its own dependencies (see [below](#vp-run-docgen-executes-your-examples)).
-- **`vp lint` runs the full Effect preset (`@enfect/oxlint`'s `recommended`, plus `@effect/tsgo`'s) with a staged rollout,** alongside oxlint's `correctness`, `suspicious` and `perf` categories over the `typescript`, `unicorn`, `oxc`, `import`, `promise` and `vitest` plugins. The `warn` tier in `vite.config.ts` is debt, not headroom: fix any new site, and when a rule's count reaches zero flip it to `error` and delete its line. `@ts-expect-error` is the assertion mechanism of `test/*.types.ts` and stays allowed there.
-- **`dist/` JavaScript is bundled; its declarations are not.** `vp pack` (tsdown) emits one ESM entry per export (`.`, `./schema` and each module subpath) with shared code in hashed chunks; `tsc -p tsconfig.build.json` then writes one `.d.ts` per source module, because a consumer's declaration emit cannot name a type in a bundled chunk (#385). `test/entry-points.test.ts` walks the built graph, `test/emitted/*.types.ts` type-check against the emitted `.d.ts`, and `test/declaration-emit.test.ts` compiles a consumer through `node_modules` — all because what consumers see is not what `src/` resolves to.
+## Pitfalls
 
-## Conventions
+- `vp run docgen` executes examples; `vp check` and `vp run check` passing doesn't mean they run.
+- `typecheck:dist`, `test/entry-points.test.ts` and `docgen` read `dist/`: build first.
+- A new query family goes in both the flat and the nested struct in `Query.schema` ([docs/architecture.md](docs/architecture.md)).
 
-- **`exactOptionalPropertyTypes` is on, and absence is spelled without `| undefined`** (`effect/prefer-option-over-null` is at `error`). An options-object member is `readonly x?: T`, and an optional parameter `x?: T`; an Option-valued optional property is `x?: Option.Option<T>`; a "maybe" result is an `Option`, never `T | undefined` or `T | null`. JSON:API wire shapes keep their native optionals and `null` (`data: null`, an absent `included`), but spell them from their schemas (`typeof Schema.Type`, `Schema.NullOr<S>["Type"]`), never as a hand-written union. A caller holding a maybe-`undefined` value omits the key rather than passing `undefined`; forwarding code inside the package builds such objects with `definedMember` / `someMember` from `src/internal/members.ts` (`{ ...definedMember("x", x) }`), because a conditional empty-object spread (`...(x === undefined ? {} : { x })`) is banned by `no-conditional-empty-object-spread`.
-- **Relative imports carry a `.js` extension** (`./Resource.js`), unlike the `.ts` used in effect-web and prosekit-utilities.
-- **Tests import from `vite-plus/test`**, never `vitest` — with one exception: Effect tests import `it` (and `layer`) from `@effect/vitest`, which wraps vitest and adds `it.effect` / `it.live` / `it.layer`. `describe`, `expect` and the hooks still come from `vite-plus/test`; `it.effect` runs under a `TestClock`, so a test that really sleeps uses `it.live`. Run an Effect with `it.effect(…, () => Effect.gen(…))`, never `Effect.runPromise` / `runSync` in a test body (`effect/effect-run-in-body`).
-- **Every export has a doc comment** with a summary, an `@example` for principal APIs, `@since` and a `@category` from the vocabulary in [CONTRIBUTING.md](CONTRIBUTING.md#documentation).
-- **Schema-backed errors are `Schema.TaggedError<Self>()(tag, fields)`** — the spelling in the pinned `effect`; `Schema.TaggedErrorClass` was the beta-line name.
+## Fallow
 
-### `vp run docgen` executes your examples
-
-`vp run docgen` doesn't just type-check JSDoc `@example` blocks — it **compiles them as ESM and runs them**. `@effect/docgen` covers the examples on modules, functions, constants, types, namespaces and exports, and on a class's own doc comment, its methods and static methods, and its non-static, non-`private` properties. It reads neither a constructor's doc comment nor a static property's — it neither prints nor checks them — so put such an example on the class instead. Note this is a separate command/CI step from `vp check` + `vp run check` + `vp run -r test:unit` — those passing does not mean your examples run; run `docgen` too before you're done. A broken example fails the build, not a lint warning.
-
-Consequences for any `@example` in `src/*.ts`:
-
-- It must be a **complete, self-contained program**: import everything it uses, including from the package root (`@thomasfosterau/effect-jsonapi`) exactly as a consumer would.
-- **`declare const` is banned.** It emits no runtime value, so `docgen` fails at execution, not at type-check — the error is easy to misread as unrelated. If an example needs a value you don't want to construct for real (a handler's request context, a client), take it as a function parameter or build it with `Effect.gen`.
-- It must actually run without throwing — `Effect.runPromise`/`runSync` (or leaving a `Effect.gen` unexecuted only if the surrounding example doesn't claim to run it) needs to succeed, not just type-check.
-- Ground examples in real usage pulled from `examples/` or `test/` rather than inventing new call shapes — those are already known to compile and run.
-
-This restriction is **specific to `src/*.ts` JSDoc examples**. `declare const` is fine in `test/*.types.ts` (see below) — those files are asserted by `tsc`, never executed by docgen or vitest. `src/index.ts` is excluded from docgen (`docgen.json`), so nothing executes its module doc; keep it free of code samples.
-
-Docgen (4.x) parses `src/` under `parseCompilerOptions` in `docgen.json` with the TypeScript 6.0 that its `ts-morph` dependency bundles, never the workspace's TS6 alias (#343). It compiles the examples by spawning the `tsc` on `PATH` (its `tscExecutable` option), which under `vp run` is the native TS7 `tsc`, under `examplesCompilerOptions`, then runs them with `tsx` — only because `docgen.json` sets `"runExamples": true`; the default is type-check only, so dropping the key silently stops the examples running. It rewrites no imports: an example's `@thomasfosterau/effect-jsonapi` imports resolve through the package's own `exports`, i.e. against `dist/`, which is why the `docgen` task depends on `build`. `types: ["node"]` is explicit in both option sets because TypeScript 6 and later no longer auto-include `@types`.
-
-Three rules follow from that pipeline:
-
-- **Import assertion functions by name** (`import { strictEqual } from "node:assert";`). Docgen injects no imports, so a bare `assert.…` is an unknown name.
-- **Fence every `@example` as `ts`.** Docgen extracts only fenced code whose info string starts with `ts` / `typescript`; an unfenced example is printed but never checked.
-- **A `ts` fence in a doc comment's description is an example too.** Docgen type-checks and runs every such fence in a description as well as under `@example`. Fence a type sketch that is not a complete program as `ts skip-type-checking` (docgen skips it and prints a plain `ts` fence).
-
-## Architecture
-
-### Everything derives from `Resource.make`
-
-A `Resource.make(type, { attributes, relationships, meta })` call in `src/Resource.ts` is the single source of truth for a resource. Every other module takes a resource definition (or several) as input and derives schemas or endpoints from it — nothing else declares resource shape independently:
-
-- **`Resource.ts`** — the resource schema itself, id/identifier schemas, create/update payload schemas, `sortable`/`filterable`/`attributeKeys` helpers used to build allow-lists for other modules.
-- **`Query.ts`** — given a resource (or an explicit sort/filter/page option set derived from one), builds the `include`/`fields`/`sort`/`page`/`filter` query-parameter schema.
-- **`Document.ts`** — given a resource, builds the top-level JSON:API document/collection schemas, with `included` derived from the relationship graph.
-- **`Endpoint.ts`** — given a resource (and a `Query.schema` built from it), builds the `HttpApiEndpoint` definitions (list/get/create/update/delete + relationship endpoints).
-- **`Handlers.ts`** — types handler signatures against the `Document`/`Query` shapes an `Endpoint` expects, so a handler that doesn't match its endpoint is a compile error.
-
-**Import direction is one-way: `Resource.ts` imports neither `Query.ts` nor `Endpoint.ts`.** `Query.ts` uses `Resource.ts`'s allow-list helpers (`allTargets`, `attributeKeys`, `filterable`, `includePaths`) and `Endpoint.ts` uses both. Reversing any edge creates a cycle. `Query.ts` is generic over the structural shape a resource definition produces rather than over the `Resource` type, so when tracing "where does this type come from", follow the resource definition through generic parameters, not through `import` statements.
-
-### Where the type machinery lives
-
-`src/Resource.ts` and `src/Query.ts` carry almost all the conditional/mapped-type work. `src/Endpoint.ts` is large mostly from repetition (one block per CRUD/relationship endpoint kind), not novel type-level logic — start in `Resource.ts`/`Query.ts` first when debugging a type error that doesn't obviously belong to one endpoint.
-
-**`AsFields<T>`** (`src/Resource.ts`, with private copies in `src/Query.ts` and `src/Atomic.ts`) is the recurring escape hatch:
-
-```ts
-type AsFields<T> = T extends Schema.Struct.Fields ? T : never;
-```
-
-Mapped/conditional types that _compute_ a `Schema.Struct.Fields`-shaped record (e.g. merging base + extra attributes, or relationship descriptors) can't be proven by TS to satisfy that constraint while their type parameters are still generic, even though every concrete instantiation does satisfy it. `AsFields` re-asserts the constraint at the point of use instead of loosening it. If you hit a "does not satisfy the constraint `Struct.Fields`" error on a generic helper that clearly produces struct fields, this is the pattern to reach for — not `as any`.
-
-### Type-level tests: `test/*.types.ts`
-
-Compile-time invariants (what should and shouldn't type-check) live in `test/*.types.ts`, not in `*.test.ts` runtime assertions. They're checked by the `typecheck` task (`tsc -p tsconfig.json`, which resolves the package name to `./src`), never executed; `test/emitted/*.types.ts` is the exception, checked by `typecheck:dist` against the built declarations after `vp run build`. The assertion mechanism is `@ts-expect-error` immediately above a statement that must fail to compile; a passing build means every expected error actually fired (an unused `@ts-expect-error` is itself a `tsc` error). `declare const` is fine here — these files are never run.
-
-Add a case here (not a `.test.ts`) when you're asserting that something _doesn't_ compile, or asserting an inferred type shape rather than a runtime value.
-
-### Wire format: flat vs. nested query schema
-
-`Query.schema` builds two struct shapes for the same logical query, not one:
-
-- A **flat**, bracket-keyed struct — `filter[status]`, `page[limit]`, `fields[articles]` — because that's what JSON:API actually puts on the wire and what `HttpApiEndpoint` decodes URL search params into.
-- A **nested**, fully-decoded struct — `{ filter: {...}, page: {...}, fields: { articles: [...] } }` — because that's what's ergonomic for handler code and client call sites.
-
-These aren't two independent schemas kept in sync by hand: the flat struct is built field-by-field alongside the nested one in the same function (`src/Query.ts`, look for `flatFields`/`nestedFields`), then related by a transformation. If you add a new query family, add it to _both_ field records in the same place, not just the one that looks user-facing — a family present only in the nested struct won't have a wire representation at all, and one present only in the flat struct won't decode into anything handler code can read.
-
-The same split explains why filtering has two forms with different flat encodings: an explicit `filter: { key: Schema }` map registers one `filter[key]` flat field per declared key (a fixed, enumerable set), while `filter: true` (the open, spec-shaped filter grammar derived from the resource's `filter: true`-marked attributes) can't be enumerated ahead of time — arbitrary nesting like `filter[age][gt]=18` — so its flat struct instead uses `Schema.StructWithRest` to accept any bracket suffix matching the grammar, plus one explicit bare `filter` key so a malformed (non-bracketed) value still reaches the grammar's own rejection instead of being silently dropped as an excess property.
-
-## Commands
-
-- `pnpm install` — dependencies, the Vite+ git hooks (pre-commit runs `vp staged`: format with fixes, then lint without, on staged files) and, through the root `prepare` script, the Effect-patched `tsc` / `oxlint` binaries. There is **no pre-push hook** — run the gates yourself.
-- `vp check` — format + lint (Oxfmt + Oxlint); the lint is type-aware through oxlint-tsgolint (`typeAware` + `typeCheck` in `vite.config.ts`), reading each file's nearest `tsconfig.json`, so it never depends on `dist/`. `vp run check` — the type gate: sources + colocated tests + type-level tests (`typecheck`), the emitted declarations (`typecheck:dist`, which builds `dist/` first) and every example. They are different commands.
-- `vp run -r test:unit` — the root suite and each example's, under `vite-plus/test`.
-- `vp run typecheck:floor` — a typed `Client.make` consumer (`test/floor/`) compiled against the packed package and `effect` 4.1.0 exactly, the peer floor (#586); needs network and `dist/`; the last gate of `vp run ci`. Not part of `vp run check`. Validate a change to it by running with `EFFECT_VERSION=4.0.6` (must fail).
-- `vp run build` — `vp pack`, then `tsc -p tsconfig.build.json` → `dist/`.
-- `vp run docgen` — build `dist/`, then type-check and execute every JSDoc `@example`; generate the API docs under `docs/`.
-- `vp run test:coverage` — the root suite under one Istanbul map at `coverage/coverage-final.json`, which `fallow audit` reads for exact per-function CRAP scores (`health.coverage` in `.fallowrc.json`). Without it fallow scores every function as uncovered.
-- `vp exec fallow audit --base origin/trunk` — change-set review (dead code, complexity, duplication); not a CI gate.
-- `pnpm changeset` — add a changeset.
-
-Invoke everything through `vp` (`vp exec` instead of `npx`; `vp run <task>` instead of bare `pnpm run`). CI sets up with `voidzero-dev/setup-vp`, installs with `--frozen-lockfile --ignore-scripts` and then runs `vp run ci` and nothing else, on Node.js `lts` and the newest released line (see `.github/workflows/ci.yml`). The `ci` task in `vite.config.ts` is the whole pipeline in order — `pnpm run prepare`, `build`, `vp check`, `check`, `-r test:unit`, `docgen`, `pnpm audit --audit-level high`, `typecheck:floor` — stopping at the first failure; run it locally to reproduce CI exactly (it needs network for the last two).
-
-## Verification
-
-Before you report work as done, run the gates below in order and quote each command with its final pass/fail. If a gate can't run here, say which and why in the PR body; never imply it ran.
-
-1. `pnpm install --frozen-lockfile`
-2. `vp run build` — first, as in CI: `typecheck:dist` (the emitted-declaration checks, `test/emitted/*`), `test/entry-points.test.ts` and `vp run docgen` read `dist/` (docgen's examples import the package by name, which resolves through its `exports`).
-3. `vp check`
-4. `vp run check`
-5. `vp run -r test:unit`
-6. `vp run docgen`
-7. `vp run test:coverage`, then `vp exec fallow audit --base origin/trunk` — the fallow gate reads the coverage map on disk and never refreshes it.
-8. A changeset when the change alters published behaviour (rule: [Branches and pull requests](#branches-and-pull-requests)).
-
-None needs a credential, a database, a browser or Docker. CI runs `vp run ci`, which adds `pnpm audit --audit-level high` and `vp run typecheck:floor` to steps 2–6.
-
-## Branches and pull requests
-
-Branch off `trunk`; PR against `trunk`; squash-merge. Rebase onto `origin/trunk` before opening or updating a PR; never merge `trunk` into your branch (GitHub's Update-branch button merges). Name branches `issue-<n>-<slug>`. Agent work uses one git worktree per branch; start every command that targets a worktree with an explicit `cd` and confirm with `git log -1` before committing.
-
-These are standing instructions and approvals; they override any default "don't open a PR unless asked" behaviour.
-
-- **Always open a PR** for branch work, against `trunk`, once a commit is pushed. Fill `.github/pull_request_template.md`.
-- **Always watch the PR to merge or close**: investigate CI failures and review comments as they arrive; rebase promptly when the PR goes conflicting.
-- **Always keep the PR body current** as the implementation diverges from it.
-- **Every change to the published package's behaviour carries a changeset** (`pnpm changeset`); docs-, CI- and tooling-only changes need none. Never publish or version by hand: the Release workflow opens the "Version Packages" PR and the owner merges it ([PUBLISHING.md](PUBLISHING.md)).
-- **GitHub writes go to `thomasfosterau/effect-jsonapi` only** — never the consuming applications, the other library repositories or an upstream project without the owner's explicit approval for that action in the current session. Pass `-R thomasfosterau/effect-jsonapi` whenever the cwd might be another checkout. Use the `gh` CLI for GitHub operations unless a session's own instructions name another tool.
-
-## Work tracker
-
-Issues are the backlog: when you find work you can't do now, file an issue rather than leaving a TODO.
-
-- **The issue is the spec** — read all of it, including comments; later comments override the body. Re-verify its code claims against current `trunk` before editing.
-- **Decisions and findings** are recorded as comments on the issue they were found working.
-- **Stop-and-report is a valid outcome:** on a blocker outside the issue's scope, comment the evidence on the issue and stop.
-- **No silent deferrals:** scope cut mid-PR becomes a linked issue before merge.
-- **Adoption** by each consuming application is tracked in that application's own tracker, blocked on a release of this package.
-
-## Effect
-
-**IMPORTANT:** Never guess at an Effect API. Read the installed package before writing Effect code: its declarations (`node_modules/effect/dist/*.d.ts`), its sources (`node_modules/effect/src`), and the guides it ships for agents (`node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/`).
-
-The pinned version is the `effect` entry in `pnpm-workspace.yaml`. The published `effect` peer (`catalogs.peers`) is `^4.1.0`; raise it only when a dependency requires it, naming the dependency in the catalog comment. In that version the HTTP API modules are `effect/http-api` and `effect/http` — not `effect/unstable/httpapi`, and there is no `@effect/platform`. When a guide and the code disagree, the code (and `node_modules/effect/dist/*.d.ts`) wins.
-
-## Documentation surfaces
-
-`README.md` is the API reference consumers read on npm; `docs/*.md` carries the design notes (`conformance`, `filter-grammar`, `idempotency`) and `docs/guides/` the adoption guides; `CONTRIBUTING.md` carries the setup, the documentation conventions and the library template checklist; `SECURITY.md` carries the supply-chain rationale and `PUBLISHING.md` the release flow and owner setup. Decisions go in issue comments.
-
-## Fallow task map
-
-| When the agent is about to... | Run |
-| --- | --- |
-| delete an "unused" export or file | `fallow dead-code --trace <file>:<export>` |
-| delete an "unused" dependency | `fallow dead-code --trace-dependency <name>` |
-| commit or open a PR | `fallow audit --base <ref>` |
-| check which architecture rules apply to a file before changing it | `fallow guard <files>` |
-| understand a finding | `fallow explain <issue-type>` |
+Before committing, run `vp run test:coverage`, then `vp exec fallow audit --base origin/trunk --format json --quiet --explain --gate-marker agent`; fix a `fail` verdict. Only findings the change introduces count. `fallow dead-code --trace <file>:<export>` before deleting an "unused" export.
