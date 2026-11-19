@@ -45,8 +45,7 @@ const articles = Group.make(
     errors: [ArticleNotFound],
   }),
   // GET /articles?sort=-createdAt&page[offset]=0&page[limit]=10&filter[author]=9
-  // (`filter[f]=v` is `eq`, `filter[f]=a,b` is `in`, `filter[f][gt]=v` an operator —
-  //  the filter grammar, docs/filter-grammar.md)
+  // (`filter[f]=v` is `eq`, `filter[f]=a,b` is `in`, `filter[f][gt]=v` an operator)
   Endpoint.list(Article, {
     include: true,
     sort: ["createdAt", "title"],
@@ -634,7 +633,7 @@ Every endpoint automatically:
 
 A `POST` whose response is lost leaves the client unable to tell "it didn't happen" from "it happened and I didn't hear" — retrying duplicates, not retrying loses the write. `lid` does not help: it correlates resources **within** one request, and says nothing about whether the request already ran.
 
-Opt an endpoint in and it accepts an `Idempotency-Key` request header ([the profile](idempotency.md)):
+Opt an endpoint in and it accepts an `Idempotency-Key` request header:
 
 ```ts
 const articles = Group.make(
@@ -661,4 +660,4 @@ const ApiLive = Layer.mergeAll(ArticlesLive).pipe(
 
 For the atomic extension, one key covers the **whole request** — the extension's own unit of atomicity — and replays the whole `atomic:results` document, which is what makes a replayed `lid` resolve to the id it resolved to the first time.
 
-JSON:API v1.1 specifies no idempotency mechanism. The header name and the three statuses are the [IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)'s convention; the fingerprint, the replay rule, the key's scope and the retention contract are this package's, published as a profile URI and defined in full in [`docs/idempotency.md`](idempotency.md).
+JSON:API v1.1 specifies no idempotency mechanism. The header name and the three statuses are the [IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)'s convention; the fingerprint, the replay rule, the key's scope and the retention contract are this package's, published as a profile URI (`Idempotency.PROFILE_URI`).

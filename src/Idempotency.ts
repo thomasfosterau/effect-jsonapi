@@ -23,7 +23,7 @@
  * three failure statuses are the convention of the IETF draft
  * {@link https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/ `Idempotency-Key`}
  * — a draft, not a standard. Everything the draft leaves to "the resource
- * owner" is this package's choice, fixed in `docs/idempotency.md`: what a key
+ * owner" is this package's choice, fixed by this profile: what a key
  * covers, how a request is fingerprinted, which responses are recorded, and
  * what the atomic extension does with a key.
  *
@@ -49,7 +49,6 @@
  * )
  * ```
  *
- * @see `docs/idempotency.md` for the profile's normative semantics.
  * @since 0.15.0
  */
 import * as MutableHashMap from "effect/MutableHashMap";
@@ -90,7 +89,7 @@ import { parse, stringify } from "./internal/json.js";
  * ignored, never rejected — so nothing about request handling keys off a
  * client naming it.
  *
- * `v1` is `docs/idempotency.md`; an incompatible change is `v2`.
+ * An incompatible change to the profile is `v2`.
  *
  * @example
  * ```ts
@@ -174,7 +173,7 @@ export const jsonapi: JsonApiObject = { version: "1.1", profile: [PROFILE_URI] }
 
 // RFC 8941 spells a Structured Field String quoted, with `\` and `"` escaped.
 // Deployed servers overwhelmingly send a bare token (a UUID), so both forms
-// are accepted and the bare one is emitted — see `docs/idempotency.md` §2.
+// are accepted and the bare one is emitted.
 const unquote = (value: string): string =>
   value.length >= 2 && value.startsWith(`"`) && value.endsWith(`"`)
     ? value.slice(1, -1).replace(/\\(["\\])/g, "$1")
@@ -620,7 +619,7 @@ export interface Recorded {
  *
  * The whole `request` is here so a store can scope keys however the
  * application needs — per principal, per tenant — which this package cannot
- * know and therefore does not decide. See `docs/idempotency.md` §4.
+ * know and therefore does not decide.
  *
  * @since 0.15.0
  * @category models
@@ -670,7 +669,7 @@ export type Claim =
  *     recorded nowhere, and the client may safely retry the same key — which
  *     is correct, where quietly processing a write whose idempotency cannot be
  *     guaranteed is not.
- *   - **Retention is the store's.** See `docs/idempotency.md` §6: keep a
+ *   - **Retention is the store's.** Keep a
  *     completed record for at least 24 hours; once it is evicted the key is
  *     unknown again and a later retry runs as a fresh write.
  *
@@ -837,7 +836,7 @@ const replay = (recorded: Recorded): HttpServerResponse.HttpServerResponse => {
  * Atomic operations need nothing special: the extension's request *is* the
  * unit — one key covers the whole `atomic:operations` array and replays the
  * whole `atomic:results` document, which is also what makes a replayed `lid`
- * resolve to the id it resolved to the first time. See `docs/idempotency.md` §7.
+ * resolve to the id it resolved to the first time.
  *
  * @example
  * ```ts

@@ -55,3 +55,27 @@ jobs:
             vp-task-v1-${{ runner.os }}-node-${{ matrix.node }}-
 
       - run: vp run ci
+
+  # Not a required check: builds and starts .devcontainer/ as Codespaces does.
+  devcontainer:
+    name: devcontainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      DEVCONTAINER_CLI: "@devcontainers/cli@0.89.0"
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@v1.22.0
+        with:
+          node-version: lts
+          version-file: pnpm-workspace.yaml
+          cache: true
+          run-install: false
+      - name: Build and start the container
+        run: vp dlx "$DEVCONTAINER_CLI" up --workspace-folder .
+      - name: Check vp inside it
+        run: vp dlx "$DEVCONTAINER_CLI" exec --workspace-folder . vp --version

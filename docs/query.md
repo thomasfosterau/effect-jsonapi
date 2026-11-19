@@ -6,11 +6,11 @@
 | `fields[TYPE]` | `?fields[articles]=title,author` | `{ articles?: ReadonlyArray<"title" \| "body" \| "author" \| …> }` — closed per-type sets of attribute and relationship names |
 | `sort` | `?sort=-createdAt,title` | `[{ field: "createdAt", direction: "desc" }, …]` |
 | `page[*]` | `?page[offset]=0&page[limit]=10` | `{ offset?: number, limit?: number }` (`Page.Offset`, `Page.Number`, `Page.Cursor`, or custom) |
-| `filter[*]` | `?filter[status]=open&filter[age][gt]=18` | `Filter.Ast` — one root node over the declared fields ([the filter grammar](filter-grammar.md), `filter: true`); fails closed on undeclared fields, operators and literals. Or a user-defined schema per key (`filter: { q: … }`) |
+| `filter[*]` | `?filter[status]=open&filter[age][gt]=18` | `Filter.Ast` — one root node over the declared fields (the filter grammar, `filter: true`); fails closed on undeclared fields, operators and literals. Or a user-defined schema per key (`filter: { q: … }`) |
 
 Unknown include paths, unknown sparse-fieldset names, unknown sort fields, and — under the grammar — unknown filter fields, undeclared operators and bad literals fail decoding, which the schema-error middleware turns into a spec-compliant **400 JSON:API error document** whose error objects carry `source.parameter` naming the offending key (`filter[age][gt]`, `page[limit]`) — and, where the schema publishes what it would have accepted, the legal vocabulary as `meta`: a rejected `include` path carries `meta.includablePaths` (the endpoint's whole supported set, as `ApiError.UnsupportedIncludePath` does) and an unknown `sort` field `meta.sortableFields`, so a caller that guessed wrong needs no second request. HttpApi decodes a request with `errors: "first"`, so a query yields one error object — except the `filter` family, whose codec reports every offending key together.
 
-Every comma-separated family also accepts the repeated-key spelling `UrlParams.toRecord` produces for a repeated key — `?sort=-createdAt&sort=title` decodes the same as `?sort=-createdAt,title`, and likewise for `include` and `fields[TYPE]` — in any mix of the two, and `filter[*]` accepts a repeated key at its list-valued positions ([the filter grammar](filter-grammar.md) §2). Encoding always emits the single comma form.
+Every comma-separated family also accepts the repeated-key spelling `UrlParams.toRecord` produces for a repeated key — `?sort=-createdAt&sort=title` decodes the same as `?sort=-createdAt,title`, and likewise for `include` and `fields[TYPE]` — in any mix of the two, and `filter[*]` accepts a repeated key at its list-valued positions. Encoding always emits the single comma form.
 
 A parameter the endpoint's query does not declare never reaches the handler: decoding drops it, on an endpoint whose query declares no family at all (its decoded `query` is then `{}`) as on any other, and no spelling of one — a bare name next to its bracketed members, empty brackets, deeper nesting — can make the query fail to decode.
 
@@ -95,9 +95,9 @@ Endpoint.list(Product, { sort: Resource.sortable(Product), page: Query.Page.Offs
 // ?sort=-createdAt,priceCents decodes; ?sort=name is a 400
 ```
 
-What a sorted collection must look like is [§10 of the profile](filter-grammar.md#10-sort-order), and it is the handler's job to produce it: ascending by each field's JSON value under the filter grammar's own comparison domain (numeric; code-point order for strings — no locale collation; ISO-8601 text for dates), NULLs (an absent attribute or `null`) **last** ascending and first descending, several fields lexicographically in the order given, and — a SHOULD — remaining ties broken by `id`, so the order is the same on every request and offset pagination over it neither repeats nor skips a resource.
+What a sorted collection must look like is fixed by the profile, and it is the handler's job to produce it: ascending by each field's JSON value under the filter grammar's own comparison domain (numeric; code-point order for strings — no locale collation; ISO-8601 text for dates), NULLs (an absent attribute or `null`) **last** ascending and first descending, several fields lexicographically in the order given, and — a SHOULD — remaining ties broken by `id`, so the order is the same on every request and offset pagination over it neither repeats nor skips a resource.
 
-`filter: true` on a list endpoint turns on the `filter` query codec over this declaration — the grammar in [`docs/filter-grammar.md`](filter-grammar.md). `filter[f]=v` is `eq`, `filter[f]=a,b` is `in`, `filter[f][gt]=v` any operator, and a Drupal-style group form (`filter[g][group][conjunction]=OR`, `filter[c][condition][path]=…`) spells `OR`, `NOT`, nesting and repeated `(field, operator)` pairs. Handlers receive one decoded, normalised `Filter.Ast` root node, with `field` narrowed to the declared names and every literal decoded through its attribute schema:
+`filter: true` on a list endpoint turns on the `filter` query codec over this declaration — the package's filter grammar. `filter[f]=v` is `eq`, `filter[f]=a,b` is `in`, `filter[f][gt]=v` any operator, and a Drupal-style group form (`filter[g][group][conjunction]=OR`, `filter[c][condition][path]=…`) spells `OR`, `NOT`, nesting and repeated `(field, operator)` pairs. Handlers receive one decoded, normalised `Filter.Ast` root node, with `field` narrowed to the declared names and every literal decoded through its attribute schema:
 
 ```ts
 Endpoint.list(Product, { filter: true, sort: Resource.sortable(Product), page: Query.Page.Offset });
@@ -114,7 +114,7 @@ Endpoint.list(Product, { filter: true, sort: Resource.sortable(Product), page: Q
 
 The grammar is a JSON:API **profile**, `Filter.PROFILE_URI` (`https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1`). Advertise it on the media type of responses from endpoints that speak it — `Content-Type: application/vnd.api+json; profile="…"` — clients that do not name it are served the same way, since unknown profiles are ignored, never rejected.
 
-The profile defines what a tree **means**, not only how it is spelled: [§6 of the grammar](filter-grammar.md#6-semantics) is the normative semantics — three-valued (Kleene) logic, a truth table per operator including every NULL case, the comparison domain of each attribute type, and the line between a 400 and an empty result. Handlers are what evaluate a tree, so that section is the contract they answer to; this package builds, validates and canonicalises trees and evaluates none.
+The profile defines what a tree **means**, not only how it is spelled: three-valued (Kleene) logic, a truth table per operator including every NULL case, the comparison domain of each attribute type, and the line between a 400 and an empty result (`Filter` documents each operator). Handlers are what evaluate a tree, so those semantics are the contract they answer to; this package builds, validates and canonicalises trees and evaluates none.
 
 ## The canonical query string
 
@@ -134,7 +134,7 @@ canonical(query);
 // → "include=author&fields[articles]=title&filter[status]=open&sort=-createdAt&page[offset]=0&page[limit]=10"
 ```
 
-The order is `include`; `fields[*]` sorted by type; `filter[*]` in [the grammar's canonical order](filter-grammar.md#33-key-order-and-ids) (shorthand sorted by key, the group form in the encoder's pre-order); `sort`; `page[*]` in the page strategy's declared order (`offset, limit` — what the link builders emit); then any other key, sorted. Keys and values go through `encodeURIComponent` (spaces `%20`, commas `%2C` — a list's separator and the grammar's `\,` alike), with `[` / `]` left readable in keys; `URLSearchParams` / `UrlParams` decode the result back identically. `Query.canonicalPairs(schema)` is the ordered pair list before serialisation and `Query.serialise(pairs)` the encoding on its own.
+The order is `include`; `fields[*]` sorted by type; `filter[*]` in the grammar's canonical order (shorthand sorted by key, the group form in the encoder's pre-order); `sort`; `page[*]` in the page strategy's declared order (`offset, limit` — what the link builders emit); then any other key, sorted. Keys and values go through `encodeURIComponent` (spaces `%20`, commas `%2C` — a list's separator and the grammar's `\,` alike), with `[` / `]` left readable in keys; `URLSearchParams` / `UrlParams` decode the result back identically. `Query.canonicalPairs(schema)` is the ordered pair list before serialisation and `Query.serialise(pairs)` the encoding on its own.
 
 The pagination link builders serialise the same way and take the other pairs as an option, so every link carries the full query with its page cursor slotted in:
 

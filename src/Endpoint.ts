@@ -48,8 +48,7 @@
  * `operations`, and the whole set `resource` generates): `true` declares the
  * `Idempotency-Key` request header and honours it, `"required"` insists on one.
  * It attaches `Idempotency.Middleware`, so an api carrying an idempotent
- * endpoint cannot be built without a store — see {@link Idempotency} and
- * `docs/idempotency.md`.
+ * endpoint cannot be built without a store — see {@link Idempotency}.
  *
  * The primary-data endpoints take the same `success` option: `get` / `create` /
  * `update` default to the resource's `document()` and `list` to its
@@ -635,7 +634,7 @@ type DefaultListQuery<
  * Those options compose the whole query schema — a flat, bracket-keyed string
  * record on the wire that decodes to the spec's nested shape (`page: { offset,
  * limit }`, `filter: …`). `filter: true` turns on the filter grammar
- * (`docs/filter-grammar.md`) over the resource's declared filterable fields
+ * over the resource's declared filterable fields
  * (`Resource.attribute(schema, { filter })`, `Relationship.one(ref, { filter })`):
  * `?filter[status]=open&filter[age][gt]=18` decodes to a `Filter.Ast` root
  * node, and an unknown field, undeclared operator or bad literal is a 400
@@ -777,8 +776,7 @@ export const list = <
     readonly page?: PageFields;
     /**
      * Enable `?filter[*]=` filtering. `true` turns on the filter grammar
-     * (`docs/filter-grammar.md`) over the resource's declared filterable
-     * fields, decoding to a `Filter.Ast`; a field map (`{ q: Schema.String }`)
+     * over the resource's declared filterable fields, decoding to a `Filter.Ast`; a field map (`{ q: Schema.String }`)
      * is the open per-key escape hatch, each key becoming `filter[<key>]`.
      */
     readonly filter?: FilterFields;
@@ -865,8 +863,7 @@ export const list = <
  * declares the `Idempotency-Key` header, `"required"` insists on it. A retry
  * carrying the same key replays the original 201 verbatim rather than creating
  * a second resource; the same key with a different body is a 422. It attaches
- * `Idempotency.Middleware`, so the api needs an `Idempotency.layer(store)` —
- * see `docs/idempotency.md`.
+ * `Idempotency.Middleware`, so the api needs an `Idempotency.layer(store)`.
  *
  * A 201 answers with a `Location` header (§Creating Resources → 201 Created),
  * copied verbatim from the created resource's `data.links.self` — or, when it

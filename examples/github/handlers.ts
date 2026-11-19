@@ -534,7 +534,7 @@ const paginate = <A>(
 };
 
 // ---------------------------------------------------------------------------
-// The filter grammar's semantics (docs/filter-grammar.md §6)
+// The filter grammar's semantics
 // ---------------------------------------------------------------------------
 //
 // The package decodes `GET /issues?filter[…]` into one `Filter.Ast` root node

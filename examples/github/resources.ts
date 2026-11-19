@@ -64,7 +64,7 @@ export const IssueComment = Resource.make("issueComments", {
 });
 
 // Issues are the one collection that speaks the filter grammar (`filter: true`
-// on `GET /issues`, docs/filter-grammar.md): every attribute but `body`, and
+// on `GET /issues`): every attribute but `body`, and
 // the three to-one relationships, valued by the related id, are filter fields
 // over the whole operator core (`Filter.able()`; a relationship's `filter:
 // true` is `eq ne in nin isnull`).

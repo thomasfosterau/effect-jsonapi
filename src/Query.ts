@@ -35,7 +35,7 @@
  * and the repeated key (`?include=a&include=b`) that `UrlParams.toRecord`
  * decodes to an array, in any mix. Both decode identically; encoding always
  * emits the comma form. `filter[*]` accepts the repeated key too, at the
- * grammar's list-valued positions (`docs/filter-grammar.md` §2). An empty
+ * grammar's list-valued positions. An empty
  * segment from a stray comma (`?include=a,,b`, `?include=a,b,`) is dropped
  * rather than treated as an item: both decode as `["a", "b"]`.
  *
@@ -1178,7 +1178,7 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
   repeatable(SortCodec(fields));
 
 // ---------------------------------------------------------------------------
-// The filter codec (docs/filter-grammar.md)
+// The filter codec
 // ---------------------------------------------------------------------------
 
 /**
@@ -1369,7 +1369,7 @@ const messageOf = (cause: unknown): string => (P.isError(cause) ? cause.message 
 
 /**
  * Creates the `filter` codec for one resource: the filter grammar
- * (`docs/filter-grammar.md`) over the resource's declaration
+ * over the resource's declaration
  * (`Resource.filterable`), between the flat record of `filter[...]` keys on
  * the wire and one decoded, normal-form AST root.
  *
@@ -1391,7 +1391,7 @@ const messageOf = (cause: unknown): string => (P.isError(cause) ? cause.message 
  * `[value]` member — decoding identically to the comma form, and rejected the
  * same way when the field has no list operator declared. Everywhere else — a
  * group's `[conjunction]`, any `[memberOf]`, a condition's `[path]` /
- * `[operator]` — a repeated key is a 400 (`docs/filter-grammar.md` §2).
+ * `[operator]` — a repeated key is a 400.
  *
  * The record must carry at least one `filter[...]` key — an absent `filter`
  * is `Query.schema`'s concern, not the codec's. Literal codecs are run
@@ -1524,7 +1524,7 @@ export interface Options<Res extends Any> {
   readonly page?: Schema.Struct.Fields;
   /**
    * Enable `?filter[*]=` filtering. `true` turns on the filter grammar
-   * (`docs/filter-grammar.md`) over the resource's declared filterable fields
+   * over the resource's declared filterable fields
    * — `filter[f]=v` is `eq`, `filter[f]=a,b` is `in`, `filter[f][gt]=v` any
    * operator, plus the group form for `OR` / `NOT` / nesting — decoding to a
    * {@link FilterAst}; unknown fields, undeclared operators and bad literals
@@ -2021,8 +2021,7 @@ export const serialise: (pairs: Iterable<Pair>) => string = serialisePairs;
  *
  * 1. `include`
  * 2. `fields[*]`, sorted by type (code-point order)
- * 3. `filter[*]`, in the filter grammar's canonical order (`docs/filter-grammar.md`
- *    §3.3): shorthand keys sorted by key (code-point order), which is also
+ * 3. `filter[*]`, in the filter grammar's canonical order (§3.3): shorthand keys sorted by key (code-point order), which is also
  *    how the per-key `filter: { … }` escape hatch is ordered; the group form
  *    in the encoder's pre-order, whose ids are meaningful and never re-sorted
  * 4. `sort`

@@ -4,7 +4,7 @@
  * server serves unfiltered.
  *
  * No fixture is needed, because the unfiltered collection is the known set:
- * `docs/filter-grammar.md` §6.1 F-EVAL-4 reads `value(resource, field)` from
+ * The filter profile's §6.1 F-EVAL-4 reads `value(resource, field)` from
  * the resource's JSON representation and §6.2 F-ORD-1 defines comparison on
  * it, which is exactly what came back over the wire. So the rule fetches the
  * collection, builds filter trees over attributes it carries, evaluates each

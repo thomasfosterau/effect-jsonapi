@@ -42,6 +42,7 @@ Use Effect idioms throughout, and strongly prefer Effect v4's own modules (`Opti
 - Import Effect modules as namespaces (`import * as Option from "effect/Option"`); never bind effect's `Record` as `Record` (use `R`).
 - Absence is `Option`. `exactOptionalPropertyTypes` is on: an options member is `readonly x?: T`, with no `| undefined`. JSON:API wire shapes keep their native optionals and `null`, spelled from their schemas.
 - Relative imports carry `.js`.
+- Exports follow Effect's layout: one PascalCase module per file, re-exported as a namespace from `src/index.ts` (`export * as Resource from "./Resource.js"`) and importable through its own subpath (`./Resource`). A new module needs its `exports` entry.
 - Fix lint findings in code; a rule is relaxed only in `vite.config.ts`, with its reason.
 
 [architecture.md](architecture.md) explains how the modules derive from one resource definition.

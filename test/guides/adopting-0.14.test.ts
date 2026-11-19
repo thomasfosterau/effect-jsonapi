@@ -1,15 +1,8 @@
 /**
- * The "after" code of docs/guides/adopting-0.14.md, executed.
- *
- * The guide shows an existing consumer how to replace the scaffolding the
- * consuming applications wrote around 0.13 (their own include spec, include
- * walk, fieldset projection, error-document decoder and Accept parser) with
- * the 0.14 surfaces. Every snippet the guide presents as the replacement is
- * exercised here against the behaviour the applications' own tests pinned
- * (website's `apps/api/tests/document.test.ts`, `include-targets.test.ts`,
- * `packages/api/tests/negotiate.test.ts`, `jsonapi.test.ts`), so the guide
- * cannot describe a call shape that does not compile or a property that does
- * not hold.
+ * The 0.14 surfaces that replace the scaffolding consuming applications wrote
+ * around 0.13 (their own include spec, include walk, fieldset projection,
+ * error-document decoder and Accept parser), held to the behaviour those
+ * applications' own tests pinned.
  */
 import * as R from "effect/Record";
 import { it } from "@effect/vitest";

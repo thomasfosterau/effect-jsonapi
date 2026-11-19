@@ -4,15 +4,13 @@
  *
  * Three groups:
  *
- *   - **The filter grammar profile** (`docs/filter-grammar.md`, published at
- *     `Filter.PROFILE_URI`). Its §2 surface syntax, §3 canonical encoding, §4
+ *   - **The filter grammar profile** (published at `Filter.PROFILE_URI`). Its §2 surface syntax, §3 canonical encoding, §4
  *     closed operator core, §5 advertisement and §7 error pointers are all
  *     normative today and mechanically checkable over the wire. Its §6
  *     *evaluation* semantics are checked by `./evaluation.ts`, with the kit's
  *     own oracle (`./semantics.ts`) over the collection the server serves
  *     unfiltered.
- *   - **The Idempotency-Key profile** (`docs/idempotency.md`, published at
- *     `Idempotency.PROFILE_URI`). Only its advertisement (§1) is checked, on
+ *   - **The Idempotency-Key profile** (published at `Idempotency.PROFILE_URI`). Only its advertisement (§1) is checked, on
  *     the 2xx a create or update probe gets from the `writes` fixture; delete
  *     and atomic writes, and what a *retried* write does, are declared as a
  *     coverage gap.
@@ -529,7 +527,7 @@ const probeUpdate = (ctx: Context, rule: Rule, target: WriteTarget) =>
   );
 
 /**
- * `docs/idempotency.md` §1: a server advertises the profile in `jsonapi.profile`
+ * The Idempotency-Key profile's §1: a server advertises the profile in `jsonapi.profile`
  * and MAY also name it on the media type, so either place passes. Only a write
  * shows it — the kit cannot read an endpoint's answer to a write without
  * making one — so the rule runs, on the `writes` fixture under

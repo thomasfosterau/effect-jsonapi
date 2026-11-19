@@ -10,9 +10,6 @@
 | [The server skeleton](server.md) | Flat contracts, the error seam, negotiation, the assembler and registry |
 | [Spec compliance](compliance.md) | What the constructors guarantee, declaration emit, limitations |
 | [Conformance kit](conformance.md) | Running `Conformance` against a server |
-| [Filter grammar](filter-grammar.md) | The `filter` / `sort` profile, normative |
-| [Idempotency profile](idempotency.md) | The `Idempotency-Key` profile, normative |
-| [Adopting 0.14](guides/adopting-0.14.md) | Replacing hand-rolled application code with the package's surfaces |
 
 ## Overview
 

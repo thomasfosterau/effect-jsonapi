@@ -1,5 +1,5 @@
 /**
- * The profile's sort rules: `docs/filter-grammar.md` §10, checked from the
+ * The filter profile's sort rules (§10), checked from the
  * wire.
  *
  * Read-only and fixture-free. Each rule fetches every list or related endpoint

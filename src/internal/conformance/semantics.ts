@@ -1,5 +1,5 @@
 /**
- * The filter profile's evaluation semantics — `docs/filter-grammar.md` §6 — as
+ * The filter profile's evaluation semantics (§6) as
  * a fold over the filter AST: the conformance kit's own oracle.
  *
  * The package evaluates no filter (§6.9): a server does, against its store.

@@ -358,7 +358,7 @@ export interface Discovered {
   readonly queryPrefixes: ReadonlyArray<string>;
   /**
    * Whether the endpoint's headers schema declares `Idempotency-Key`, opting
-   * into the idempotency profile (`docs/idempotency.md`): `"required"` when it
+   * into the idempotency profile: `"required"` when it
    * insists on the header (`idempotency: "required"`), `"optional"` when it
    * accepts one (`idempotency: true`), `"absent"` when it declares none.
    */
