@@ -1,9 +1,9 @@
+# `uvx zizmor --offline .github` should report nothing beyond what is configured here.
 rules:
-  # Matches pnpm's `minimumReleaseAge` (8 hours): Dependabot counts whole days.
   dependabot-cooldown:
     config:
       days: 1
-  # Tags in `uses:`; .github/workflows/actions.lock pins them to commits.
+  # Exact tags in `uses:`; .github/workflows/actions.lock pins them to commits.
   unpinned-uses:
     config:
       policies:
