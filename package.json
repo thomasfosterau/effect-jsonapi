@@ -142,10 +142,7 @@
     "access": "public"
   },
   "scripts": {
-    "prepare": "vp config && effect-tsgo patch --typescript --oxlint",
-    "version": "changeset version && vp fmt && pnpm install --lockfile-only",
-    "release": "pnpm publish --recursive --access public --no-git-checks --ignore-scripts && changeset git-tag",
-    "prepublishOnly": "vp run build"
+    "prepare": "vp config && effect-tsgo patch --typescript --oxlint"
   },
   "dependencies": {
     "@thomasfosterau/effect-ext": "catalog:"

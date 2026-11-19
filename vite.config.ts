@@ -293,6 +293,20 @@ export default defineConfig({
         command: "vp exec fallow --summary",
         cache: false,
       },
+      // The Changesets steps release.yml runs: bump versions and changelogs,
+      // then publish what npm does not have yet and tag it. `pnpm publish`
+      // rewrites `catalog:` specifiers; lifecycle scripts stay off in the
+      // privileged publish job.
+      version: {
+        command: "changeset version && vp fmt && pnpm install --lockfile-only",
+        cache: false,
+      },
+      release: {
+        command:
+          "pnpm publish --recursive --access public --no-git-checks --ignore-scripts && changeset git-tag",
+        dependsOn: ["build"],
+        cache: false,
+      },
       // Compiles and runs every JSDoc `@example` against `dist/`; writes the
       // API reference to docs/api/.
       docgen: {

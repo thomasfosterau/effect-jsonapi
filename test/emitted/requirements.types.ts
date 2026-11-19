@@ -17,7 +17,7 @@
  * client carried an `unknown` requirement that no layer could satisfy —
  * while the source-resolved type checked clean.
  *
- * This file is checked by `tsconfig.dist.json` (`pnpm run typecheck:dist`),
+ * This file is checked by `tsconfig.dist.json` (`vp run typecheck:dist`),
  * which maps the package to `./dist/index.d.ts` and therefore only means
  * anything after a build.
  */

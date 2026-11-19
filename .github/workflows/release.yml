@@ -82,7 +82,7 @@ jobs:
       - id: version
         uses: changesets/action/version@v2.1.2
         with:
-          script: pnpm run version
+          script: vp run version
           commit-message: "chore: version packages"
           pr-title: "chore: version packages"
       - name: Assign the owner to the version PR
@@ -118,11 +118,11 @@ jobs:
           cache: false
           run-install: |
             - args: ["--frozen-lockfile", "--ignore-scripts"]
-      - run: vp run build
-      # `pnpm publish --recursive` skips a version npm already has, so a trunk
-      # push with nothing new to publish is a no-op.
+      # `vp run release` builds first. `pnpm publish --recursive` skips a
+      # version npm already has, so a trunk push with nothing new to publish
+      # is a no-op.
       - uses: changesets/action/publish@v2.1.2
         with:
-          script: pnpm run release
+          script: vp run release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
