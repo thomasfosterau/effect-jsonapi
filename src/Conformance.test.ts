@@ -2110,7 +2110,7 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
   );
 
   // A `3xx` the kit reads as the answer itself — one with no `Location`, or a
-  // `304` — is an answer, not silence, so it fails both as before.
+  // `304` — is an answer, not silence, so it still fails both.
   it.effect.each([
     ["a 302 with no `Location`", 302],
     ["a 304", 304],
@@ -6120,7 +6120,7 @@ describe("Conformance: the write fixture", () => {
   );
 
   brokenWrite(
-    // What `Endpoint.create` answered before: a foreign type failed its
+    // What `Endpoint.create` used to answer: a foreign type failed its
     // `data.type` literal, a 400.
     "a create of a type the endpoint does not serve answered 400, not 409",
     "spec/status/create-conflict-type",

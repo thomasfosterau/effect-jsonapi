@@ -243,8 +243,8 @@ describe("the default `included` union reaches every legal include path", () => 
       ).toEqual(["people", "companies"]);
     });
 
-    // The type of `collection`'s `included` agrees (
-    // `test/include-depth-included.types.ts`).
+    // The type of `collection`'s `included` agrees
+    // (`test/include-depth-included.types.ts`).
     it.each([
       ["without `include`", {}, ["people"]],
       ["with `fields: true`", { fields: true }, ["people"]],
@@ -363,7 +363,7 @@ describe("an endpoint that turns no include path on keeps its union", () => {
   });
 
   it("the document is unchanged on the wire", () => {
-    // The resource's own `document()`, the default before.
+    // The resource's own `document()`, the former default.
     const roundTrip = (endpoint: { readonly success: Iterable<Schema.Top> }) => {
       const success = successOf(endpoint);
       return Schema.encodeUnknownSync(success)(
@@ -484,8 +484,8 @@ describe("a depth-2 include path answered over HTTP", () => {
     },
   });
 
-  // The handlers return the depth-2 `people` resource the path brings in: a
-  // compile error before, and a 500 when forced. They project the
+  // The handlers return the depth-2 `people` resource the path brings in, once
+  // a compile error and a 500 when forced. They project the
   // requested fieldsets, which the default document admits.
   const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     handlers

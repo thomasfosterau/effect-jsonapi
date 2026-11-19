@@ -3,8 +3,8 @@
  * doesn't declare. Every write body member struct, whether it
  * declares fields or none, answers 400 with a `source.pointer` at each
  * undeclared member, through the real middleware stack, instead of dropping
- * the member (a struct with fields, before) or handing it to the handler
- * (a struct with none, before). A non-object member answers 400
+ * the member (as a struct with fields used to) or handing it to the handler
+ * (as a struct with none used to). A non-object member answers 400
  * `Expected object` at the member, a `null` included. The members
  * JSON:API allows around them (`meta`, `jsonapi`, `links`) are still accepted,
  * the OpenAPI document still describes each member's properties, and encoding

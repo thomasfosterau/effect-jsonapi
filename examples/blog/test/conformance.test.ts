@@ -24,15 +24,14 @@ import { BlogLive, discardArticle } from "../handlers.js";
 /**
  * The rules this example is known to break, each with the issue tracking it.
  * Remove an entry when its issue is fixed; the test will tell you to. The read
- * rules have been clean: the handlers of the reads that declare
- * `fields` (`GET /articles/:id`, `/search` and,
- * `GET /articles/:id/relationships/tags`) project `?fields[TYPE]=` with
- * `onResource: Handlers.project(query.fields)` and stamp `jsonapi:
- * Document.v1_1` on every `Handlers.data` / `collection` / `linkage` document
- * (the `Atomic.results` answer carries none). The write rules have been clean,
- * which answers a resource object of another `type` with 409, and
- * #450, which answers a client-generated id `Endpoint.create` does not
- * support with 403 — as #464 does one on an atomic `add`.
+ * rules are clean: the handlers of the reads that declare `fields`
+ * (`GET /articles/:id`, `/search` and `GET /articles/:id/relationships/tags`)
+ * project `?fields[TYPE]=` with `onResource: Handlers.project(query.fields)`
+ * and stamp `jsonapi: Document.v1_1` on every `Handlers.data` / `collection` /
+ * `linkage` document (the `Atomic.results` answer carries none). The write
+ * rules are clean too: a resource object of another `type` is answered with
+ * 409, and a client-generated id that `Endpoint.create` or an atomic `add`
+ * does not support with 403.
  */
 const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [];
 

@@ -30,7 +30,7 @@ describe("parseMediaType — the q weight (RFC 9110 §12.4.2 qvalue)", () => {
     expect(parseMediaType(`${MEDIA_TYPE};q=0.5 `).weight).toEqual(Option.some(0.5));
   });
 
-  // Each of these was a finite `Number(...)` before, so the empty and
+  // Each of these used to be a finite `Number(...)`, so the empty and
   // non-positive ones read as `q=0` — an explicit refusal.
   it.each(["", "0x0", "-1", "-0", "+0", "1e-9", "2", "1.0001", "1.5", "0.0001", ".5"])(
     "reports q=%s, outside the qvalue grammar, as malformed (undefined), never as a refusal",

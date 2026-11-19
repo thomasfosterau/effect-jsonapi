@@ -294,7 +294,7 @@ assertType<
 // ---------------------------------------------------------------------------
 
 // The resource's own `document()` / `collection()`, passed as `success`, is
-// what the default was before.
+// what the default used to be.
 export const explicit = Endpoint.get(Article, { success: Article.document() });
 export const plain = Endpoint.get(Article);
 export const off = Endpoint.get(Article, { include: false });

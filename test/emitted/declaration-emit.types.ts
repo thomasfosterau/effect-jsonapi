@@ -8,7 +8,7 @@
  * somewhere": the TypeScript checker does not follow a namespace alias
  * (`export * as Query from "./Query.js"`) when it looks for a name. A type is
  * nameable only through a namespace the consumer's file imports itself, or
- * through a module that exports it directly —, its module's own
+ * through a module that exports it directly: now its module's own
  * subpath (`@thomasfosterau/effect-jsonapi/Query`), and before that the root's
  * type aliases (`src/index.ts`, now deprecated). When neither holds, the
  * checker reports TS2883 / TS4023 — or, worse, inlines the type structurally
