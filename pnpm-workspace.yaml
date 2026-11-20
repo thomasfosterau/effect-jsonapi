@@ -27,7 +27,7 @@ catalog:
   "@vitest/coverage-istanbul": 5.1.0
   # Tracks `latest`; consumers see the `catalogs.peers` range.
   effect: 4.1.4
-  fallow: 3.43.1
+  fallow: 3.43.2
   # docgen's example runner; never invoke it directly.
   tsx: ^4.23.13
   # TypeScript 6/7 side by side: JS-API consumers (the language service, the
