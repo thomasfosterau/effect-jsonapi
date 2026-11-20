@@ -15,7 +15,7 @@ catalog:
   # on a `@typescript/native` or vite-plus oxlint version missing from the
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs.
   # Read it before bumping any of the three.
-  "@effect/tsgo": 0.69.0
+  "@effect/tsgo": 0.70.0
   # Peers `effect` at its own version.
   "@effect/vitest": 4.1.4
   "@enfect/oxlint": 0.10.0
@@ -24,7 +24,7 @@ catalog:
   "@thomasfosterau/effect-ext": ^0.2.0 || ^0.3.0
   "@types/node": ^26.4.1
   # Must equal the vitest vite-plus bundles.
-  "@vitest/coverage-istanbul": 5.1.0
+  "@vitest/coverage-istanbul": 5.1.1
   # Tracks `latest`; consumers see the `catalogs.peers` range.
   effect: 4.1.4
   fallow: 3.43.2
@@ -36,9 +36,9 @@ catalog:
   typescript: "npm:@typescript/typescript6@6.0.2"
   "@typescript/native": "npm:typescript@7.0.2"
   # `vite` must equal `vite-plus`; `vitest` must equal vite-plus's pin.
-  vite-plus: 1.6.0
+  vite-plus: 1.7.0
   vite: npm:@voidzero-dev/vite-plus-core@1.6.0
-  vitest: 5.1.0
+  vitest: 5.1.1
 
 # Published peer ranges. Raise `effect` only when a dependency (or effect's own
 # HttpApi types) needs it; `vp run typecheck:floor` (test/floor/) compiles a
