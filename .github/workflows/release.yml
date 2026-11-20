@@ -109,6 +109,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       # No lifecycle scripts run in this privileged job; pnpm publishes via OIDC itself.
       - uses: voidzero-dev/setup-vp@v1.22.0
@@ -118,11 +119,10 @@ jobs:
           cache: false
           run-install: |
             - args: ["--frozen-lockfile", "--ignore-scripts"]
-      # `vp run release` builds first. `pnpm publish --recursive` skips a
-      # version npm already has, so a trunk push with nothing new to publish
-      # is a no-op.
+      # `vp run release` (vite.config.ts) builds first. `vp pm publish -r`
+      # skips a version npm already has, so a trunk push with nothing new to
+      # publish is a no-op; then `changeset git-tag` reports the new tag through
+      # CHANGESETS_OUTPUT, and the action pushes it and creates the release.
       - uses: changesets/action/publish@v2.1.2
         with:
           script: vp run release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

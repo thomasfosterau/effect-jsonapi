@@ -69,4 +69,4 @@ Run `vp run ci` (or each gate in its order). The pre-commit hook runs the Fallow
 
 ## Changesets
 
-Every change to the published package's behaviour, including doc comments that reach the emitted `.d.ts`, needs a changeset: `vp exec changeset`. Docs-, CI- and tooling-only changes need none. Pre-1.0, a breaking change is `minor`; never `major`. Never version or publish by hand: see [PUBLISHING.md](PUBLISHING.md).
+Every change to the published package's behaviour, including doc comments that reach the emitted `.d.ts`, needs a changeset: `vp exec changeset`. Docs-, CI- and tooling-only changes need none. Pre-1.0, a breaking change is `minor`; never `major`. Never version or publish by hand: the Release workflow runs `vp run release` (`vp run release:dry-run` shows what it would publish); see [PUBLISHING.md](PUBLISHING.md).

@@ -12,6 +12,7 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 - `vp run docgen` executes examples; `vp check` and `vp run check` passing doesn't mean they run.
 - `typecheck:dist`, `test/entry-points.test.ts` and `docgen` read `dist/`: build first.
 - A new query family goes in both the flat and the nested struct in `Query.schema` ([docs/architecture.md](docs/architecture.md)).
+- Publish only through the Release workflow (`vp run release`; there is no publish script). Release-path registry calls go through `vp pm`, never `npm` / `pnpm` directly; `vp pm view` fails inside this repo (`devEngines.runtime` is `lts`), so rely on `vp pm publish -r` skipping published versions.
 
 ## Fallow
 

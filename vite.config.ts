@@ -294,16 +294,26 @@ export default defineConfig({
         cache: false,
       },
       // The Changesets steps release.yml runs: bump versions and changelogs,
-      // then publish what npm does not have yet and tag it. `pnpm publish`
-      // rewrites `catalog:` specifiers; lifecycle scripts stay off in the
-      // privileged publish job.
+      // then publish what npm does not have yet (`vp pm publish -r`, which
+      // rewrites `catalog:` specifiers and publishes under OIDC) and tag it
+      // (`changeset git-tag`, which reports the tag to changesets/action through
+      // `CHANGESETS_OUTPUT`). Lifecycle scripts stay off in the privileged
+      // publish job; a failed publish stops before tagging.
       version: {
-        command: "changeset version && vp fmt && pnpm install --lockfile-only",
+        command: "changeset version && vp fmt && vp install --lockfile-only",
         cache: false,
       },
       release: {
-        command:
-          "pnpm publish --recursive --access public --no-git-checks --ignore-scripts && changeset git-tag",
+        command: [
+          "vp pm publish -r --access public --no-git-checks -- --ignore-scripts",
+          "changeset git-tag",
+        ],
+        dependsOn: ["build"],
+        cache: false,
+      },
+      // What `release` would publish, without publishing or tagging.
+      "release:dry-run": {
+        command: "vp pm publish -r --access public --dry-run --no-git-checks -- --ignore-scripts",
         dependsOn: ["build"],
         cache: false,
       },
