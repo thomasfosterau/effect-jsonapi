@@ -16,3 +16,5 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 ## Fallow
 
 The pre-commit hook runs `vp run fallow:audit` and blocks a commit on findings the change introduces; fix them rather than skipping the hook. Run `fallow dead-code --trace <file>:<export>` before deleting an "unused" export.
+
+`vp install` links the `fallow` skill into `.claude/skills/fallow` from the installed package (approved under `permissions` in `pnpm-workspace.yaml`).
