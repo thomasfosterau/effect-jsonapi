@@ -10,7 +10,7 @@ on:
 permissions: {}
 
 env:
-  # pnpm 11 would otherwise re-install WITH lifecycle scripts before
+  # pnpm would otherwise re-install WITH lifecycle scripts before
   # `pnpm run` once a manifest looks newer than the install.
   pnpm_config_verify_deps_before_run: "false"
 
