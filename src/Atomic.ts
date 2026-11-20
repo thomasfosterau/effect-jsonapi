@@ -750,10 +750,9 @@ export type RelationshipOperation<Res extends Any> = {
     : Res["relationships"][K] extends Relationship.Optional<infer T>
       ? UpdateToOneRelationshipOperation<Res, K, Schema.NullOr<Ref<T>>>
       : Res["relationships"][K] extends Relationship.ToMany<infer T>
-        ?
-            | ToManyRelationshipOperation<"add", Res, K, T>
-            | ToManyRelationshipOperation<"update", Res, K, T>
-            | ToManyRelationshipOperation<"remove", Res, K, T>
+        ? | ToManyRelationshipOperation<"add", Res, K, T>
+          | ToManyRelationshipOperation<"update", Res, K, T>
+          | ToManyRelationshipOperation<"remove", Res, K, T>
         : never;
 }[RelationshipName<Res>];
 
