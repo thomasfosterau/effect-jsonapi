@@ -30,7 +30,7 @@
 
 Versions live only in the `pnpm-workspace.yaml` catalog; never edit one in a `package.json`. After changing the catalog, run `vp install` and commit `pnpm-lock.yaml`.
 
-On a Dependabot toolchain PR, also move: the `vite` alias (equal to `vite-plus`), the `typescript` / `@typescript/native` aliases (to a pairing `@effect/tsgo` supports), and the devcontainer image tag (equal to `vite-plus`). Raise or drop the advisory floors under `overrides` when `pnpm audit` or their dependents change.
+Dependabot can't make the toolchain moves, so make them in a PR from a new branch started from its head (never push to a `dependabot/*` branch, which stops it rebasing), and it closes its own PR once yours merges. There, also move: the `vite` alias (equal to `vite-plus`), the `typescript` / `@typescript/native` aliases (to a pairing `@effect/tsgo` supports), and the devcontainer image tag (equal to `vite-plus`). Raise or drop the advisory floors under `overrides` when `pnpm audit` or their dependents change.
 
 ## Coding guidelines
 
