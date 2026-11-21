@@ -3767,59 +3767,58 @@ type GeneratedRelationships<
         RO,
         K
       > extends true
-        ?
-            | GeneratedRelated<
+        ? | GeneratedRelated<
+              Type,
+              Attributes,
+              Rels,
+              Meta,
+              IdSchema,
+              K,
+              RelConfigObject<RO, K>,
+              GErrors,
+              GInclude,
+              GFields,
+              GSort,
+              GPage
+            >
+          | ReturnType<
+              typeof getRelationship<
                 Type,
                 Attributes,
                 Rels,
                 Meta,
                 IdSchema,
                 K,
-                RelConfigObject<RO, K>,
-                GErrors,
-                GInclude,
-                GFields,
-                GSort,
-                GPage
-              >
-            | ReturnType<
-                typeof getRelationship<
-                  Type,
-                  Attributes,
-                  Rels,
-                  Meta,
-                  IdSchema,
+                RelErrors<RelConfigObject<RO, K>, GErrors>,
+                `${K}Relationship`,
+                `/${Type}/:id/relationships/${K}`,
+                Rels[K] extends Relationship.ToMany<Any>
+                  ? RelPage<RelConfigObject<RO, K>, GPage>
+                  : never,
+                typeof AnyMeta,
+                RelRelationshipInclude<
+                  Resource<Type, Attributes, Rels, Meta, IdSchema>,
                   K,
-                  RelErrors<RelConfigObject<RO, K>, GErrors>,
-                  `${K}Relationship`,
-                  `/${Type}/:id/relationships/${K}`,
-                  Rels[K] extends Relationship.ToMany<Any>
-                    ? RelPage<RelConfigObject<RO, K>, GPage>
-                    : never,
-                  typeof AnyMeta,
-                  RelRelationshipInclude<
-                    Resource<Type, Attributes, Rels, Meta, IdSchema>,
-                    K,
-                    RelConfigObject<RO, K>,
-                    GRelInclude
-                  >,
-                  RelRelationshipFields<RelConfigObject<RO, K>, GRelFields>
-                >
+                  RelConfigObject<RO, K>,
+                  GRelInclude
+                >,
+                RelRelationshipFields<RelConfigObject<RO, K>, GRelFields>
               >
-            | ReturnType<
-                typeof updateRelationship<
-                  Type,
-                  Attributes,
-                  Rels,
-                  Meta,
-                  IdSchema,
-                  K,
-                  RelErrors<RelConfigObject<RO, K>, GErrors>,
-                  `update${Capitalize<K>}Relationship`,
-                  `/${Type}/:id/relationships/${K}`,
-                  typeof AnyMeta
-                >
+            >
+          | ReturnType<
+              typeof updateRelationship<
+                Type,
+                Attributes,
+                Rels,
+                Meta,
+                IdSchema,
+                K,
+                RelErrors<RelConfigObject<RO, K>, GErrors>,
+                `update${Capitalize<K>}Relationship`,
+                `/${Type}/:id/relationships/${K}`,
+                typeof AnyMeta
               >
+            >
         : never;
     }[RelationshipName<Resource<Type, Attributes, Rels, Meta, IdSchema>>]
   | {
@@ -3827,34 +3826,33 @@ type GeneratedRelationships<
         RO,
         K
       > extends true
-        ?
-            | ReturnType<
-                typeof addRelationship<
-                  Type,
-                  Attributes,
-                  Rels,
-                  Meta,
-                  IdSchema,
-                  K,
-                  RelErrors<RelConfigObject<RO, K>, GErrors>,
-                  `add${Capitalize<K>}Relationship`,
-                  `/${Type}/:id/relationships/${K}`,
-                  typeof AnyMeta
-                >
+        ? | ReturnType<
+              typeof addRelationship<
+                Type,
+                Attributes,
+                Rels,
+                Meta,
+                IdSchema,
+                K,
+                RelErrors<RelConfigObject<RO, K>, GErrors>,
+                `add${Capitalize<K>}Relationship`,
+                `/${Type}/:id/relationships/${K}`,
+                typeof AnyMeta
               >
-            | ReturnType<
-                typeof removeRelationship<
-                  Type,
-                  Attributes,
-                  Rels,
-                  Meta,
-                  IdSchema,
-                  K,
-                  RelErrors<RelConfigObject<RO, K>, GErrors>,
-                  `remove${Capitalize<K>}Relationship`,
-                  `/${Type}/:id/relationships/${K}`
-                >
+            >
+          | ReturnType<
+              typeof removeRelationship<
+                Type,
+                Attributes,
+                Rels,
+                Meta,
+                IdSchema,
+                K,
+                RelErrors<RelConfigObject<RO, K>, GErrors>,
+                `remove${Capitalize<K>}Relationship`,
+                `/${Type}/:id/relationships/${K}`
               >
+            >
         : never;
     }[ToManyName<Resource<Type, Attributes, Rels, Meta, IdSchema>>];
 

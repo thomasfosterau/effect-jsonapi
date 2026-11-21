@@ -48,7 +48,11 @@ export default defineConfig({
       "test/floor/**",
     ],
     extends: [recommended, effect.configs.recommended],
-    options: { typeAware: true, typeCheck: true },
+    // `typeCheck` is off: tsrs's type check reports the Effect language
+    // service's warnings (tsconfig.base.json's `diagnosticSeverity`) as errors,
+    // ignoring `ignoreEffectWarningsInTscExitCode`. `vp run check` stays the
+    // type gate.
+    options: { typeAware: true, typeCheck: false },
     plugins: ["eslint", "typescript", "unicorn", "oxc", "import", "promise", "vitest"],
     categories: {
       correctness: "error",
@@ -355,6 +359,12 @@ export default defineConfig({
   // declarations put types in hashed chunks a consumer's declaration emit
   // cannot name, so `build` emits them per module with `tsc`.
   pack: {
+    deps: {
+      // tsdown <0.23 compatibility: resolve external dependency subpaths.
+      // Remove to preserve subpath imports as written (the new default).
+      // https://tsdown.dev/options/dependencies#deps-resolvedepsubpath
+      resolveDepSubpath: true,
+    },
     entry: ["src/index.ts", "src/schema.ts", "src/[A-Z]*.ts", "!src/**/*.test.ts"],
     format: "esm",
     platform: "neutral",

@@ -11,11 +11,12 @@ catalog:
   # Executes every JSDoc `@example` under `tsx` (below) against `dist/`.
   "@effect/docgen": ^4.1.2
   "@effect/language-service": ^0.87.3
-  # `prepare` runs `effect-tsgo patch --typescript --oxlint`, which hard-errors
-  # on a `@typescript/native` or vite-plus oxlint version missing from the
-  # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs.
-  # Read it before bumping any of the three.
-  "@effect/tsgo": 0.69.0
+  # `prepare` runs `effect-tsgo patch --typescript --oxlint --tsrs`, which
+  # hard-errors on a `@typescript/native` or vite-plus oxlint / tsrs version
+  # missing from the `components` table in
+  # node_modules/@effect/tsgo/dist/effect-tsgo.cjs. Read it before bumping any
+  # of them.
+  "@effect/tsgo": 0.73.2
   # Peers `effect` at its own version.
   "@effect/vitest": 4.1.4
   "@enfect/oxlint": 0.10.0
@@ -35,9 +36,10 @@ catalog:
   # the native TS7 `tsc` runs the type gates. Exact: @effect/tsgo patches it.
   typescript: "npm:@typescript/typescript6@6.0.2"
   "@typescript/native": "npm:typescript@7.0.2"
-  # `vite` must equal `vite-plus`; `vitest` must equal vite-plus's pin.
-  vite-plus: 1.6.0
-  vite: npm:@voidzero-dev/vite-plus-core@1.6.0
+  # `vite` and `vitest` must equal what vite-plus itself depends on (`npm view
+  # vite-plus@<v> dependencies`); `vite` no longer equals vite-plus.
+  vite-plus: 1.7.0
+  vite: npm:@voidzero-dev/vite-plus-core@8.3.8000
   vitest: 5.1.0
 
 # Published peer ranges. Raise `effect` only when a dependency (or effect's own
@@ -56,6 +58,9 @@ overrides:
   "js-yaml@3": "^3.15.2"
   "launch-editor@2": "^2.14.2"
   "shell-quote@1": "^1.11.0"
+  # One `vite` (vite-plus's aliased core) and one `vitest` throughout.
+  vite@*: "catalog:"
+  vitest@*: "catalog:"
 nodeLinker: hoisted
 allowBuilds:
   esbuild: true
@@ -72,13 +77,6 @@ permissions:
 
 skills:
   dirs: [.claude/skills]
-peerDependencyRules:
-  allowAny:
-    - vite
-    - vitest
-  allowedVersions:
-    vite: "*"
-    vitest: "*"
 
 # Hold new versions for 24 hours; first-party packages are exempt.
 minimumReleaseAge: 1440

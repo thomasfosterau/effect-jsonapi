@@ -1215,11 +1215,10 @@ const judgeWalked = (
     sparseFamily(endpoint, path, candidates, [...nullable, ...total, ...relationships]),
     includeFamily(endpoint, path, candidates, [...nullable, ...total, ...relationships]),
   ];
-  return Effect.flatMap(judgeAll(io, ctx, path, candidates, groupProbes), (groups) =>
-    Effect.map(judgeFamilies(io, ctx, path, candidates, families), (judged) => [
-      ...groups,
-      ...judged,
-    ]),
+  return Effect.zipWith(
+    judgeAll(io, ctx, path, candidates, groupProbes),
+    judgeFamilies(io, ctx, path, candidates, families),
+    (groups, judged) => [...groups, ...judged],
   );
 };
 

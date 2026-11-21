@@ -2240,14 +2240,13 @@ type DeclaredOperators<D, All extends string> = D extends true
  * @category type-level
  */
 export type FilterableKeys<Res extends Any> = Res extends Any
-  ?
-      | FilterableIdKey<Res>
-      | {
-          [K in AttributeKeys<Res>]: [FilterMarkerOf<AttributesOf<Res>[K]>] extends [never]
-            ? never
-            : K;
-        }[AttributeKeys<Res>]
-      | FilterableRelationshipKeys<Res>
+  ? | FilterableIdKey<Res>
+    | {
+        [K in AttributeKeys<Res>]: [FilterMarkerOf<AttributesOf<Res>[K]>] extends [never]
+          ? never
+          : K;
+      }[AttributeKeys<Res>]
+    | FilterableRelationshipKeys<Res>
   : never;
 
 /**
