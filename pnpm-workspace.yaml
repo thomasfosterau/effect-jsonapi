@@ -22,7 +22,7 @@ catalog:
   "@enfect/oxlint": 0.10.0
   # Only its Schema subpaths are imported; none of its types reach our
   # declarations. 0.2.0 is the first with `Issues.leaves` / `Issues.message`.
-  "@thomasfosterau/effect-ext": ^0.2.0 || ^0.3.0
+  "@thomasfosterau/effect-ext": ^0.2.0 || ^0.3.0 || ^0.4.0
   "@types/node": ^26.4.1
   # Must equal the vitest vite-plus bundles.
   "@vitest/coverage-istanbul": 5.1.1
