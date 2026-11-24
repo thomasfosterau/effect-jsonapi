@@ -18,7 +18,7 @@ catalog:
   # of them.
   "@effect/tsgo": 0.73.2
   # Peers `effect` at its own version.
-  "@effect/vitest": 4.1.4
+  "@effect/vitest": 4.1.5
   "@enfect/oxlint": 0.10.0
   # Only its Schema subpaths are imported; none of its types reach our
   # declarations. 0.2.0 is the first with `Issues.leaves` / `Issues.message`.
@@ -27,7 +27,7 @@ catalog:
   # Must equal the vitest vite-plus bundles.
   "@vitest/coverage-istanbul": 5.1.0
   # Tracks `latest`; consumers see the `catalogs.peers` range.
-  effect: 4.1.4
+  effect: 4.1.5
   fallow: 3.44.0
   # docgen's example runner; never invoke it directly.
   tsx: ^4.23.13
