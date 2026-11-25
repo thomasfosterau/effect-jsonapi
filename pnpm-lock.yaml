@@ -178,10 +178,10 @@ catalogs:
       version: 3.0.3
     '@effect/docgen':
       specifier: ^4.1.2
-      version: 4.1.2
+      version: 4.1.5
     '@effect/language-service':
       specifier: ^0.87.3
-      version: 0.87.3
+      version: 0.87.5
     '@effect/tsgo':
       specifier: 0.73.4
       version: 0.73.4
@@ -233,17 +233,17 @@ importers:
     dependencies:
       '@thomasfosterau/effect-ext':
         specifier: 'catalog:'
-        version: 0.3.0(@effect/platform-node@4.1.2(effect@4.1.5)(redis@6.3.0))(effect@4.1.5)
+        version: 0.3.0(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.3.0))(effect@4.1.5)
     devDependencies:
       '@changesets/cli':
         specifier: 'catalog:'
         version: 3.0.3
       '@effect/docgen':
         specifier: 'catalog:'
-        version: 4.1.2(@typescript/typescript6@6.0.2)(redis@6.3.0)(tsx@4.23.13)
+        version: 4.1.5(@typescript/typescript6@6.0.2)(redis@6.3.0)(tsx@4.23.13)
       '@effect/language-service':
         specifier: 'catalog:'
-        version: 0.87.3
+        version: 0.87.5
       '@effect/tsgo':
         specifier: 'catalog:'
         version: 0.73.4
@@ -457,16 +457,16 @@ packages:
     resolution: {integrity: sha512-y7/yvZ2TPAnR9+jnc00klvNNLkJiXFFrQA/hlLCcxA9a2A4zQIOimyFQ9XfwYKiGD1fb5GY8vbKIIgO8d5Tb2A==}
     engines: {node: '>= 20.12.0'}
 
-  '@effect/docgen@4.1.2':
-    resolution: {integrity: sha512-R4e0mxxY9B5v8Sdr2tWjjQL9nIlOwT0J8baQ3zgF4wth89rmVcDH7NA2r1ojwlArq17h/Y8ZgLi2ViQgsenRfw==}
+  '@effect/docgen@4.1.5':
+    resolution: {integrity: sha512-qDXsWPsrOliGFiAmNNScxcSJYwPJSWim3aor2z6+sSR9EQRcHsFd/OWpDaWBbjngmBJCYWZajtFgxfoqlYYQ9Q==}
     engines: {node: '>=22.19.0'}
     hasBin: true
     peerDependencies:
       tsx: '>=4.19.3 <5.0.0'
       typescript: '>=5.8.2 <7.0.0'
 
-  '@effect/language-service@0.87.3':
-    resolution: {integrity: sha512-g1OmRBZF5chbW9QMNoirPo5Bb4zzU2HfP88tR7/VSZEUxHJ1/qVb8AQ0kUh2ggctLH1I715yCwP4gkw56PTjpQ==}
+  '@effect/language-service@0.87.5':
+    resolution: {integrity: sha512-np/zJgk71/PyHxtoqyUKLYcpQhoRBI+L6+1Z0ILk35JSQ/lvXzwlwOwddYZLDkeC4bdF2ukKekqKlla/F88R5w==}
     hasBin: true
 
   '@effect/markdown-toc@0.1.0':
@@ -474,14 +474,14 @@ packages:
     engines: {node: '>=0.10.0'}
     hasBin: true
 
-  '@effect/platform-node-shared@4.1.2':
-    resolution: {integrity: sha512-wSwl9A/G1hcVvF8nLI+YfB3EyOIDvWS6+lsTZBkmgDnPBL7m8YWZF+1HD+mdEsb52SUGfukip46Q3gRwSdk3QA==}
+  '@effect/platform-node-shared@4.1.5':
+    resolution: {integrity: sha512-JzlrYe4uKaBFTWihBRXo2pDjkUVB39kQpKdGfXdbp7Co5sKT8hbcjOmdB5pg/WOYESdGTddd3fxD4lwlZELbZQ==}
     engines: {node: '>=22.19.0'}
     peerDependencies:
       effect: 4.1.5
 
-  '@effect/platform-node@4.1.2':
-    resolution: {integrity: sha512-ye0UjxORdd5Qu3paZ1LljgGOALWHt7muP9VTpjUSCNfcesiB/Hm7wPJIvZeu4gnwpTe5BtEnO1VHngWqjJp8mA==}
+  '@effect/platform-node@4.1.5':
+    resolution: {integrity: sha512-tFnRvxF9EKc3oU17sDHj1JeLP+TL/IkaOEl3IUk2EjgMS0x7AWs0ioUXjdNKLb3Z1LdjVfMf/DxsNh9PW5FFAg==}
     engines: {node: '>=22.19.0'}
     peerDependencies:
       effect: 4.1.5
@@ -1845,8 +1845,8 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
-  glob@14.0.4:
-    resolution: {integrity: sha512-mMiwNKoJZ4HAIRVJxotO6LsNRReA30gQwP9E2/p94tfLv+jygCNpKDjhhSL6OLY6LE371EZm5EAf7RpYuUqlsw==}
+  glob@14.0.6:
+    resolution: {integrity: sha512-OwXjVP2svY5EyLY75Vek96C8qK43gqrt4xsZ+qSILdnaEiJPXkd62mcfUSNx/TQErQRdu5uM5kF67sfONragKw==}
     engines: {node: 18 || 20 || >=22}
 
   gray-matter@3.1.1:
@@ -2141,8 +2141,8 @@ packages:
     resolution: {integrity: sha512-LJlKCCAUFKOuZxipUdYw1NzIITEsPcgyOG9LkvRJvuKj/bRzbuRY0ARXvL0pWGpsZvn8jku+LMep2eU0seHp8g==}
     engines: {node: ^10 || ^12 || >=14}
 
-  prettier@3.9.10:
-    resolution: {integrity: sha512-skGHTH1Yb9QvaTC4hWnRTzEYtCpApF0UMBPz+t/0ZPzP8ihefo/btKd+QA7pUE0fEwA1SbS/NmhyEcstdXOIdA==}
+  prettier@3.10.1:
+    resolution: {integrity: sha512-70vp3ZUYoPlFbF9uiTdXHUUCGEIp7d4+6p+8DYbkm2jP7x/3i/paXVF6dopSI3zd/CEitrZN1rc4i85xWmmXlg==}
     engines: {node: '>=14'}
     hasBin: true
 
@@ -2388,6 +2388,18 @@ packages:
       utf-8-validate:
         optional: true
 
+  ws@8.23.0:
+    resolution: {integrity: sha512-wCkmX8QMOrKjgO8HW2WyDbTSGeqkocxgDzS9iR79rEAexty6/2qzilx3Ag8Tqf9ykop3irLKle0MtVn5qjVnoQ==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   xtend@4.0.2:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
     engines: {node: '>=0.4'}
@@ -2555,16 +2567,16 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
 
-  '@effect/docgen@4.1.2(@typescript/typescript6@6.0.2)(redis@6.3.0)(tsx@4.23.13)':
+  '@effect/docgen@4.1.5(@typescript/typescript6@6.0.2)(redis@6.3.0)(tsx@4.23.13)':
     dependencies:
       '@babel/code-frame': 8.0.6
       '@effect/markdown-toc': 0.1.0
-      '@effect/platform-node': 4.1.2(effect@4.1.5)(redis@6.3.0)
+      '@effect/platform-node': 4.1.5(effect@4.1.5)(redis@6.3.0)
       chalk: 6.0.1
       doctrine: 3.0.0
       effect: 4.1.5
-      glob: 14.0.4
-      prettier: 3.9.10
+      glob: 14.0.6
+      prettier: 3.10.1
       ts-morph: 28.0.0
       tsconfck: 3.1.6(@typescript/typescript6@6.0.2)
       tsx: 4.23.13
@@ -2574,7 +2586,7 @@ snapshots:
       - redis
       - utf-8-validate
 
-  '@effect/language-service@0.87.3': {}
+  '@effect/language-service@0.87.5': {}
 
   '@effect/markdown-toc@0.1.0':
     dependencies:
@@ -2591,18 +2603,18 @@ snapshots:
       repeat-string: 1.6.1
       strip-color: 0.1.0
 
-  '@effect/platform-node-shared@4.1.2(effect@4.1.5)':
+  '@effect/platform-node-shared@4.1.5(effect@4.1.5)':
     dependencies:
       '@types/ws': 8.18.2
       effect: 4.1.5
-      ws: 8.22.1
+      ws: 8.23.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/platform-node@4.1.2(effect@4.1.5)(redis@6.3.0)':
+  '@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.3.0)':
     dependencies:
-      '@effect/platform-node-shared': 4.1.2(effect@4.1.5)
+      '@effect/platform-node-shared': 4.1.5(effect@4.1.5)
       effect: 4.1.5
       redis: 6.3.0
       undici: 8.12.4
@@ -3030,11 +3042,11 @@ snapshots:
     dependencies:
       '@testing-library/dom': 10.4.2
 
-  '@thomasfosterau/effect-ext@0.3.0(@effect/platform-node@4.1.2(effect@4.1.5)(redis@6.3.0))(effect@4.1.5)':
+  '@thomasfosterau/effect-ext@0.3.0(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.3.0))(effect@4.1.5)':
     dependencies:
       effect: 4.1.5
     optionalDependencies:
-      '@effect/platform-node': 4.1.2(effect@4.1.5)(redis@6.3.0)
+      '@effect/platform-node': 4.1.5(effect@4.1.5)(redis@6.3.0)
 
   '@ts-morph/common@0.29.0':
     dependencies:
@@ -3511,7 +3523,7 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
-  glob@14.0.4:
+  glob@14.0.6:
     dependencies:
       minimatch: 11.0.5
       minipass: 7.1.3
@@ -3780,7 +3792,7 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.2
 
-  prettier@3.9.10: {}
+  prettier@3.10.1: {}
 
   pretty-format@27.5.1:
     dependencies:
@@ -4058,6 +4070,8 @@ snapshots:
   why-is-node-running@3.2.1: {}
 
   ws@8.22.1: {}
+
+  ws@8.23.0: {}
 
   xtend@4.0.2: {}
 
