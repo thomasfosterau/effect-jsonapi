@@ -324,7 +324,7 @@ export default defineConfig({
       // Compiles and runs every JSDoc `@example` against `dist/`; writes the
       // API reference to docs/api/.
       docgen: {
-        command: "docgen",
+        command: 'PATH="$(cd scripts/bin && pwd):$PATH" docgen',
         dependsOn: ["build"],
         cache: false,
       },
