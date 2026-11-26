@@ -8,7 +8,7 @@ catalogMode: strict
 
 catalog:
   "@changesets/cli": ^3.0.3
-  # Executes every JSDoc `@example` under `tsx` (below) against `dist/`.
+  # Executes every JSDoc `@example` under `vpx` (scripts/bin/tsx) against `dist/`.
   "@effect/docgen": ^4.1.2
   "@effect/language-service": ^0.87.3
   # `prepare` runs `effect-tsgo patch --typescript --oxlint --tsrs`, which
@@ -29,8 +29,6 @@ catalog:
   # Tracks `latest`; consumers see the `catalogs.peers` range.
   effect: 4.1.5
   fallow: 3.48.0
-  # docgen's example runner; never invoke it directly.
-  tsx: ^4.23.13
   # TypeScript 6/7 side by side: JS-API consumers (the language service, the
   # tsdown declaration bundler, test/entry-points.test.ts) need TS6 (`tsc6`);
   # the native TS7 `tsc` runs the type gates. Exact: @effect/tsgo patches it.
@@ -38,8 +36,8 @@ catalog:
   "@typescript/native": "npm:typescript@7.0.2"
   # `vite` and `vitest` must equal what vite-plus itself depends on (`npm view
   # vite-plus@<v> dependencies`); `vite` no longer equals vite-plus.
-  vite-plus: 1.7.0
-  vite: npm:@voidzero-dev/vite-plus-core@8.3.8000
+  vite-plus: 1.8.0
+  vite: npm:@voidzero-dev/vite-plus-core@8.3.8001
   vitest: 5.1.1
 
 # Published peer ranges. Raise `effect` only when a dependency (or effect's own
@@ -52,12 +50,6 @@ catalogs:
 overrides:
   # `effect` must be a singleton.
   effect: "catalog:"
-  # Advisory floors for dev-only transitive dependencies, scoped to the major
-  # their dependents ask for. Drop each once its dependent's range excludes
-  # the vulnerable versions.
-  "js-yaml@3": "^3.15.2"
-  "launch-editor@2": "^2.14.2"
-  "shell-quote@1": "^1.11.0"
   # One `vite` (vite-plus's aliased core) and one `vitest` throughout.
   vite@*: "catalog:"
   vitest@*: "catalog:"
@@ -82,3 +74,14 @@ skills:
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - "@thomasfosterau/*"
+# Vite+ selects Node.js (.node-version) and pnpm (packageManager); pnpm
+# must not download or switch to its own.
+runtimeOnFail: ignore
+pmOnFail: ignore
+# docgen runs its examples with `tsx`, which scripts/bin/tsx stands in for
+# (through vpx), so its `tsx` peer is optional and never installed.
+packageExtensions:
+  "@effect/docgen":
+    peerDependenciesMeta:
+      tsx:
+        optional: true
