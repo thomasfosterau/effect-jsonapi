@@ -14,6 +14,12 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 - A new query family goes in both the flat and the nested struct in `Query.schema` ([docs/architecture.md](docs/architecture.md)).
 - Publish only through the Release workflow (`vp run release`; there is no publish script). Release-path registry calls go through `vp pm`, never `npm` / `pnpm` directly; `vp pm view` fails inside this repo (`devEngines.runtime` is `lts`), so rely on `vp pm publish -r` skipping published versions.
 
+## Pull requests
+
+- **Write the PR body with the `pr` skill** from Matt Pocock's skills (`mattpocock-skills:pr`), filling in the repository's pull request template where there is one.
+- **Resolve merge conflicts before you hand a PR over.** Rebase onto `origin/trunk` and push; a PR that conflicts with `trunk` isn't finished.
+- **Mark the PR ready for review as soon as the initial draft is finished.** Don't wait for CI to run, for reviews, or for the owner to do it. Keep fixing CI failures and review findings on the ready PR.
+
 ## Fallow
 
 The pre-commit hook runs `vp run fallow:audit` and blocks a commit on findings the change introduces; fix them rather than skipping the hook. Run `fallow dead-code --trace <file>:<export>` before deleting an "unused" export.
