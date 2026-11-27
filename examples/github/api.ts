@@ -17,8 +17,8 @@
  *   users, like GitHub's global search
  */
 import * as Schema from "effect/Schema";
-import { HttpApi, HttpApiMiddleware } from "effect/http-api";
-import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi";
+import { HttpApi } from "effect/http-api";
+import { Endpoint, Filter, Group, Query } from "@thomasfosterau/effect-jsonapi";
 import {
   IssueLocked,
   IssueNotFound,
@@ -29,17 +29,6 @@ import {
   UserNotFound,
 } from "./errors.js";
 import { Issue, IssueComment, PullRequest, Repository, User } from "./resources.js";
-
-/**
- * Advertises the filter grammar's profile on the media type of every answer
- * from an endpoint that speaks it — `Content-Type: application/vnd.api+json;
- * profile="…"`. The package declares the grammar but leaves advertising it to
- * the server, since only the server knows that its handler evaluates the
- * grammar's semantics; `FilterProfileLive` in `handlers.ts` implements it.
- */
-export class FilterProfile extends HttpApiMiddleware.Service<FilterProfile>()(
-  "github/FilterProfile",
-) {}
 
 /**
  * Typed collection meta carried by list responses.
@@ -200,14 +189,15 @@ export const issues = Group.make(
     errors: [IssueNotFound],
   }),
   // GET /issues?filter[state]=open&filter[repository]=1&sort=-createdAt —
-  // the filter grammar (`IssuesQuery`). Its answers advertise the profile
-  // (`FilterProfile`), which is what commits the handler to the profile's
+  // the filter grammar (`IssuesQuery`). Its answers name the profile on their
+  // media type (`profiles`), which commits the handler to the profile's
   // three-valued semantics (§6).
   Endpoint.list(Issue, {
     ...issuesQueryOptions,
     query: IssuesQuery,
     meta: PageMeta,
-  }).middleware(FilterProfile),
+    profiles: [Filter.PROFILE_URI],
+  }),
   // POST /issues → 201 (repository and author are required relationships)
   Endpoint.create(Issue, {
     errors: [RepositoryNotFound, LabelNotFound],

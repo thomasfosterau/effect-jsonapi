@@ -35,13 +35,10 @@ import * as Option from "effect/Option";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
 import type * as Schema from "effect/Schema";
-import * as Str from "effect/String";
-import { HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { Document, Filter, Handlers, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
 import {
   Api,
-  FilterProfile,
   IssueCommentsQuery,
   IssueCommentsRelationshipQuery,
   IssuesQuery,
@@ -668,26 +665,6 @@ const matching = (issues: ReadonlyArray<Issue>, filter: Option.Option<IssueFilte
     onSome: (tree) => Arr.filter(issues, (issue) => evaluate(tree, issue) === "TRUE"),
   });
 
-/** The media type of an answer from an endpoint speaking the grammar (§5). */
-const PROFILED_MEDIA_TYPE = `application/vnd.api+json; profile="${Filter.PROFILE_URI}"`;
-
-/**
- * The live {@link FilterProfile}: names the profile on the media type of every
- * JSON:API answer from the endpoints it is attached to (`GET /issues`).
- */
-export const FilterProfileLive: Layer.Layer<FilterProfile> = Layer.succeed(
-  FilterProfile,
-  (httpEffect) =>
-    Effect.map(httpEffect, (response) =>
-      Option.exists(
-        Option.fromNullishOr(response.headers["content-type"]),
-        Str.startsWith("application/vnd.api+json"),
-      )
-        ? HttpServerResponse.setHeader(response, "content-type", PROFILED_MEDIA_TYPE)
-        : response,
-    ),
-);
-
 // ---------------------------------------------------------------------------
 // Users
 // ---------------------------------------------------------------------------
@@ -1224,8 +1201,7 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
 
 /**
  * Everything needed to serve the GitHub-like API: the handlers plus the
- * JSON:API protocol middleware (content negotiation + spec-compliant 400s),
- * and the filter grammar's profile advertisement on `GET /issues`.
+ * JSON:API protocol middleware (content negotiation + spec-compliant 400s).
  *
  * The middleware is provided *into* the handler groups (not merged alongside
  * them) so that every endpoint's middleware requirement is satisfied.
@@ -1236,4 +1212,4 @@ export const GitHubLive = Layer.mergeAll(
   IssuesLive,
   PullsLive,
   SearchLive,
-).pipe(Layer.provideMerge(Layer.mergeAll(Middleware.layer, FilterProfileLive)));
+).pipe(Layer.provideMerge(Middleware.layer));

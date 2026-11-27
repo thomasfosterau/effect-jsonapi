@@ -660,4 +660,14 @@ const ApiLive = Layer.mergeAll(ArticlesLive).pipe(
 
 For the atomic extension, one key covers the **whole request** — the extension's own unit of atomicity — and replays the whole `atomic:results` document, which is what makes a replayed `lid` resolve to the id it resolved to the first time.
 
-JSON:API v1.1 specifies no idempotency mechanism. The header name and the three statuses are the [IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)'s convention; the fingerprint, the replay rule, the key's scope and the retention contract are this package's, published as a profile URI (`Idempotency.PROFILE_URI`).
+JSON:API v1.1 specifies no idempotency mechanism. The header name and the three statuses are the [IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)'s convention; the fingerprint, the replay rule, the key's scope and the retention contract are this package's, published as a profile URI (`Idempotency.PROFILE_URI`). An endpoint that opts in names that profile on the media type of its success responses (`Content-Type: application/vnd.api+json; profile="…"`), as JSON:API §6.1 requires of an applied profile; `jsonapi: Idempotency.jsonapi` in the body is optional on top.
+
+## Applied profiles (`profiles`)
+
+Every endpoint constructor takes `profiles`: the URIs of the [profiles](https://jsonapi.org/format/1.1/#profiles) its success responses apply. The endpoint declares its success media type with a `profile` parameter naming them, so the server sends `Content-Type: application/vnd.api+json; profile="…"` and the OpenAPI document shows the same media type:
+
+```ts skip-type-checking
+Endpoint.list(Issue, { filter: true, profiles: [Filter.PROFILE_URI] });
+```
+
+Naming a profile is a claim that the handler answers by its rules; the package doesn't check that. Error responses keep the plain media type.

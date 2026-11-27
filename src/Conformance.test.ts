@@ -10377,25 +10377,36 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
       ...options,
     });
 
-  it("is a profile-tier SHOULD citing the profiles section of the spec", () => {
+  it("is a profile-tier MUST citing the profiles section of the spec", () => {
     const rule = Conformance.rules.find((candidate) => candidate.id === RULE);
     expect(rule).toMatchObject({
       tier: "profile",
-      level: "SHOULD",
+      level: "MUST",
       reference: "https://jsonapi.org/format/1.1/#profiles",
     });
   });
 
   it.effect(
-    "passes a create that names the profile in `jsonapi.profile`, sending no key where it is optional",
+    "passes a create that names the profile on its media type, sending no key where it is optional",
     () =>
       Effect.gen(function* () {
         const keys: Array<string> = [];
-        const report = yield* runRule(verifyIdempotent, idempotentServer("document", keys));
+        const report = yield* runRule(verifyIdempotent, idempotentServer("media type", keys));
         expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 1 });
         expect(keys).toEqual(["(no key)"]);
         expect(report.writes?.map((write) => write.rule)).toEqual([RULE]);
       }),
+  );
+
+  it.effect("fails a create that names the profile in `jsonapi.profile` only", () =>
+    Effect.gen(function* () {
+      const report = yield* runRule(verifyIdempotent, idempotentServer("document", []));
+      const outcome = outcomeFor(report, RULE);
+      expect(outcome._tag).toBe("Failed");
+      expect(P.isTagged(outcome, "Failed") && outcome.findings[0]?.detail).toContain(
+        "in `jsonapi.profile` only, not on its media type",
+      );
+    }),
   );
 
   it.effect("holds an endpoint that requires the key too, sending a fresh one", () =>
@@ -10431,7 +10442,8 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
           const type = request.path.slice(1);
           return {
             status: 201,
-            body: { jsonapi: Idempotency.jsonapi, data: { type, id: `${next++}`, attributes: {} } },
+            contentType: profiled,
+            body: { data: { type, id: `${next++}`, attributes: {} } },
           };
         },
         {
@@ -10619,7 +10631,7 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
     it.effect("judges one create and one update per type, keying only the required update", () =>
       Effect.gen(function* () {
         const seen: Array<Seen> = [];
-        const report = yield* runUpdates(true, updatableServer("document", "media type", seen));
+        const report = yield* runUpdates(true, updatableServer("media type", "media type", seen));
         expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 2 });
         expect(seen).toEqual([
           { request: "POST /articles", key: "(no key)" },
@@ -10650,11 +10662,14 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
             ),
           );
           const seen: Array<Seen> = [];
-          const report = yield* verifyOver(withPut)(updatableServer("document", "document", seen), {
-            only: [RULE],
-            mutating: true,
-            writes: { articles: updating },
-          });
+          const report = yield* verifyOver(withPut)(
+            updatableServer("media type", "media type", seen),
+            {
+              only: [RULE],
+              mutating: true,
+              writes: { articles: updating },
+            },
+          );
           expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 4 });
           expect(seen).toEqual([
             { request: "POST /articles", key: "(no key)" },
@@ -10667,7 +10682,7 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
 
     it.effect("fails an update that names the profile in neither place", () =>
       Effect.gen(function* () {
-        const report = yield* runUpdates(true, updatableServer("document", "neither", []));
+        const report = yield* runUpdates(true, updatableServer("media type", "neither", []));
         expect(outcomeFor(report, RULE)).toMatchObject({
           _tag: "Failed",
           findings: [
@@ -10679,7 +10694,7 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
 
     it.effect("judges the create too when its endpoint declares the header", () =>
       Effect.gen(function* () {
-        const report = yield* runUpdates(true, updatableServer("neither", "document", []));
+        const report = yield* runUpdates(true, updatableServer("neither", "media type", []));
         expect(outcomeFor(report, RULE)).toMatchObject({
           _tag: "Failed",
           findings: [{ detail: expect.stringContaining(`creating a "articles" resource`) }],
@@ -10689,7 +10704,7 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
 
     it.effect("judges only the update when the create endpoint does not declare the header", () =>
       Effect.gen(function* () {
-        const report = yield* runUpdates(false, updatableServer("neither", "document", []));
+        const report = yield* runUpdates(false, updatableServer("neither", "media type", []));
         // Both requests count, as when the create is judged too.
         expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 2 });
       }),
@@ -10697,7 +10712,7 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
 
     it.effect("does not decide on an update the server did not accept", () =>
       Effect.gen(function* () {
-        const report = yield* runUpdates(false, updatableServer("neither", "document", [], 422));
+        const report = yield* runUpdates(false, updatableServer("neither", "media type", [], 422));
         expect(outcomeFor(report, RULE)).toEqual(
           expect.objectContaining({
             _tag: "Skipped",
@@ -10710,7 +10725,7 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
     it.effect("still probes the create when there is no update fixture", () =>
       Effect.gen(function* () {
         const seen: Array<Seen> = [];
-        const report = yield* runUpdates(true, updatableServer("document", "neither", seen), {
+        const report = yield* runUpdates(true, updatableServer("media type", "neither", seen), {
           articles: fixture,
         });
         expect(outcomeFor(report, RULE)).toMatchObject({
@@ -11183,18 +11198,15 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
       },
     };
 
-    it.effect("passes when the handler answers with `jsonapi: Idempotency.jsonapi`", () =>
-      Effect.gen(function* () {
-        const report = yield* runOver(idempotentApi, live(true))(options);
-        expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 1 });
-      }),
-    );
-
-    it.effect("fails when the handler answers without it", () =>
-      Effect.gen(function* () {
-        const report = yield* runOver(idempotentApi, live(false))(options);
-        expect(outcomeFor(report, RULE)._tag).toBe("Failed");
-      }),
+    // The endpoint names the profile on its media type itself, so what the
+    // handler puts in `jsonapi` does not decide it.
+    it.effect.each([true, false])(
+      "passes whether or not the handler answers with `jsonapi: Idempotency.jsonapi` (%s)",
+      (advertise) =>
+        Effect.gen(function* () {
+          const report = yield* runOver(idempotentApi, live(advertise))(options);
+          expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 1 });
+        }),
     );
   });
 });

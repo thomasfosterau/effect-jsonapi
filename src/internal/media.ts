@@ -58,8 +58,9 @@ export const baseMediaType = (entry: string): string =>
 
 /**
  * The JSON:API media type carrying an `ext` parameter for the given extension
- * URIs — the exact string the spec calls for, and the one the package's own
- * §5 parser accepts: a single space-separated, double-quoted URI list.
+ * URIs and a `profile` parameter for the given profile URIs — the exact
+ * string the spec calls for, and the one the package's own §5 parser
+ * accepts: each a single space-separated, double-quoted URI list.
  *
  * The single definition of "the media type this api speaks", shared by the
  * server (response body annotations) and the client (`Accept` /
@@ -69,10 +70,17 @@ export const baseMediaType = (entry: string): string =>
  * @category constructors
  * @internal
  */
-export const mediaTypeWith = (extensions?: ReadonlyArray<string>): string =>
-  extensions === undefined || Arr.isReadonlyArrayEmpty(extensions)
-    ? MEDIA_TYPE
-    : `${MEDIA_TYPE};ext="${extensions.join(" ")}"`;
+export const mediaTypeWith = (
+  extensions?: ReadonlyArray<string>,
+  profiles?: ReadonlyArray<string>,
+): string => [MEDIA_TYPE, ...uriList("ext", extensions), ...uriList("profile", profiles)].join(";");
+
+// One media type parameter carrying a space-separated, double-quoted URI
+// list, or none for an absent or empty list.
+const uriList = (name: string, uris?: ReadonlyArray<string>): ReadonlyArray<string> =>
+  uris === undefined || Arr.isReadonlyArrayEmpty(uris)
+    ? []
+    : [`${name}="${Arr.dedupe(uris).join(" ")}"`];
 
 /**
  * The JSON:API media type carrying the atomic operations `ext` parameter.
