@@ -455,10 +455,10 @@ const checkHop = (owner: Any, key: string, target: Any, path: string): void => {
       `Include: "${path}" — resource "${owner.type}" declares no relationship "${key}"`,
     );
   }
-  if (descriptor.kind === "paginated") {
+  if (!descriptor.includable) {
     throw declarationError(
-      `Include: "${path}" — relationship "${key}" on "${owner.type}" is paginated; ` +
-        "a paginated relationship carries no inline linkage and is never included",
+      `Include: "${path}" — relationship "${key}" on "${owner.type}" is not includable; ` +
+        "a paginated relationship, or one declared `includable: false`, is never included",
     );
   }
   const declared = descriptor.ref();

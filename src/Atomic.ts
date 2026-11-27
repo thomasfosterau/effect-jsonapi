@@ -331,7 +331,7 @@ type AsFields<T> = T extends Schema.Struct.Fields ? T : never;
  */
 export type AddRelationshipFields<Rels extends Relationships> = {
   readonly [
-    K in keyof Rels as Rels[K] extends Relationship.Paginated<Any> ? never : K
+    K in keyof Rels as Rels[K]["writable"] extends false ? never : K
   ]: Rels[K] extends Relationship.One<Any>
     ? RefSchemaFor<Rels[K]>
     : Schema.optionalKey<RefSchemaFor<Rels[K]>>;
@@ -358,9 +358,9 @@ export type AddRelationshipsMember<Rels extends Relationships> =
  * @category type-level
  */
 export type UpdateRelationshipFields<Rels extends Relationships> = {
-  readonly [
-    K in keyof Rels as Rels[K] extends Relationship.Paginated<Any> ? never : K
-  ]: Schema.optionalKey<RefSchemaFor<Rels[K]>>;
+  readonly [K in keyof Rels as Rels[K]["writable"] extends false ? never : K]: Schema.optionalKey<
+    RefSchemaFor<Rels[K]>
+  >;
 };
 
 // How many undeclared members each operation member reports at its own path:
@@ -381,20 +381,23 @@ const addRelationshipMembers = (resource: Any, cap: number) => {
   const fields: Record<string, Schema.Top> = {};
   const entries = R.toEntries(relationships);
   Arr.forEach(entries, ([key, descriptor]) => {
-    if (descriptor.kind === "paginated") return;
+    if (!descriptor.writable) return;
     fields[key] =
       descriptor.kind === "one"
         ? refSchemaFor(descriptor)
         : Schema.optionalKey(refSchemaFor(descriptor));
   });
-  const required = Arr.some(entries, ([, descriptor]) => descriptor.kind === "one");
+  const required = Arr.some(
+    entries,
+    ([, descriptor]) => descriptor.kind === "one" && descriptor.writable,
+  );
   return { struct: wireStruct(fields, memberNames(resource), cap), required };
 };
 
 const updateRelationshipFields = (resource: Any, cap: number): Schema.Top => {
   const fields: Record<string, Schema.Top> = {};
   Arr.forEach(R.toEntries(resource.relationships), ([key, descriptor]) => {
-    if (descriptor.kind === "paginated") return;
+    if (!descriptor.writable) return;
     fields[key] = Schema.optionalKey(refSchemaFor(descriptor));
   });
   return wireStruct(fields, memberNames(resource), cap);

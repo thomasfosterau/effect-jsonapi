@@ -111,9 +111,7 @@ export interface RefLinkageValue {
  */
 export type ResolvedLinkage<Res extends Any> = {
   readonly [
-    K in keyof Res["relationships"] as Res["relationships"][K] extends Relationship.Paginated<Any>
-      ? never
-      : K
+    K in keyof Res["relationships"] as Res["relationships"][K]["writable"] extends false ? never : K
   ]?: Res["relationships"][K] extends Relationship.One<infer T>
     ? { readonly data: T["identifier"]["Type"]; readonly meta?: MetaValue }
     : Res["relationships"][K] extends Relationship.Optional<infer T>

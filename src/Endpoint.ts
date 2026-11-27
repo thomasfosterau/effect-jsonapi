@@ -2430,17 +2430,19 @@ type ConstructSignature<R> = R extends new (_: never) => infer I ? new (_: never
  * @since 0.18.0
  * @category type-level
  */
-export type RelationshipIncludeBase<Res extends Any, Name extends string> =
-  DescriptorOf<Res, Name> extends Relationship.Paginated<infer T extends Any>
-    ? AsAny<
-        Omit<Res, "relationships"> &
-          ConstructSignature<Res> & {
-            readonly relationships: Omit<Res["relationships"], Name> & {
-              readonly [K in Name]: Relationship.Many<T>;
-            };
-          }
-      >
-    : Res;
+export type RelationshipIncludeBase<Res extends Any, Name extends string> = DescriptorOf<
+  Res,
+  Name
+>["includable"] extends false
+  ? AsAny<
+      Omit<Res, "relationships"> &
+        ConstructSignature<Res> & {
+          readonly relationships: Omit<Res["relationships"], Name> & {
+            readonly [K in Name]: Relationship.Many<Relationship.TargetOf<DescriptorOf<Res, Name>>>;
+          };
+        }
+    >
+  : Res;
 
 /**
  * Constrains the `?include=` paths {@link getRelationship} advertises, as
@@ -2634,7 +2636,7 @@ const rootedAt =
 // view inherits everything else from the parent through its prototype.
 const relationshipIncludeBase = (resource: Any, name: string): Any => {
   const descriptor = descriptorFor(resource, name);
-  if (descriptor.kind !== "paginated") return resource;
+  if (descriptor.includable) return resource;
   const relationships: Relationships = {
     ...resource.relationships,
     [name]: Relationship.many(descriptor.ref),

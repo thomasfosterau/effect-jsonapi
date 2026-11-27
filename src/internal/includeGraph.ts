@@ -148,7 +148,7 @@ const reachedBy = (resource: Any, segments: ReadonlyArray<string>): ReadonlyArra
       Option.match(R.get(resource.relationships, segment), {
         onNone: (): ReadonlyArray<Any> => [],
         onSome: (descriptor) => {
-          if (descriptor.kind === "paginated") return [];
+          if (!descriptor.includable) return [];
           const target = descriptor.ref();
           return [target, ...reachedBy(target, rest)];
         },

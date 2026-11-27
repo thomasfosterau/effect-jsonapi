@@ -38,7 +38,7 @@ A resource's attributes and relationships share one namespace with each other an
 
 ## Relationship kinds
 
-Each relationship declares its cardinality _and_ how its data travels — inline as resource identifiers, or behind a link to a paginated endpoint:
+Each relationship declares its cardinality _and_ how its data travels — inline as resource identifiers, or behind a link to a paginated endpoint. The four constructors are presets over a [linkage policy](#linkage-policy-toone-and-tomany) the core `toOne` / `toMany` take as options:
 
 | Constructor | Cardinality | Wire shape of the relationship object | In `?include=` | In create payload |
 | --- | --- | --- | --- | --- |
@@ -50,6 +50,40 @@ Each relationship declares its cardinality _and_ how its data travels — inline
 `one` / `optional` / `many` carry **inline linkage**: clients see the related identifiers right inside the parent resource and can pull the full resources into a compound document with `?include=`.
 
 `paginated` is for **unbounded collections** (an article's comments, a user's repositories): the relationship object carries only a required `related` link pointing at a paginated collection endpoint (see [Relationship & related endpoints](endpoints.md#relationship--related-endpoints)).
+
+### Linkage policy: `toOne` and `toMany`
+
+The four constructors are presets. JSON:API 1.1 lets a server decide, per relationship, whether a relationship object carries `data` at all ([§7.2.2.2](https://jsonapi.org/format/1.1/#document-resource-object-relationships): it "MUST contain at least one of" `links`, `data` and `meta`), and the core constructors `Relationship.toOne` and `Relationship.toMany` take that decision, and the ones that follow from it, as options:
+
+| Option | Values | Default |
+| --- | --- | --- |
+| `linkage` | `"always"`: `data` on every response. `"whenIncluded"`: `data` when the path is in `?include=`, otherwise it may be left out. `"optional"`: `data`, and the relationship itself, may be left out of any response. `"never"`: no `data`, a required `links.related`. | `"always"` |
+| `includable` | whether `?include=` may name the relationship | `true`, or `false` under `"never"` |
+| `writable` | whether create and update payloads may set it | `true` |
+| `paginationLinks` (`toMany`) | whether `links` may carry `first` / `prev` / `next` / `last`, paging the linkage in `data` | `false` |
+| `nullable` (`toOne`) | whether linkage may be `null` | `false` |
+
+`toOne(ref)` is `one(ref)`, `toOne(ref, { nullable: true })` is `optional(ref)` and `toMany(ref)` is `many(ref)`; `paginated(ref)` is the `{ linkage: "never", includable: false, writable: false }` policy plus a canonical `order`. `toOne` takes `one`'s `filter` and `key` options, and every constructor takes `meta`.
+
+```ts
+const Article = Resource.make("articles", {
+  attributes: { title: Schema.NonEmptyString },
+  relationships: {
+    // ids loaded only when asked for
+    author: Relationship.toOne(() => Person, { linkage: "whenIncluded" }),
+    // an expensive lookup: only `links.related`
+    reviewer: Relationship.toOne(() => Person, { nullable: true, linkage: "never" }),
+    // a page of linkage, with `links.next` for the rest
+    comments: Relationship.toMany(() => Comment, { paginationLinks: true }),
+    // unbounded and links-only, but still settable on create
+    watchers: Relationship.toMany(() => Person, { linkage: "never", writable: true }),
+  },
+});
+```
+
+The resource schema, its documents, the include paths, the create and update payloads, the atomic operations and the client all read the policy. A write always carries linkage: whatever the response policy, the payloads read `{ data }`. A combination the spec rules out throws when the relationship is declared: `"never"` with `includable` (an included resource must be reached through linkage, §Compound Documents) or with `paginationLinks` (they "MUST paginate the relationship data"), and `"whenIncluded"` without `includable`.
+
+Under `"whenIncluded"` the handler decides what to send: put `data` on the relationship when the request's `include` names it, and leave it out otherwise. The full-linkage check still holds every included resource to being reached through `data`.
 
 Paging is only well defined over a stable total order — `first` / `prev` / `next` / `last` denote a sequence of pages, and a cursor _is_ a position in an order — so a `paginated` relationship can declare the **canonical order** its related collection is paged in, in the same `{ field, direction }` terms `?sort=` decodes into:
 
@@ -117,8 +151,8 @@ Everything below is **derived** — never assembled by hand:
 | `Article.ref("1")` | a typed identifier _value_ — handy for relationship linkage |
 | `Article.localIdentifier` | the `{ type: "articles", lid }` schema — identifies a resource being created (no server id yet) |
 | `Article.lidRef("a1")` | a typed local-identifier _value_ — the `lid` counterpart of `ref` |
-| `Article.createPayload` | `{ data: { type, lid?, attributes, relationships } }` — no `id` (a client-generated `data.id` is rejected at `/data/id`, which `Endpoint.create` answers with 403); `one` relationships required, `paginated` relationships and non-`create` [attribute projections](#read-only--per-attribute-projections) excluded |
-| `Article.updatePayload` | `{ data: { type, id, attributes? (partial), relationships? } }` — attributes are [tri-state](#update-payloads-set--unset--leave-unchanged); `paginated` relationships and non-`update` [attribute projections](#read-only--per-attribute-projections) excluded |
+| `Article.createPayload` | `{ data: { type, lid?, attributes, relationships } }` — no `id` (a client-generated `data.id` is rejected at `/data/id`, which `Endpoint.create` answers with 403); `one` relationships required, `paginated` (and `writable: false`) relationships and non-`create` [attribute projections](#read-only--per-attribute-projections) excluded |
+| `Article.updatePayload` | `{ data: { type, id, attributes? (partial), relationships? } }` — attributes are [tri-state](#update-payloads-set--unset--leave-unchanged); `paginated` (and `writable: false`) relationships and non-`update` [attribute projections](#read-only--per-attribute-projections) excluded |
 | `Article.createInput` / `Article.updateInput` | flat ["command-style"](#flat-command-style-payloads) request schemas — attributes (and, for update, the `id`) without the JSON:API envelope |
 | `Article.document()` | single-resource document with `Article` as primary `data` (non-null); `included` union derived from the non-paginated relationships |
 | `Article.collection()` | collection document (strict array `data`) |
