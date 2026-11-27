@@ -299,7 +299,7 @@ export type AttributePresence = "required" | "optional" | false;
  * @since 0.13.0
  * @category type-level
  */
-export type FilterDeclaration = boolean | ReadonlyArray<Filter.Operator>;
+export type FilterDeclaration = boolean | ReadonlyArray<Filter.Declarable>;
 
 /**
  * The type-level config carried by an {@link Attribute}: the base schema, how
@@ -409,7 +409,18 @@ type ResolveClearable<S extends Schema.Top, Clearable extends boolean> = [Cleara
 // produce one type. `false` (the default) leaves the schema untouched.
 type WithFilter<S extends Schema.Top, D extends FilterDeclaration, Literal> = [D] extends [false]
   ? S
-  : Filter.Declared<S, DeclaredOperators<D, Filter.CoreOperator, Filter.Operator>, Literal>;
+  : Filter.Declared<S, AttributeOperators<D>, Literal, AttributeCustoms<D>>;
+// The operators and custom operators an attribute's `filter` sugar declares.
+type AttributeOperators<D extends FilterDeclaration> = D extends
+  | true
+  | ReadonlyArray<Filter.Declarable>
+  ? Filter.OperatorsIn<D>
+  : never;
+type AttributeCustoms<D extends FilterDeclaration> = D extends
+  | true
+  | ReadonlyArray<Filter.Declarable>
+  ? Filter.CustomsIn<D>
+  : never;
 type WithSort<S extends Schema.Top, Sortable extends boolean> = [Sortable] extends [true]
   ? Sort.Declared<S>
   : S;
@@ -570,10 +581,7 @@ export const attribute = <
     readonly Type: Schema.NullOr<Schema.Schema<NoInfer<Literal>>>["Type"];
   } & NotAlready<S, Filter.MarkerKey, FilterDecl> &
     NotAlready<S, Sort.MarkerKey, Sortable> &
-    Filter.TextOnString<
-      DeclaredOperators<FilterDecl, Filter.CoreOperator, Filter.Operator>,
-      NoInfer<Literal>
-    >,
+    Filter.TextOnString<AttributeOperators<FilterDecl>, NoInfer<Literal>>,
   options?: {
     // A literal only: a non-literal `boolean` cannot decide, at the type level,
     // whether the attribute is on the resource object.
@@ -670,10 +678,7 @@ export const readOnlyAttribute = <
     readonly Type: Schema.NullOr<Schema.Schema<NoInfer<Literal>>>["Type"];
   } & NotAlready<S, Filter.MarkerKey, FilterDecl> &
     NotAlready<S, Sort.MarkerKey, Sortable> &
-    Filter.TextOnString<
-      DeclaredOperators<FilterDecl, Filter.CoreOperator, Filter.Operator>,
-      NoInfer<Literal>
-    >,
+    Filter.TextOnString<AttributeOperators<FilterDecl>, NoInfer<Literal>>,
   {
     filterLiteral,
     ...options
@@ -2321,7 +2326,11 @@ type MarkerOf<F, Key extends string> = F extends { readonly [K in Key]: infer M 
 // The `Filter.able` declaration of an attribute field (`never` when undeclared)
 // and whether the field is `Sort.able`.
 type FilterMarkerOf<F> =
-  MarkerOf<F, Filter.MarkerKey> extends infer M extends Filter.Marker<Filter.Operator, unknown>
+  MarkerOf<F, Filter.MarkerKey> extends infer M extends Filter.Marker<
+    string,
+    unknown,
+    Filter.AnyCustomOperator
+  >
     ? M
     : never;
 // (`never` — no marker — must be caught first: it satisfies any `extends`.)
@@ -2478,6 +2487,28 @@ export type FilterOperators<
   ? OwnFilterOperators<Target<Res, Name>, Sub>
   : OwnFilterOperators<Res, K>;
 
+/**
+ * The custom operators (`Filter.CustomOperator`) a filterable key declares, as
+ * a union; `never` when it declares none.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type FilterCustomOperators<
+  Res extends Any,
+  K extends FilterableKeys<Res>,
+> = K extends `${infer Name extends TraversableKeys<Res>}.${infer Sub}`
+  ? OwnFilterCustomOperators<Target<Res, Name>, Sub>
+  : OwnFilterCustomOperators<Res, K>;
+
+// The custom operators of a key a resource declares filterable itself.
+type OwnFilterCustomOperators<Res extends Any, K> =
+  K extends FilterableIdKey<Res>
+    ? FilterMarkerOf<Res["Id"]>["custom"]
+    : K extends AttributeKeys<Res>
+      ? FilterMarkerOf<AttributesOf<Res>[K]>["custom"]
+      : never;
+
 // The operators of a key a resource declares filterable itself.
 type OwnFilterOperators<Res extends Any, K> =
   K extends FilterableIdKey<Res>
@@ -2534,9 +2565,14 @@ export type FilterLiteralType<S extends { readonly Type: unknown }> = Filter.Lit
  * @since 0.13.0
  * @category models
  */
-export interface FilterableField<Op extends Filter.Operator, Literal, RD = never, RE = never> {
-  /** The declared operators, in declaration order (the whole set for `filter: true`). */
+export interface FilterableField<Op extends string, Literal, RD = never, RE = never> {
+  /**
+   * The declared operators, in declaration order (the whole set for `filter: true`);
+   * a custom operator by its name.
+   */
   readonly operators: ReadonlyArray<Op>;
+  /** The custom operators declared, when there are any. */
+  readonly custom?: ReadonlyArray<Filter.AnyCustomOperator>;
   /**
    * The literal codec: decodes a wire string to the field's `Type` (through the
    * attribute schema, so refinements and brands apply — or through the target's
@@ -2792,15 +2828,19 @@ const attributeSchemaOf = (field: Schema.Top): Schema.Top => {
 };
 
 // Whether a value read from under `Filter.AnnotationId` is a well-formed
-// declaration: a non-empty list of operators from the closed core, and a
-// literal that is absent or a schema.
+// declaration: a non-empty list of operators, each from the vocabulary or
+// one of its custom operators, and a literal that is absent or a schema.
 const isFilterAnnotation = (u: unknown): u is Filter.Annotation => {
   if (!P.isObject(u)) return false;
-  const { operators, literal } = u;
+  const { operators, literal, custom = [] } = u as Partial<Filter.Annotation>;
   return (
     Array.isArray(operators) &&
     Arr.isReadonlyArrayNonEmpty(operators) &&
-    operators.every(Filter.isOperator) &&
+    Array.isArray(custom) &&
+    custom.every(Filter.isCustomOperator) &&
+    operators.every(
+      (operator) => Filter.isOperator(operator) || custom.some((entry) => entry.name === operator),
+    ) &&
     (literal === undefined || Schema.isSchema(literal))
   );
 };
@@ -2832,14 +2872,44 @@ const sortableKeys = (type: string, fields: Schema.Struct.Fields): ReadonlyArray
 // declaration throws) and shared by the accessor; keyed like `filterableCache`.
 const sortableCache = new WeakMap<object, ReadonlyArray<string>>();
 
-const isTextOperator = (operator: Filter.Operator): boolean =>
+const isTextOperator = (operator: string): boolean =>
   (Filter.textOperators as ReadonlyArray<string>).includes(operator);
 
 // The runtime shape of one `filterable` entry.
 interface RuntimeFilterable {
-  readonly operators: ReadonlyArray<Filter.Operator>;
+  readonly operators: ReadonlyArray<string>;
   readonly literal: Schema.Codec<unknown, string>;
+  readonly custom?: ReadonlyArray<Filter.AnyCustomOperator>;
 }
+
+// Refuses, at definition time, a custom operator declared on an attribute
+// whose encoded kind it does not apply to.
+const checkCustomOperators = (
+  type: string,
+  key: string,
+  declaration: Filter.Annotation,
+  kind: Option.Option<ScalarKind>,
+): void => {
+  Arr.forEach(declaration.custom ?? [], (custom) => {
+    if (Option.isNone(custom.appliesTo)) return;
+    if (
+      Option.exists(kind, (k) => custom.appliesTo.pipe(Option.exists((kinds) => kinds.includes(k))))
+    )
+      return;
+    throw declarationError(
+      `Resource.make("${type}"): attribute "${key}" declares filter operator ${custom.name}, ` +
+        `which applies to ${custom.appliesTo.value.join(", ")} attributes only`,
+    );
+  });
+};
+
+// The `custom` member of a filterable entry, present only when there is one.
+const customMember = (
+  declaration: Filter.Annotation,
+): { readonly custom?: ReadonlyArray<Filter.AnyCustomOperator> } =>
+  declaration.custom === undefined || Arr.isReadonlyArrayEmpty(declaration.custom)
+    ? {}
+    : { custom: declaration.custom };
 
 // The `Filter.able` declaration a schema carries, if any; a present but
 // malformed one is a definition error naming `subject` (an attribute, or the id).
@@ -2876,9 +2946,11 @@ const filterableFields = (
   // literal never fails: a wire string decoded through the id schema.
   const idDeclaration = filterDeclarationOf(type, "the id schema", id);
   if (Option.isSome(idDeclaration)) {
+    checkCustomOperators(type, "id", idDeclaration.value, Option.some("string"));
     result["id"] = {
       operators: idDeclaration.value.operators,
       literal: idDeclaration.value.literal ?? deriveFilterLiteral(type, "id", id),
+      ...customMember(idDeclaration.value),
     };
   }
   Arr.forEach(R.toEntries(fields), ([key, field]) => {
@@ -2887,10 +2959,9 @@ const filterableFields = (
     const declaration = declared.value;
     const schema = attributeSchemaOf(field as Schema.Top);
     const text = declaration.operators.filter(isTextOperator);
-    if (
-      Arr.isArrayNonEmpty(text) &&
-      !Option.contains(scalarKindOf(SchemaAST.toEncoded(nonNullableBase(schema).ast)), "string")
-    ) {
+    const kind = scalarKindOf(SchemaAST.toEncoded(nonNullableBase(schema).ast));
+    checkCustomOperators(type, key, declaration, kind);
+    if (Arr.isArrayNonEmpty(text) && !Option.contains(kind, "string")) {
       throw declarationError(
         `Resource.make("${type}"): attribute "${key}" declares filter operator ${text.join(", ")}, ` +
           "but its encoded form is not a string; the text operators apply to string attributes only",
@@ -2899,6 +2970,7 @@ const filterableFields = (
     result[key] = {
       operators: declaration.operators,
       literal: declaration.literal ?? deriveFilterLiteral(type, key, schema),
+      ...customMember(declaration),
     };
   });
   Arr.forEach(R.toEntries(relationships), ([key, descriptor]) => {

@@ -17,7 +17,18 @@ import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
-import type { Compare, LiteralCodecs, Node } from "../Filter.js";
+import type {
+  AnyCustomOperator,
+  Compare,
+  ConditionSource,
+  Dialect,
+  DialectContext,
+  DialectIssue,
+  LiteralCodecs,
+  Node,
+  WireCondition,
+  WireNode,
+} from "../Filter.js";
 import {
   conjunctions,
   listOperators,
@@ -39,6 +50,8 @@ import { render } from "./json.js";
 export interface FieldCodec {
   readonly operators: ReadonlyArray<string>;
   readonly literal: Schema.Top;
+  /** The custom operators the field declares, by name. */
+  readonly custom?: ReadonlyArray<AnyCustomOperator>;
 }
 
 /** The filterable fields of a resource, keyed by field name. */
@@ -69,7 +82,7 @@ const declaration = <V>(fields: { readonly [field: string]: V }, field: string) 
  * Encodes one literal of a field to its wire string, before escaping. Throws
  * when the field is unknown or the literal does not encode.
  */
-export type LiteralEncoder = (field: string, value: Compare["value"]) => string;
+export type LiteralEncoder = (field: string, value: Compare["value"], operator?: string) => string;
 
 /**
  * A `LiteralEncoder` over a declaration's literal codecs. A `null` literal is
@@ -79,11 +92,25 @@ export type LiteralEncoder = (field: string, value: Compare["value"]) => string;
  */
 export const literalEncoder =
   (fields: FieldCodecs): LiteralEncoder =>
-  (field, value) => {
+  (field, value, operator = "eq") => {
     const codec = declaration(fields, field);
     if (codec === undefined) throw new InvalidFilter({ message: unknownField(field) });
     if (value === null) throw new InvalidFilter({ message: nullLiteral(field) });
-    return Schema.encodeUnknownSync(codec.literal as Schema.Codec<unknown, string>)(value);
+    return Schema.encodeUnknownSync(literalOf(codec, operator))(value);
+  };
+
+/**
+ * Whether a field's custom operator takes a literal list. Read when encoding,
+ * so a `Custom` node's `value` is checked against the operator's shape.
+ */
+export type ListCheck = (field: string, operator: string) => boolean;
+
+/** A `ListCheck` over a declaration. */
+export const listCheck =
+  (fields: FieldCodecs): ListCheck =>
+  (field, operator) => {
+    const codec = declaration(fields, field);
+    return codec !== undefined && Option.exists(customOf(codec, operator), (custom) => custom.list);
   };
 
 /**
@@ -205,31 +232,119 @@ const isListPosition = (segments: ReadonlyArray<string>): boolean =>
   (segments.length === 3 && segments[1] === "condition" && segments[2] === "value");
 
 // ---------------------------------------------------------------------------
-// Decoding (§2.2, §2.4)
+// The dialect context: field, operator and literal checks
 // ---------------------------------------------------------------------------
 
-/** The outcome of a decode: the tree, or one issue per offending key. */
-export type Decoded =
-  | { readonly _tag: "Node"; readonly node: Node }
-  | { readonly _tag: "Issues"; readonly issues: ReadonlyArray<SchemaIssue.Issue> };
-
 /**
- * A `filter[...]` value as the flat query carries it: one string, or the
+ * A `filter` family value as the flat query carries it: one string, or the
  * strings of a repeated key (`Query.FilterWireValue`).
  */
 export type WireValue = string | ReadonlyArray<string>;
 
-// The offending value, carried as the issue's `actual`.
-const pointed = (key: string, message: string, input?: WireValue): SchemaIssue.Issue =>
-  new SchemaIssue.Pointer([key], new SchemaIssue.InvalidValue({ message }, input));
+// The custom operator `operator` names on a field, if the field declares one.
+const customOf = (codec: FieldCodec, operator: string): Option.Option<AnyCustomOperator> =>
+  Arr.findFirst(codec.custom ?? [], (custom) => custom.name === operator);
 
-// The keys a condition's members were read from; in shorthand all three are
-// the one key.
-interface ConditionKeys {
-  readonly field: string;
-  readonly operator: string;
-  readonly value: string;
-}
+// The literal codec `operator` decodes and encodes through on a field: a
+// custom operator's own, else the field's.
+const literalOf = (codec: FieldCodec, operator: string): Schema.Codec<unknown, string> =>
+  Option.getOrElse(
+    Option.flatMap(customOf(codec, operator), (custom) => custom.literal),
+    () => codec.literal as Schema.Codec<unknown, string>,
+  );
+
+/**
+ * The {@link DialectContext} over a declaration: every check a condition
+ * goes through, in the order the bracket grammar has always made them —
+ * field, operator, `isnull` value, declaration, arity, literals — so every
+ * dialect rejects with the same messages.
+ */
+export const dialectContext = (fields: FieldCodecs): DialectContext => {
+  const customs = Arr.flatMap(
+    R.values(fields as R.ReadonlyRecord<string, FieldCodec>),
+    (codec) => codec.custom ?? [],
+  );
+  const known = Arr.dedupe([...allOperators, ...Arr.map(customs, (custom) => custom.name)]);
+  const isOperator = (operator: string): boolean => known.includes(operator);
+  const isList = (field: string, operator: string): boolean => {
+    if (isListOperator(operator)) return true;
+    const codec = declaration(fields, field);
+    const own = codec === undefined ? Option.none() : customOf(codec, operator);
+    return Option.isSome(own)
+      ? own.value.list
+      : customs.some((custom) => custom.name === operator && custom.list);
+  };
+  const condition: DialectContext["condition"] = ({ field, operator, values }, source) => {
+    const keys = P.isString(source) ? { field: source, operator: source, value: source } : source;
+    const raw = values.join(",");
+    const issue = (key: string, message: string, actual: string) =>
+      Result.fail({ key, message, actual });
+    const codec = declaration(fields, field);
+    if (codec === undefined) return issue(keys.field, unknownField(field), field);
+    if (!isOperator(operator)) {
+      return issue(
+        keys.operator,
+        `Unknown filter operator ${render(operator)}; expected one of ${known.join(", ")}`,
+        operator,
+      );
+    }
+    if (operator === nullOperator && raw !== "true" && raw !== "false")
+      return issue(keys.value, `Expected true or false for isnull, got ${render(raw)}`, raw);
+    if (!codec.operators.includes(operator))
+      return issue(keys.operator, undeclaredOperator(field, operator, codec.operators), operator);
+    const list = isList(field, operator);
+    if (!Arr.isReadonlyArrayNonEmpty(values) || (!list && values.length > 1)) {
+      return issue(
+        keys.value,
+        `Operator ${render(operator)} takes ${list ? "at least" : "exactly"} one literal, got ${values.length}`,
+        raw,
+      );
+    }
+    if (operator === nullOperator)
+      return Result.succeed({ _tag: "IsNull", field, negated: raw === "false" });
+    // A text operator's literal is a fragment of the value, not a value: it is
+    // the string itself, never decoded through the field's codec.
+    if (isTextOperator(operator))
+      return Result.succeed({ _tag: "Text", op: operator, field, value: values[0] });
+    const decode = Schema.decodeUnknownResult(literalOf(codec, operator));
+    const decoded: Array<unknown> = [];
+    const invalid = Arr.findFirst(values, (item) => {
+      const result = decode(item);
+      if (Result.isFailure(result)) return Option.some({ item, failure: result.failure });
+      decoded.push(result.success);
+      return Option.none();
+    });
+    if (Option.isSome(invalid)) {
+      return issue(
+        keys.value,
+        `Invalid literal ${render(invalid.value.item)} for field ${render(field)}: ${issueMessage(invalid.value.failure)}`,
+        raw,
+      );
+    }
+    const literals = decoded as [unknown, ...Array<unknown>];
+    if (operator === "in" || operator === "nin")
+      return Result.succeed({ _tag: operator === "in" ? "In" : "NotIn", field, values: literals });
+    if (Option.isSome(customOf(codec, operator)))
+      return Result.succeed({
+        _tag: "Custom",
+        op: operator,
+        field,
+        value: list ? literals : literals[0],
+      });
+    return Result.succeed({ _tag: "Compare", op: operator as never, field, value: literals[0] });
+  };
+  return {
+    operators: (field) =>
+      Option.map(Option.fromUndefinedOr(declaration(fields, field)), (codec) => codec.operators),
+    isOperator,
+    isList,
+    condition,
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Decoding (§2.2, §2.4)
+// ---------------------------------------------------------------------------
 
 interface Draft {
   readonly kind: "group" | "condition";
@@ -240,93 +355,77 @@ interface Draft {
 }
 
 /**
- * Decodes a record of `filter[...]` keys (each a string, or a repeated key's
- * strings) to one normalised root node. Every rejection is a `Pointer` at the offending flat key.
+ * The bracket dialect's decoder: a record of `filter[...]` keys (each a
+ * string, or a repeated key's strings) to one root node, or one issue per
+ * offending key.
  */
-export const decodeFilter = (
-  fields: FieldCodecs,
+const decodeBracket = (
   input: { readonly [key: string]: WireValue },
-): Decoded => {
-  const issues = MutableHashMap.empty<string, SchemaIssue.Issue>();
-  const fail = (key: string, message: string, value?: WireValue): void => {
-    if (!MutableHashMap.has(issues, key))
-      MutableHashMap.set(issues, key, pointed(key, message, value));
+  context: DialectContext,
+): Result.Result<Node, Arr.NonEmptyReadonlyArray<DialectIssue>> => {
+  const issues = MutableHashMap.empty<string, DialectIssue>();
+  const record = (issue: DialectIssue): void => {
+    const key = issue.key ?? "";
+    if (!MutableHashMap.has(issues, key)) MutableHashMap.set(issues, key, issue);
+  };
+  const fail = (key: string, message: string, actual?: WireValue): void => {
+    record(actual === undefined ? { key, message } : { key, message, actual });
   };
   // `fail`, as the result of a decode that produced nothing.
-  const reject = (key: string, message: string, value?: WireValue): Option.Option<never> => {
-    fail(key, message, value);
+  const reject = (key: string, message: string, actual?: WireValue): Option.Option<never> => {
+    fail(key, message, actual);
     return Option.none();
   };
-
-  // One condition, from wherever its members came from.
+  const failure = () =>
+    Result.fail(
+      Arr.fromIterable(MutableHashMap.values(issues)) as [DialectIssue, ...Array<DialectIssue>],
+    );
+  // One condition, from wherever its members came from: the bracket syntax of
+  // its value here, the field, operator and literal checks in the context.
   const condition = (
-    keys: ConditionKeys,
+    keys: ConditionSource,
     field: string,
     given: Option.Option<string>,
     raw: string,
   ): Option.Option<Node> => {
-    const codec = declaration(fields, field);
-    if (codec === undefined) return reject(keys.field, unknownField(field), field);
-    let items: ReadonlyArray<string>;
+    const settle = (result: Result.Result<Node, DialectIssue>): Option.Option<Node> =>
+      Result.match(result, {
+        onSuccess: Option.some,
+        onFailure: (issue) => {
+          record(issue);
+          return Option.none();
+        },
+      });
+    // An unknown field or operator is rejected ahead of the value's syntax.
+    if (
+      Option.isNone(context.operators(field)) ||
+      Option.exists(given, (op) => !context.isOperator(op))
+    ) {
+      return settle(
+        context.condition(
+          { field, operator: Option.getOrElse(given, () => "eq"), values: [raw] },
+          keys,
+        ),
+      );
+    }
+    let values: ReadonlyArray<string>;
     let operator: string;
     if (Option.isNone(given)) {
       const parsed = unescape(raw, true);
       if ("error" in parsed) return reject(keys.value, parsed.error, raw);
-      items = parsed.items;
-      operator = items.length > 1 ? "in" : "eq";
+      values = parsed.items;
+      operator = values.length > 1 ? "in" : "eq";
     } else {
-      const op = given.value;
-      if (!allOperators.includes(op)) {
-        return reject(
-          keys.operator,
-          `Unknown filter operator ${render(op)}; expected one of ${allOperators.join(", ")}`,
-          op,
-        );
-      }
-      operator = op;
-      if (op === nullOperator) {
-        if (raw !== "true" && raw !== "false") {
-          return reject(keys.value, `Expected true or false for isnull, got ${render(raw)}`, raw);
-        }
-        items = [raw];
+      operator = given.value;
+      if (operator === nullOperator) {
+        values = [raw];
       } else {
-        const parsed = unescape(raw, isListOperator(op));
+        const parsed = unescape(raw, context.isList(field, operator));
         if ("error" in parsed) return reject(keys.value, parsed.error, raw);
-        items = parsed.items;
+        values = parsed.items;
       }
     }
-    if (!codec.operators.includes(operator)) {
-      return reject(keys.operator, undeclaredOperator(field, operator, codec.operators), operator);
-    }
-    if (operator === nullOperator)
-      return Option.some({ _tag: "IsNull", field, negated: items[0] === "false" });
-    // A text operator's literal is a fragment of the value, not a value: it is
-    // the unescaped string itself, never decoded through the field's codec.
-    if (isTextOperator(operator))
-      return Option.some({ _tag: "Text", op: operator, field, value: items[0] });
-    const decode = Schema.decodeUnknownResult(codec.literal as Schema.Codec<unknown, string>);
-    const values: Array<unknown> = [];
-    const invalid = Arr.findFirst(items, (item) => {
-      const result = decode(item);
-      if (Result.isFailure(result)) return Option.some({ item, failure: result.failure });
-      values.push(result.success);
-      return Option.none();
-    });
-    if (Option.isSome(invalid)) {
-      return reject(
-        keys.value,
-        `Invalid literal ${render(invalid.value.item)} for field ${render(field)}: ${issueMessage(invalid.value.failure)}`,
-        raw,
-      );
-    }
-    if (operator === "in" || operator === "nin") {
-      return Option.some({
-        _tag: operator === "in" ? "In" : "NotIn",
-        field,
-        values: values as [unknown, ...Array<unknown>],
-      });
-    }
-    return Option.some({ _tag: "Compare", op: operator as never, field, value: values[0] });
+    return settle(context.condition({ field, operator, values }, keys));
   };
 
   const roots: Array<Node> = [];
@@ -524,8 +623,7 @@ export const decodeFilter = (
     });
   });
 
-  if (MutableHashMap.size(issues) > 0)
-    return { _tag: "Issues", issues: Arr.fromIterable(MutableHashMap.values(issues)) };
+  if (MutableHashMap.size(issues) > 0) return failure();
 
   // Assemble the tree from the leaves up.
   const children = MutableHashMap.empty<string, Array<string>>();
@@ -560,16 +658,11 @@ export const decodeFilter = (
   Arr.forEach(built, ([id, node]) => {
     if (Option.isNone(node.memberOf)) roots.push(build(id));
   });
-  if (MutableHashMap.size(issues) > 0)
-    return { _tag: "Issues", issues: Arr.fromIterable(MutableHashMap.values(issues)) };
+  if (MutableHashMap.size(issues) > 0) return failure();
 
-  if (Arr.isReadonlyArrayEmpty(roots)) {
-    return {
-      _tag: "Issues",
-      issues: [new SchemaIssue.InvalidValue({ message: "Expected at least one filter[...] key" })],
-    };
-  }
-  return { _tag: "Node", node: roots.length === 1 ? roots[0] : { _tag: "And", members: roots } };
+  if (Arr.isReadonlyArrayEmpty(roots))
+    return Result.fail([{ message: "Expected at least one filter[...] key" }]);
+  return Result.succeed(roots.length === 1 ? roots[0] : { _tag: "And", members: roots });
 };
 
 // ---------------------------------------------------------------------------
@@ -584,6 +677,8 @@ export interface PreparedCondition {
   readonly node: Node;
   readonly field: string;
   readonly op: string;
+  /** The wire literals, unescaped, in normal-form order. */
+  readonly values: Arr.NonEmptyReadonlyArray<string>;
   /** The escaped wire value: one literal, or the joined list. */
   readonly value: string;
   /** How many list items the value carries (1 for a scalar). */
@@ -666,50 +761,90 @@ const sortedUnique = <A>(items: ReadonlyArray<A>, compare: (a: A, b: A) => numbe
   return sorted.filter((item, index) => index === 0 || compare(sorted[index - 1], item) !== 0);
 };
 
+// A prepared condition over its unescaped wire literals.
+const preparedCondition = (
+  node: Node,
+  field: string,
+  op: string,
+  values: Arr.NonEmptyReadonlyArray<string>,
+): Prepared => ({
+  kind: "condition",
+  node,
+  field,
+  op,
+  values,
+  value: values.map(escape).join(","),
+  arity: values.length,
+});
+
+// A list of literals sorted by encoded wire string and deduplicated (§3.2).
+const sortedLiterals = (
+  node: { readonly _tag: string; readonly field: string },
+  values: ReadonlyArray<Compare["value"]>,
+  encode: (value: Compare["value"]) => string,
+) => {
+  if (!Arr.isReadonlyArrayNonEmpty(values))
+    throw new InvalidFilter({ message: `A ${node._tag} node needs at least one value` });
+  const items = sortedUnique(
+    values.map((value) => ({ wire: encode(value), value })),
+    (a, b) => compareCodePoints(a.wire, b.wire),
+  ) as [
+    { readonly wire: string; readonly value: unknown },
+    ...Array<{ readonly wire: string; readonly value: unknown }>,
+  ];
+  return {
+    values: Arr.map(items, (item) => item.value),
+    wires: Arr.map(items, (item) => item.wire),
+  };
+};
+
 /**
  * Normalises a tree (§3.2), computing each node's wire strings on the way:
- * `In` / `NotIn` values sorted by encoded string and deduplicated, `And` /
- * `Or` members sorted by the node order and deduplicated. `check` asserts each
- * condition's operator against its field's declaration, so a tree the codec
- * would reject on decode is rejected on encode too.
+ * `In` / `NotIn` (and list `Custom`) values sorted by encoded string and
+ * deduplicated, `And` / `Or` members sorted by the node order and
+ * deduplicated. `check` asserts each condition's operator against its field's
+ * declaration, so a tree the codec would reject on decode is rejected on
+ * encode too; `isList` says which custom operators take a literal list.
  */
 export const prepare = (
   node: Node,
   encode: LiteralEncoder,
   check: OperatorCheck = () => {},
+  isList: ListCheck = () => false,
 ): Prepared =>
   Match.value(node).pipe(
     Match.tag("Compare", (node): Prepared => {
       check(node.field, node.op);
-      return {
-        kind: "condition",
-        node,
-        field: node.field,
-        op: node.op,
-        value: escape(encode(node.field, node.value)),
-        arity: 1,
-      };
+      return preparedCondition(node, node.field, node.op, [encode(node.field, node.value)]);
     }),
     Match.tag("In", "NotIn", (node): Prepared => {
-      check(node.field, P.isTagged(node, "In") ? "in" : "nin");
-      if (Arr.isReadonlyArrayEmpty(node.values))
-        throw new InvalidFilter({ message: `A ${node._tag} node needs at least one value` });
-      const items = sortedUnique(
-        node.values.map((value) => ({ wire: escape(encode(node.field, value)), value })),
-        (a, b) => compareCodePoints(a.wire, b.wire),
+      const op = P.isTagged(node, "In") ? "in" : "nin";
+      check(node.field, op);
+      const { values, wires } = sortedLiterals(node, node.values, (value) =>
+        encode(node.field, value),
       );
-      return {
-        kind: "condition",
-        node: {
-          _tag: node._tag,
-          field: node.field,
-          values: items.map((item) => item.value) as [unknown, ...Array<unknown>],
-        },
-        field: node.field,
-        op: P.isTagged(node, "In") ? "in" : "nin",
-        value: items.map((item) => item.wire).join(","),
-        arity: items.length,
-      };
+      return preparedCondition(
+        { _tag: node._tag, field: node.field, values },
+        node.field,
+        op,
+        wires,
+      );
+    }),
+    Match.tag("Custom", (node): Prepared => {
+      check(node.field, node.op);
+      if (!isList(node.field, node.op))
+        return preparedCondition(node, node.field, node.op, [
+          encode(node.field, node.value, node.op),
+        ]);
+      if (!Array.isArray(node.value)) {
+        throw new InvalidFilter({
+          message: `Operator ${render(node.op)} takes a list of literals, got ${render(node.value)}`,
+        });
+      }
+      const { values, wires } = sortedLiterals(node, node.value, (value) =>
+        encode(node.field, value, node.op),
+      );
+      return preparedCondition({ ...node, value: values }, node.field, node.op, wires);
     }),
     Match.tag("Text", (node): Prepared => {
       check(node.field, node.op);
@@ -718,29 +853,15 @@ export const prepare = (
           message: `A Text node's value must be a string, got ${render(node.value)}`,
         });
       }
-      return {
-        kind: "condition",
-        node,
-        field: node.field,
-        op: node.op,
-        value: escape(node.value),
-        arity: 1,
-      };
+      return preparedCondition(node, node.field, node.op, [node.value]);
     }),
     Match.tag("IsNull", (node): Prepared => {
       check(node.field, nullOperator);
-      return {
-        kind: "condition",
-        node,
-        field: node.field,
-        op: nullOperator,
-        value: node.negated ? "false" : "true",
-        arity: 1,
-      };
+      return preparedCondition(node, node.field, nullOperator, [node.negated ? "false" : "true"]);
     }),
     Match.tag("And", "Or", (node): Prepared => {
       const members = sortedUnique(
-        node.members.map((member) => prepare(member, encode, check)),
+        node.members.map((member) => prepare(member, encode, check, isList)),
         compareNodes,
       );
       return {
@@ -751,7 +872,7 @@ export const prepare = (
       };
     }),
     Match.tag("Not", (node): Prepared => {
-      const member = prepare(node.member, encode, check);
+      const member = prepare(node.member, encode, check, isList);
       return {
         kind: "group",
         node: { _tag: "Not", member: member.node },
@@ -767,25 +888,35 @@ export const prepare = (
     }),
   );
 
+/** The wire tree a dialect encodes: a prepared tree's wire strings alone. */
+export const toWire = (node: Prepared): WireNode =>
+  node.kind === "condition"
+    ? { _tag: "Condition", field: node.field, operator: node.op, values: node.values }
+    : { _tag: "Group", conjunction: node.conjunction, members: node.members.map(toWire) };
+
 // ---------------------------------------------------------------------------
 // Canonical encoding (§3.1, §3.3)
 // ---------------------------------------------------------------------------
 
-const shorthandPair = (condition: PreparedCondition): readonly [string, string] => {
-  if (condition.op === "eq") return [`filter[${condition.field}]`, condition.value];
-  if (condition.op === "in" && condition.arity >= 2)
-    return [`filter[${condition.field}]`, condition.value];
-  return [`filter[${condition.field}][${condition.op}]`, condition.value];
+// A wire condition's escaped value: one literal, or the joined list.
+const wireValue = (condition: WireCondition): string => condition.values.map(escape).join(",");
+
+const shorthandPair = (condition: WireCondition): readonly [string, string] => {
+  const value = wireValue(condition);
+  if (condition.operator === "eq") return [`filter[${condition.field}]`, value];
+  if (condition.operator === "in" && condition.values.length >= 2)
+    return [`filter[${condition.field}]`, value];
+  return [`filter[${condition.field}][${condition.operator}]`, value];
 };
 
-// The shorthand pairs of a prepared tree, when shorthand decodes back to the
+// The shorthand pairs of a wire tree, when shorthand decodes back to the
 // same tree (§3.1); `None` otherwise.
-const shorthand = (root: Prepared): Option.Option<ReadonlyArray<readonly [string, string]>> => {
-  let conditions: ReadonlyArray<PreparedCondition>;
-  if (root.kind === "condition") {
+const shorthand = (root: WireNode): Option.Option<ReadonlyArray<readonly [string, string]>> => {
+  let conditions: ReadonlyArray<WireCondition>;
+  if (P.isTagged(root, "Condition")) {
     conditions = [root];
   } else if (root.conjunction === "AND" && root.members.length >= 2) {
-    if (!root.members.every((member) => member.kind === "condition")) return Option.none();
+    if (!root.members.every((member) => P.isTagged(member, "Condition"))) return Option.none();
     conditions = root.members;
   } else {
     return Option.none();
@@ -803,10 +934,11 @@ const shorthand = (root: Prepared): Option.Option<ReadonlyArray<readonly [string
 };
 
 /**
- * The canonical flat pairs of a normalised tree, in canonical order: the
- * shorthand when it round-trips, the group form with pre-order ids otherwise.
+ * The bracket dialect's encoder: the canonical flat pairs of a normal-form
+ * wire tree, in canonical order — the shorthand when it round-trips, the group
+ * form with pre-order ids otherwise.
  */
-export const encodeFilter = (root: Prepared) => {
+const encodeBracket = (root: WireNode): Record<string, string> => {
   const pairs: Array<readonly [string, string]> = [];
   const short = shorthand(root);
   if (Option.isSome(short)) {
@@ -817,8 +949,8 @@ export const encodeFilter = (root: Prepared) => {
     // `parent` is the enclosing group's id; the root has none. A group wraps
     // its own id once, for all its members, so the walk allocates per group
     // (as the id itself does), not per member.
-    const visit = (node: Prepared, parent: Option.Option<string>): void => {
-      if (node.kind === "group") {
+    const visit = (node: WireNode, parent: Option.Option<string>): void => {
+      if (P.isTagged(node, "Group")) {
         const id = `g${groups++}`;
         pairs.push([`filter[${id}][group][conjunction]`, node.conjunction]);
         if (Option.isSome(parent)) pairs.push([`filter[${id}][group][memberOf]`, parent.value]);
@@ -829,8 +961,8 @@ export const encodeFilter = (root: Prepared) => {
       } else {
         const id = `c${conditions++}`;
         pairs.push([`filter[${id}][condition][path]`, node.field]);
-        pairs.push([`filter[${id}][condition][operator]`, node.op]);
-        pairs.push([`filter[${id}][condition][value]`, node.value]);
+        pairs.push([`filter[${id}][condition][operator]`, node.operator]);
+        pairs.push([`filter[${id}][condition][value]`, wireValue(node)]);
         if (Option.isSome(parent)) pairs.push([`filter[${id}][condition][memberOf]`, parent.value]);
       }
     };
@@ -838,6 +970,26 @@ export const encodeFilter = (root: Prepared) => {
   }
   return R.fromEntries(pairs);
 };
+
+// ---------------------------------------------------------------------------
+// Dialects
+// ---------------------------------------------------------------------------
+
+/** The `Filter.Dialect` brand. */
+export const DialectTypeId = "~@thomasfosterau/effect-jsonapi/Filter/Dialect";
+
+/** Builds a dialect from its codec halves. */
+export const dialectFrom = (definition: Omit<Dialect, typeof DialectTypeId>): Dialect => ({
+  [DialectTypeId]: DialectTypeId,
+  ...definition,
+});
+
+/** The bracket grammar of the filter profile, the default dialect. */
+export const bracket: Dialect = dialectFrom({
+  name: "bracket",
+  decode: decodeBracket,
+  encode: encodeBracket,
+});
 
 /**
  * `node` with every condition's field renamed by `rename`: the wire names a

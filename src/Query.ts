@@ -59,8 +59,8 @@ import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as ApiError from "./ApiError.js";
-import type { Ast, Node, TextOperator } from "./Filter.js";
-import { Ast as AstSchema, PROFILE_URI } from "./Filter.js";
+import type { Ast, CustomNodes, Dialect, DialectIssue, Node, TextOperator } from "./Filter.js";
+import { Ast as AstSchema, bracket, isDialect, PROFILE_URI } from "./Filter.js";
 import type { AnySurface, SurfaceFor } from "./Include.js";
 import type { FlatQuery, Pair as CanonicalPair } from "./internal/canonical.js";
 import { declaredKeys, orderPairs, serialise as serialisePairs } from "./internal/canonical.js";
@@ -75,13 +75,14 @@ import {
 } from "./internal/codecs.js";
 import type { FieldCodec, FieldCodecs } from "./internal/filter.js";
 import {
-  decodeFilter,
-  encodeFilter,
+  dialectContext,
   isFilterKey,
+  listCheck,
   literalEncoder,
   operatorCheck,
   prepare,
   renameFields,
+  toWire,
 } from "./internal/filter.js";
 import type {
   ExpandFamilies,
@@ -100,6 +101,7 @@ import type {
   FieldKeys,
   Filterable,
   FilterableKeys,
+  FilterCustomOperators,
   FilterOperators,
   IncludeDepth,
   IncludePath,
@@ -1222,7 +1224,22 @@ export type FilterFields<Res extends Any> = {
  * @since 0.13.0
  * @category type-level
  */
-export type FilterAst<Res extends Any> = Ast<FilterFields<Res>, FilterTextFields<Res>>;
+export type FilterAst<Res extends Any> = Ast<
+  FilterFields<Res>,
+  FilterTextFields<Res>,
+  FilterCustomNodes<Res>
+>;
+
+/**
+ * The `Filter.Custom` nodes a resource's {@link FilterAst} admits: one per
+ * custom operator a filterable key declares, over that key's literal type.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type FilterCustomNodes<Res extends Any> = {
+  [K in FilterableKeys<Res>]: CustomNodes<K, FilterCustomOperators<Res, K>, FilterFields<Res>[K]>;
+}[FilterableKeys<Res>];
 
 /**
  * The filterable keys of a resource that declare a text operator
@@ -1378,40 +1395,63 @@ const wireNamer = (resources: ReadonlyArray<Any>): ((key: string) => string) =>
 const wireFields = (fields: FieldCodecs, toWire: (key: string) => string): FieldCodecs =>
   R.mapKeys(fields, toWire);
 
-// Decodes a record of `filter[...]` keys to a normal-form tree, over the wire
-// names of `fields` (see `wireFields`), naming the fields by their keys.
+// A dialect's rejection as the schema issue the error middleware reads: a
+// pointer at the offending key, or the whole family when it names none.
+const dialectIssue = (issue: DialectIssue): SchemaIssue.Issue => {
+  const invalid = new SchemaIssue.InvalidValue({ message: issue.message }, issue.actual);
+  return issue.key === undefined ? invalid : new SchemaIssue.Pointer([issue.key], invalid);
+};
+
+// Decodes a record of `filter` family keys to a normal-form tree through
+// `dialect`, over the wire names of `fields` (see `wireFields`), naming the
+// fields by their keys.
 const decodeFilterRecord = (
   fields: FieldCodecs,
   names: Naming,
+  dialect: Dialect,
   ast: SchemaAST.AST,
-  input: Parameters<typeof decodeFilter>[1],
+  input: { readonly [key: string]: string | ReadonlyArray<string> },
   options: SchemaAST.ParseOptions,
 ): Effect.Effect<Node, SchemaIssue.Issue> => {
-  const decoded = decodeFilter(fields, input);
-  if (P.isTagged(decoded, "Issues"))
-    return Effect.fail(filterIssues(ast, input, decoded.issues, options));
+  const decoded = dialect.decode(input, dialectContext(fields));
+  if (Result.isFailure(decoded))
+    return Effect.fail(filterIssues(ast, input, decoded.failure.map(dialectIssue), options));
   return Effect.fromResult(
     Result.try({
-      try: () => renameFields(prepare(decoded.node, literalEncoder(fields)).node, names.toKey),
+      try: () =>
+        renameFields(
+          prepare(decoded.success, literalEncoder(fields), operatorCheck(fields), listCheck(fields))
+            .node,
+          names.toKey,
+        ),
       catch: (error) => new SchemaIssue.InvalidValue({ message: messageOf(error) }, input, options),
     }),
   );
 };
 
 // Encodes a tree (normalising it first, and checking every field and operator
-// against the declaration) to its canonical `filter[...]` pairs.
+// against the declaration) to its canonical `filter` family pairs in `dialect`.
 const encodeFilterNode = (
   fields: FieldCodecs,
   names: Naming,
+  dialect: Dialect,
   node: Node,
   options: SchemaAST.ParseOptions,
 ): Effect.Effect<Record<string, string>, SchemaIssue.Issue> =>
   Effect.fromResult(
     Result.try({
-      try: () =>
-        encodeFilter(
-          prepare(renameFields(node, names.toWire), literalEncoder(fields), operatorCheck(fields)),
+      try: () => ({
+        ...dialect.encode(
+          toWire(
+            prepare(
+              renameFields(node, names.toWire),
+              literalEncoder(fields),
+              operatorCheck(fields),
+              listCheck(fields),
+            ),
+          ),
         ),
+      }),
       catch: (error) => new SchemaIssue.InvalidValue({ message: messageOf(error) }, node, options),
     }),
   );
@@ -1444,6 +1484,9 @@ const messageOf = (cause: unknown): string => (P.isError(cause) ? cause.message 
  * group's `[conjunction]`, any `[memberOf]`, a condition's `[path]` /
  * `[operator]` — a repeated key is a 400.
  *
+ * `options.dialect` spells the same trees in another query syntax
+ * (`Filter.Dialect`); the bracket grammar, `Filter.bracket`, is the default.
+ *
  * The record must carry at least one `filter[...]` key — an absent `filter`
  * is `Query.schema`'s concern, not the codec's. Literal codecs are run
  * synchronously.
@@ -1473,7 +1516,11 @@ const messageOf = (cause: unknown): string => (P.isError(cause) ? cause.message 
  * @since 0.13.0
  * @category constructors
  */
-export const Filter = <Res extends Any>(resource: Res): Filter<Res> => {
+export const Filter = <Res extends Any>(
+  resource: Res,
+  options?: { readonly dialect?: Dialect },
+): Filter<Res> => {
+  const dialect = options?.dialect ?? bracket;
   const names = naming([resource]);
   const fields = wireFields(filterable(resource) as FieldCodecs, names.toWire);
   const from = Schema.Record(Schema.String, FilterWireValue);
@@ -1484,8 +1531,10 @@ export const Filter = <Res extends Any>(resource: Res): Filter<Res> => {
         Node,
         { readonly [key: string]: string | ReadonlyArray<string> }
       >({
-        decode: (record, options) => decodeFilterRecord(fields, names, from.ast, record, options),
-        encode: (node, options) => encodeFilterNode(fields, names, node, options),
+        decode: (record, parseOptions) =>
+          decodeFilterRecord(fields, names, dialect, from.ast, record, parseOptions),
+        encode: (node, parseOptions) =>
+          encodeFilterNode(fields, names, dialect, node, parseOptions),
       }),
     ),
   ) as Filter<Res>;
@@ -1505,7 +1554,7 @@ export const Filter = <Res extends Any>(resource: Res): Filter<Res> => {
  * @since 0.13.0
  * @category models
  */
-export type FilterOption = boolean | Schema.Struct.Fields;
+export type FilterOption = boolean | Schema.Struct.Fields | Dialect;
 
 /**
  * Query feature configuration for an endpoint.
@@ -1582,6 +1631,9 @@ export interface Options<Res extends Any> {
    * {@link FilterAst}; unknown fields, undeclared operators and bad literals
    * produce a 400 naming the key. A single resource only: a heterogeneous
    * endpoint must use the map form.
+   *
+   * A `Filter.Dialect` turns on the same grammar over the declaration, spelled
+   * in that dialect's query syntax instead of the bracket form.
    *
    * A `Schema.Struct.Fields` map is the open per-key escape hatch for flags
    * JSON:API has no family for: each key becomes `filter[<key>]` and its
@@ -1689,7 +1741,9 @@ type PageOf<O extends { readonly page?: unknown }> = [O["page"]] extends [never]
   : O["page"];
 type FilterOf<O extends { readonly filter?: unknown }> = [O["filter"]] extends [never]
   ? false
-  : O["filter"];
+  : O["filter"] extends Dialect
+    ? true
+    : O["filter"];
 // A query's implementation-specific `parameters`, none when omitted.
 type ParametersOf<O extends { readonly parameters?: unknown }> = [O["parameters"]] extends [never]
   ? Record<never, never>
@@ -1944,7 +1998,8 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
   // The grammar's field declaration, when `filter: true` is on.
   let filterFields = Option.none<FieldCodecs>();
   const filterNames = naming(resources);
-  if (options.filter === true) {
+  const filterDialect = isDialect(options.filter) ? options.filter : bracket;
+  if (options.filter === true || isDialect(options.filter)) {
     if (resources.length !== 1) {
       throw declarationError(
         "Query.schema: `filter: true` derives the filter grammar from one resource's declaration; " +
@@ -2017,7 +2072,14 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
               const nestedValues = nest(others);
               if (R.isEmptyRecord(filterKeys)) return Effect.succeed(nestedValues);
               return Effect.map(
-                decodeFilterRecord(fields, filterNames, flat.ast, filterKeys, parseOptions),
+                decodeFilterRecord(
+                  fields,
+                  filterNames,
+                  filterDialect,
+                  flat.ast,
+                  filterKeys,
+                  parseOptions,
+                ),
                 (filter) => ({
                   ...nestedValues,
                   filter,
@@ -2029,7 +2091,7 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
               const flatValues = flatten(others);
               if (filter === undefined) return Effect.succeed(flatValues);
               return Effect.map(
-                encodeFilterNode(fields, filterNames, filter as Node, parseOptions),
+                encodeFilterNode(fields, filterNames, filterDialect, filter as Node, parseOptions),
                 (pairs) => ({
                   ...flatValues,
                   ...pairs,

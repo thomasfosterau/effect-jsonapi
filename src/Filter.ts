@@ -8,6 +8,9 @@
  * This module names it once — as a schema ({@link Operator}) with typed
  * constants ({@link Op}) — so a resource's per-attribute declaration and the
  * URL codec agree byte for byte on what an operator is.
+ * An app extends it per attribute with operators of its own ({@link operator}),
+ * which decode to {@link Custom} nodes, and can spell filters in another
+ * query syntax than the bracket grammar ({@link Dialect}).
  *
  * An attribute is declared filterable by piping its schema through
  * {@link able}, which stamps the declaration as a schema annotation under
@@ -44,12 +47,28 @@
  *
  * @since 0.13.0
  */
+import * as Arr from "effect/Array";
+import { identity } from "effect/Function";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import type * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import * as R from "effect/Record";
+import type * as R from "effect/Record";
+import { declarationError } from "./internal/errors.js";
+import { render } from "./internal/json.js";
 import type { FieldCodecs } from "./internal/filter.js";
-import { literalEncoder, operatorCheck, prepare } from "./internal/filter.js";
+import {
+  bracket as bracketDialect,
+  DialectTypeId as dialectTypeId,
+  listCheck,
+  literalEncoder,
+  dialectFrom,
+  operatorCheck,
+  prepare,
+} from "./internal/filter.js";
 import {
   compareOperators,
+  conjunctions,
   coreOperators as core,
   operators as vocabulary,
   resolveOperators,
@@ -220,6 +239,177 @@ export const Op = Object.freeze({
 } as const satisfies { readonly [K in Operator]: K });
 
 // ---------------------------------------------------------------------------
+// Custom operators
+// ---------------------------------------------------------------------------
+
+/**
+ * The brand of a {@link CustomOperator}.
+ *
+ * @since 0.24.0
+ * @category symbols
+ */
+export const CustomOperatorTypeId = "~@thomasfosterau/effect-jsonapi/Filter/CustomOperator";
+
+/**
+ * The JSON scalar kinds an attribute's encoded form can take: what a
+ * {@link CustomOperator}'s `appliesTo` names.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export type ScalarKind = "string" | "number" | "boolean";
+
+/**
+ * The type-level stand-in for "the field's own literal type", carried by a
+ * {@link CustomOperator} with no `literal` codec of its own. Never a value.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export interface FieldLiteral {
+  readonly _FieldLiteral: "FieldLiteral";
+}
+
+/**
+ * An operator an app adds to the vocabulary — made with {@link operator},
+ * declared on an attribute like a built-in (`Filter.able(["eq", like])`) and
+ * carried in the AST as a {@link Custom} node.
+ *
+ *   - `name` is its spelling on the wire (`filter[title][like]=…`) and in the
+ *     node's `op`;
+ *   - `list` makes its value a comma list, as `in` / `nin` take;
+ *   - `appliesTo` names the encoded kinds of attribute it may be declared on
+ *     (`None`: any), checked when the resource is made;
+ *   - `literal` decodes its literals (`None`: the field's own codec).
+ *
+ * What the operator *means* is the app's: the filter profile defines only
+ * the built-ins, so a server answering a `Custom` node documents its own
+ * semantics.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface CustomOperator<
+  Name extends string = string,
+  List extends boolean = boolean,
+  Literal = unknown,
+> {
+  readonly [CustomOperatorTypeId]: { readonly _Literal: (_: never) => Literal };
+  readonly name: Name;
+  readonly list: List;
+  readonly appliesTo: Option.Option<Arr.NonEmptyReadonlyArray<ScalarKind>>;
+  readonly literal: Option.Option<Schema.Codec<unknown, string>>;
+}
+
+/**
+ * Any {@link CustomOperator}.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export type AnyCustomOperator = CustomOperator;
+
+const scalarKinds: ReadonlyArray<ScalarKind> = ["string", "number", "boolean"];
+const OPERATOR_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;
+
+/**
+ * Makes a custom filter operator: a `name` outside the built-in vocabulary
+ * (letters, digits and `_`, starting with a letter), and options:
+ *
+ *   - `list: true` — the value is a non-empty literal list, like `in`'s;
+ *   - `appliesTo` — the encoded kinds of attribute (`"string"`, `"number"`,
+ *     `"boolean"`) it may be declared on; any attribute when omitted;
+ *   - `literal` — a `Codec<Literal, string>` for its literals, when they are
+ *     not the field's own (a pattern, a range, a distance).
+ *
+ * Declare it on an attribute as a built-in is declared, by passing the
+ * operator itself in the list: `Filter.able(["eq", like])`. A node built with
+ * {@link custom} carries it.
+ *
+ * Definition-time errors: a malformed name, a built-in or conjunction name,
+ * and an empty or unknown `appliesTo`.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { strictEqual, deepStrictEqual } from "node:assert"
+ * import { Filter, Query, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const like = Filter.operator("like", { appliesTo: ["string"] })
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.String.pipe(Filter.able(["eq", like])) }
+ * })
+ *
+ * const filter = Query.Filter(Article)
+ * deepStrictEqual(Schema.decodeUnknownSync(filter)({ "filter[title][like]": "%effect%" }), {
+ *   _tag: "Custom", op: "like", field: "title", value: "%effect%"
+ * })
+ * strictEqual(Schema.encodeSync(filter)(Filter.custom(like, "title", "a%"))["filter[title][like]"], "a%")
+ * ```
+ *
+ * @since 0.24.0
+ * @category constructors
+ */
+export function operator<const Name extends string, const List extends boolean = false>(
+  name: Name,
+  options?: {
+    readonly list?: List;
+    readonly appliesTo?: Arr.NonEmptyReadonlyArray<ScalarKind>;
+    readonly literal?: never;
+  },
+): CustomOperator<Name, List, FieldLiteral>;
+export function operator<const Name extends string, Literal, const List extends boolean = false>(
+  name: Name,
+  options: {
+    readonly list?: List;
+    readonly appliesTo?: Arr.NonEmptyReadonlyArray<ScalarKind>;
+    readonly literal: Schema.Codec<Literal, string>;
+  },
+): CustomOperator<Name, List, Literal>;
+export function operator(
+  name: string,
+  options?: {
+    readonly list?: boolean;
+    readonly appliesTo?: ReadonlyArray<ScalarKind>;
+    readonly literal?: Schema.Codec<unknown, string>;
+  },
+): AnyCustomOperator {
+  const subject = `Filter.operator(${render(name)})`;
+  if (!OPERATOR_NAME.test(name)) {
+    throw declarationError(
+      `${subject}: an operator name is letters, digits and _, starting with a letter`,
+    );
+  }
+  if (isOperator(name) || (conjunctions as ReadonlyArray<string>).includes(name)) {
+    throw declarationError(`${subject}: the name is taken by the built-in vocabulary`);
+  }
+  const appliesTo = options?.appliesTo;
+  if (
+    appliesTo !== undefined &&
+    (!Arr.isReadonlyArrayNonEmpty(appliesTo) ||
+      !appliesTo.every((kind) => scalarKinds.includes(kind)))
+  ) {
+    throw declarationError(`${subject}: appliesTo names at least one of ${scalarKinds.join(", ")}`);
+  }
+  return {
+    [CustomOperatorTypeId]: { _Literal: identity },
+    name,
+    list: options?.list ?? false,
+    appliesTo: Option.fromUndefinedOr(appliesTo),
+    literal: Option.fromUndefinedOr(options?.literal),
+  };
+}
+
+/**
+ * Whether a value is a {@link CustomOperator}.
+ *
+ * @since 0.24.0
+ * @category guards
+ */
+export const isCustomOperator = (u: unknown): u is AnyCustomOperator =>
+  P.hasProperty(u, CustomOperatorTypeId);
+
+// ---------------------------------------------------------------------------
 // The per-attribute declaration
 // ---------------------------------------------------------------------------
 
@@ -253,8 +443,11 @@ export const AnnotationId = "@thomasfosterau/effect-jsonapi/filter";
  * @category models
  */
 export interface Annotation {
-  readonly operators: ReadonlyArray<Operator>;
+  /** The declared operators' names: built-ins, and any custom operators'. */
+  readonly operators: ReadonlyArray<string>;
   readonly literal?: Schema.Codec<unknown, string>;
+  /** The custom operators the declaration names, when it names any. */
+  readonly custom?: ReadonlyArray<AnyCustomOperator>;
 }
 
 /**
@@ -280,14 +473,16 @@ export type MarkerKey = "~@thomasfosterau/effect-jsonapi/filter";
 
 /**
  * The type-level declaration carried under {@link MarkerKey}: the declared
- * operators as a union of string literals, and the decoded literal type.
+ * operators as a union of string literals (custom operators by name), the
+ * decoded literal type, and the custom operators declared.
  *
  * @since 0.13.0
  * @category type-level
  */
-export interface Marker<Op extends Operator, Literal> {
+export interface Marker<Op extends string, Literal, Custom extends AnyCustomOperator = never> {
   readonly operators: Op;
   readonly literal: Literal;
+  readonly custom: Custom;
 }
 
 /**
@@ -300,25 +495,46 @@ export interface Marker<Op extends Operator, Literal> {
  */
 export type Declared<
   S extends Schema.Top,
-  Op extends Operator = Operator,
+  Op extends string = Operator,
   Literal = LiteralType<S>,
+  Custom extends AnyCustomOperator = never,
 > = S & {
-  readonly [K in MarkerKey]: Marker<Op, Literal>;
+  readonly [K in MarkerKey]: Marker<Op, Literal, Custom>;
 };
+
+/**
+ * What an {@link able} argument may name: a built-in {@link Operator}, or a
+ * {@link CustomOperator}.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export type Declarable = Operator | AnyCustomOperator;
 
 /**
  * The operators an {@link able} argument admits, as a union of string
  * literals: every {@link CoreOperator} for `true` (or no argument), the
- * elements for an array.
+ * elements for an array (a custom operator by its name).
  *
  * @since 0.13.0
  * @category type-level
  */
-export type OperatorsIn<D extends true | ReadonlyArray<Operator>> = [D] extends [true]
+export type OperatorsIn<D extends true | ReadonlyArray<Declarable>> = [D] extends [true]
   ? CoreOperator
-  : D extends ReadonlyArray<infer Op extends Operator>
-    ? Op
+  : D extends ReadonlyArray<infer Op extends Declarable>
+    ? Op extends AnyCustomOperator
+      ? Op["name"]
+      : Op
     : never;
+
+/**
+ * The custom operators an {@link able} argument names, as a union.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type CustomsIn<D extends true | ReadonlyArray<Declarable>> =
+  D extends ReadonlyArray<infer Op extends Declarable> ? Extract<Op, AnyCustomOperator> : never;
 
 /**
  * Refuses, at the type level, a declaration of a {@link TextOperator} on a
@@ -329,7 +545,7 @@ export type OperatorsIn<D extends true | ReadonlyArray<Operator>> = [D] extends 
  * @since 0.24.0
  * @category type-level
  */
-export type TextOnString<Op extends Operator, Literal> = [Extract<Op, TextOperator>] extends [never]
+export type TextOnString<Op extends string, Literal> = [Extract<Op, TextOperator>] extends [never]
   ? unknown
   : unknown extends Literal
     ? unknown
@@ -396,13 +612,13 @@ export type TextOnString<Op extends Operator, Literal> = [Extract<Op, TextOperat
  * @since 0.13.0
  * @category combinators
  */
-export function able<const Ops extends true | ReadonlyArray<Operator> = true>(
+export function able<const Ops extends true | ReadonlyArray<Declarable> = true>(
   operators?: Ops,
   options?: { readonly literal?: never },
 ): <S extends Schema.Top>(
   self: S & TextOnString<OperatorsIn<Ops>, LiteralType<S>>,
-) => Declared<S, OperatorsIn<Ops>>;
-export function able<const Ops extends true | ReadonlyArray<Operator>, Literal>(
+) => Declared<S, OperatorsIn<Ops>, LiteralType<S>, CustomsIn<Ops>>;
+export function able<const Ops extends true | ReadonlyArray<Declarable>, Literal>(
   operators: Ops,
   options: { readonly literal: Schema.Codec<Literal, string> },
 ): <S extends Schema.Top>(
@@ -410,18 +626,54 @@ export function able<const Ops extends true | ReadonlyArray<Operator>, Literal>(
       OperatorsIn<Ops>,
       Literal
     >,
-) => Declared<S, OperatorsIn<Ops>, Literal>;
+) => Declared<S, OperatorsIn<Ops>, Literal, CustomsIn<Ops>>;
 export function able(
-  operators: true | ReadonlyArray<Operator> = true,
+  operators: true | ReadonlyArray<Declarable> = true,
   options?: { readonly literal?: Schema.Codec<unknown, string> },
 ): (self: Schema.Top) => Schema.Top {
-  const resolved = resolveOperators(operators, Operator, "Filter.able", core);
-  const annotation: Annotation =
-    options?.literal === undefined
-      ? { operators: resolved }
-      : { operators: resolved, literal: options.literal };
+  const annotation = annotationOf(
+    operators,
+    Option.fromUndefinedOr(options?.literal),
+    "Filter.able",
+  );
   return (self) => self.annotate({ [AnnotationId]: annotation });
 }
+
+/**
+ * The {@link Annotation} a declaration stamps: the operators by name, checked
+ * against the vocabulary and the custom operators it names, which must not
+ * reuse one name for two operators.
+ */
+const annotationOf = (
+  operators: true | ReadonlyArray<Declarable>,
+  literal: Option.Option<Schema.Codec<unknown, string>>,
+  subject: string,
+): Annotation => {
+  const custom: Array<AnyCustomOperator> = [];
+  const names =
+    operators === true
+      ? operators
+      : Arr.map(operators, (entry) => {
+          if (!isCustomOperator(entry)) return entry;
+          const same = custom.find((known) => known.name === entry.name);
+          if (same === undefined) custom.push(entry);
+          else if (same !== entry) {
+            throw declarationError(
+              `${subject} declares two custom operators named ${render(entry.name)}`,
+            );
+          }
+          return entry.name;
+        });
+  const allowed = Arr.isArrayNonEmpty(custom)
+    ? Schema.Literals([...vocabulary, ...custom.map((entry) => entry.name)])
+    : Operator;
+  const resolved: ReadonlyArray<string> = resolveOperators(names, allowed, subject, core);
+  const declared: Annotation = Option.match(literal, {
+    onNone: () => ({ operators: resolved }),
+    onSome: (codec) => ({ operators: resolved, literal: codec }),
+  });
+  return Arr.isArrayNonEmpty(custom) ? { ...declared, custom } : declared;
+};
 
 // ---------------------------------------------------------------------------
 // The AST (design §1)
@@ -518,15 +770,59 @@ export interface IsNull<Field extends string = string> {
 }
 
 /**
+ * A condition under a {@link CustomOperator}: `op` is the operator's name,
+ * `value` one literal — or a non-empty list, for a `list` operator — of the
+ * operator's literal type (the field's own, unless it has a codec of its
+ * own). The filter profile gives it no meaning; the app defines it.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface Custom<
+  Field extends string = string,
+  Op extends string = string,
+  Value = unknown,
+> {
+  readonly _tag: "Custom";
+  readonly op: Op;
+  readonly field: Field;
+  readonly value: Value;
+}
+
+/**
+ * The {@link Custom} nodes a field's declared custom operators admit, over the
+ * field's literal type.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type CustomNodes<Field extends string, C extends AnyCustomOperator, FieldType> =
+  C extends CustomOperator<infer Name, infer List, infer Literal>
+    ? Custom<
+        Field,
+        Name,
+        ([Literal] extends [FieldLiteral] ? FieldType : Literal) extends infer V
+          ? List extends true
+            ? readonly [V, ...Array<V>]
+            : V
+          : never
+      >
+    : never;
+
+/**
  * A conjunction. Members are a set: order carries no meaning, and the codec
  * sorts them. `And([])` is "true".
  *
  * @since 0.13.0
  * @category models
  */
-export interface And<Fields extends FieldTypes = FieldTypes, TextFields extends string = never> {
+export interface And<
+  Fields extends FieldTypes = FieldTypes,
+  TextFields extends string = never,
+  Customs extends Custom = never,
+> {
   readonly _tag: "And";
-  readonly members: ReadonlyArray<Ast<Fields, TextFields>>;
+  readonly members: ReadonlyArray<Ast<Fields, TextFields, Customs>>;
 }
 
 /**
@@ -536,9 +832,13 @@ export interface And<Fields extends FieldTypes = FieldTypes, TextFields extends 
  * @since 0.13.0
  * @category models
  */
-export interface Or<Fields extends FieldTypes = FieldTypes, TextFields extends string = never> {
+export interface Or<
+  Fields extends FieldTypes = FieldTypes,
+  TextFields extends string = never,
+  Customs extends Custom = never,
+> {
   readonly _tag: "Or";
-  readonly members: ReadonlyArray<Ast<Fields, TextFields>>;
+  readonly members: ReadonlyArray<Ast<Fields, TextFields, Customs>>;
 }
 
 /**
@@ -548,9 +848,13 @@ export interface Or<Fields extends FieldTypes = FieldTypes, TextFields extends s
  * @since 0.13.0
  * @category models
  */
-export interface Not<Fields extends FieldTypes = FieldTypes, TextFields extends string = never> {
+export interface Not<
+  Fields extends FieldTypes = FieldTypes,
+  TextFields extends string = never,
+  Customs extends Custom = never,
+> {
   readonly _tag: "Not";
-  readonly member: Ast<Fields, TextFields>;
+  readonly member: Ast<Fields, TextFields, Customs>;
 }
 
 /**
@@ -558,19 +862,26 @@ export interface Not<Fields extends FieldTypes = FieldTypes, TextFields extends 
  * declared field, a {@link Compare}, {@link In}, {@link NotIn} or
  * {@link IsNull} whose `field` is that name and whose literals are that
  * field's type — and, for a field named in `TextFields` (the fields declaring
- * a text operator; none by default), a {@link Text}.
+ * a text operator; none by default), a {@link Text}. `Customs` adds the
+ * {@link Custom} nodes the fields' custom operators admit (none by default).
  *
  * @since 0.13.0
  * @category models
  */
-export type Condition<Fields extends FieldTypes = FieldTypes, TextFields extends string = never> = {
-  readonly [F in keyof Fields & string]:
-    | Compare<F, Fields[F]>
-    | In<F, Fields[F]>
-    | NotIn<F, Fields[F]>
-    | IsNull<F>
-    | (F extends TextFields ? Text<F> : never);
-}[keyof Fields & string];
+export type Condition<
+  Fields extends FieldTypes = FieldTypes,
+  TextFields extends string = never,
+  Customs extends Custom = never,
+> =
+  | {
+      readonly [F in keyof Fields & string]:
+        | Compare<F, Fields[F]>
+        | In<F, Fields[F]>
+        | NotIn<F, Fields[F]>
+        | IsNull<F>
+        | (F extends TextFields ? Text<F> : never);
+    }[keyof Fields & string]
+  | Customs;
 
 /**
  * The filter AST: an initial encoding — plain data, no methods — that every
@@ -590,11 +901,15 @@ export type Condition<Fields extends FieldTypes = FieldTypes, TextFields extends
  * @since 0.13.0
  * @category models
  */
-export type Ast<Fields extends FieldTypes = FieldTypes, TextFields extends string = never> =
-  | Condition<Fields, TextFields>
-  | And<Fields, TextFields>
-  | Or<Fields, TextFields>
-  | Not<Fields, TextFields>;
+export type Ast<
+  Fields extends FieldTypes = FieldTypes,
+  TextFields extends string = never,
+  Customs extends Custom = never,
+> =
+  | Condition<Fields, TextFields, Customs>
+  | And<Fields, TextFields, Customs>
+  | Or<Fields, TextFields, Customs>
+  | Not<Fields, TextFields, Customs>;
 
 /**
  * The untyped filter AST: any field name, any literal. What the runtime
@@ -603,7 +918,7 @@ export type Ast<Fields extends FieldTypes = FieldTypes, TextFields extends strin
  * @since 0.13.0
  * @category models
  */
-export type Node = Ast<FieldTypes, string>;
+export type Node = Ast<FieldTypes, string, Custom>;
 
 const Literal = Schema.Unknown;
 const LazyNode: Schema.Codec<Node> = Schema.suspend((): Schema.Codec<Node> => Ast);
@@ -624,6 +939,11 @@ const TextNode = Schema.TaggedStruct("Text", {
   op: Schema.Literals(text),
   field: Schema.String,
   value: Schema.String,
+});
+const CustomNode = Schema.TaggedStruct("Custom", {
+  op: Schema.String,
+  field: Schema.String,
+  value: Literal,
 });
 const IsNullNode = Schema.TaggedStruct("IsNull", {
   field: Schema.String,
@@ -658,6 +978,7 @@ export const Ast: Schema.Codec<Node> = Schema.Union([
   InNode,
   NotInNode,
   TextNode,
+  CustomNode,
   IsNullNode,
   AndNode,
   OrNode,
@@ -808,6 +1129,32 @@ export const startsWith = textMatch("startsWith");
 export const endsWith = textMatch("endsWith");
 
 /**
+ * A condition under a custom operator ({@link operator}): `value` is one
+ * literal, or a non-empty list for a `list` operator.
+ *
+ * @example
+ * ```ts
+ * import { Filter } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const near = Filter.operator("near", { list: true })
+ * Filter.custom(near, "location", ["51.5", "-0.1"])
+ * // { _tag: "Custom", op: "near", field: "location", value: ["51.5", "-0.1"] }
+ * ```
+ *
+ * @since 0.24.0
+ * @category constructors
+ */
+export const custom = <
+  const C extends AnyCustomOperator,
+  const Field extends string,
+  const Value extends (C["list"] extends true ? readonly [unknown, ...Array<unknown>] : unknown),
+>(
+  operator: C,
+  field: Field,
+  value: Value,
+): Custom<Field, C["name"], Value> => ({ _tag: "Custom", op: operator.name, field, value });
+
+/**
  * `field IS NULL`, or `IS NOT NULL` when `negated`.
  *
  * @since 0.13.0
@@ -876,6 +1223,8 @@ export interface LiteralCodecs {
     readonly literal: Schema.Top;
     /** When present, each condition's operator is checked against it. */
     readonly operators?: ReadonlyArray<string>;
+    /** The field's custom operators, whose own literal codecs apply. */
+    readonly custom?: ReadonlyArray<AnyCustomOperator>;
   };
 }
 
@@ -917,7 +1266,215 @@ export interface LiteralCodecs {
  * @category combinators
  */
 export const normalise = <N extends Node>(node: N, fields: LiteralCodecs): N =>
-  prepare(node, literalEncoder(fields as FieldCodecs), operatorCheck(fields)).node as N;
+  prepare(
+    node,
+    literalEncoder(fields as FieldCodecs),
+    operatorCheck(fields),
+    listCheck(fields as FieldCodecs),
+  ).node as N;
+
+// ---------------------------------------------------------------------------
+// Dialects
+// ---------------------------------------------------------------------------
+
+/**
+ * The brand of a {@link Dialect}.
+ *
+ * @since 0.24.0
+ * @category symbols
+ */
+export const DialectTypeId: typeof dialectTypeId = dialectTypeId;
+
+/**
+ * One rejection a {@link Dialect} reports: its `message`, the query `key` it
+ * points at (the 400's `source.parameter`; the whole family when absent) and
+ * the offending value.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface DialectIssue {
+  readonly message: string;
+  readonly key?: string;
+  readonly actual?: string | ReadonlyArray<string>;
+}
+
+/**
+ * The query keys a condition's members were read from, for the issues a
+ * {@link DialectContext} reports. A single key stands for all three.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface ConditionSource {
+  readonly field: string;
+  readonly operator: string;
+  readonly value: string;
+}
+
+/**
+ * What a {@link Dialect}'s decoder is handed alongside the query: the
+ * resource's filter declaration, under the fields' wire names, and the one
+ * check every condition goes through.
+ *
+ *   - `operators(field)` — the operators a field declares; `None` for a
+ *     field that is not filterable;
+ *   - `isOperator(name)` — whether a name is in the vocabulary (the
+ *     built-ins, and the custom operators any field declares);
+ *   - `isList(field, operator)` — whether the operator takes a literal list
+ *     (`in`, `nin`, or a `list` custom operator);
+ *   - `condition` — checks one condition (the field, the operator against
+ *     its declaration, the arity, each wire literal through its codec) and
+ *     returns its node, or the issue, pointed at `source`, that every dialect
+ *     rejects it with.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface DialectContext {
+  readonly operators: (field: string) => Option.Option<ReadonlyArray<string>>;
+  readonly isOperator: (name: string) => boolean;
+  readonly isList: (field: string, operator: string) => boolean;
+  readonly condition: (
+    condition: {
+      readonly field: string;
+      readonly operator: string;
+      readonly values: ReadonlyArray<string>;
+    },
+    source: string | ConditionSource,
+  ) => Result.Result<Node, DialectIssue>;
+}
+
+/**
+ * One condition of a {@link WireNode}: a field's wire name, the operator's
+ * name and its literals as wire strings (unescaped), in normal-form order.
+ * `isnull` carries `"true"` or `"false"`.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface WireCondition {
+  readonly _tag: "Condition";
+  readonly field: string;
+  readonly operator: string;
+  readonly values: Arr.NonEmptyReadonlyArray<string>;
+}
+
+/**
+ * One group of a {@link WireNode}: `NOT` has exactly one member.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface WireGroup {
+  readonly _tag: "Group";
+  readonly conjunction: "AND" | "OR" | "NOT";
+  readonly members: ReadonlyArray<WireNode>;
+}
+
+/**
+ * The tree a {@link Dialect} encodes: a normal-form filter with every literal
+ * already encoded to its wire string, so a dialect spells a tree without
+ * knowing any codec.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export type WireNode = WireCondition | WireGroup;
+
+/**
+ * A filter query syntax: how `filter` family keys spell a tree. The
+ * {@link bracket} grammar is the default; an app can supply another — an
+ * expression syntax in the bare `filter` key, say — and keep everything
+ * `Query.schema` derives from the declaration: the typed AST, the checks on
+ * fields, operators and literals, and the 400s naming the key.
+ *
+ *   - `decode` reads the query's `filter` family keys (the bare `filter` and
+ *     every `filter[…]`, each a string or a repeated key's strings) and builds
+ *     a tree, checking each condition through the {@link DialectContext}. It
+ *     fails with one {@link DialectIssue} per offending key. The tree is put in
+ *     normal form afterwards.
+ *   - `encode` spells a normal-form {@link WireNode} as `filter` family keys.
+ *     Emitting the same keys for the same tree makes URLs canonical.
+ *
+ * The filter profile ({@link PROFILE_URI}) describes the bracket grammar: an
+ * endpoint on another dialect should not advertise it.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface Dialect {
+  readonly [DialectTypeId]: typeof DialectTypeId;
+  /** A name for the dialect, for diagnostics. */
+  readonly name: string;
+  readonly decode: (
+    input: R.ReadonlyRecord<string, string | ReadonlyArray<string>>,
+    context: DialectContext,
+  ) => Result.Result<Node, Arr.NonEmptyReadonlyArray<DialectIssue>>;
+  readonly encode: (root: WireNode) => R.ReadonlyRecord<string, string>;
+}
+
+/**
+ * Makes a {@link Dialect} from its name, decoder and encoder. Pass it as a
+ * query's `filter` option (`Endpoint.list(Article, { filter: dialect })`) or
+ * to `Query.Filter(resource, { dialect })`.
+ *
+ * @example
+ * ```ts
+ * import { Result, Schema } from "effect"
+ * import { deepStrictEqual } from "node:assert"
+ * import { Filter, Query, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * // `filter=status:open`: one `field:value` equality in the bare key.
+ * const colon = Filter.dialect({
+ *   name: "colon",
+ *   decode: (input, context) => {
+ *     const raw = input["filter"]
+ *     const [field = "", value = ""] = typeof raw === "string" ? raw.split(":") : []
+ *     return Result.mapError(
+ *       context.condition({ field, operator: "eq", values: [value] }, "filter"),
+ *       (issue) => [issue] as const
+ *     )
+ *   },
+ *   encode: (root): Record<string, string> =>
+ *     root._tag === "Condition" ? { filter: `${root.field}:${root.values[0]}` } : {}
+ * })
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: { status: Schema.String.pipe(Filter.able(["eq"])) }
+ * })
+ * const filter = Query.Filter(Article, { dialect: colon })
+ * deepStrictEqual(Schema.decodeUnknownSync(filter)({ filter: "status:open" }), Filter.eq("status", "open"))
+ * deepStrictEqual(Schema.encodeSync(filter)(Filter.eq("status", "done")), { filter: "status:done" })
+ * ```
+ *
+ * @since 0.24.0
+ * @category constructors
+ */
+export const dialect: (definition: {
+  readonly name: string;
+  readonly decode: Dialect["decode"];
+  readonly encode: Dialect["encode"];
+}) => Dialect = dialectFrom;
+
+/**
+ * Whether a value is a {@link Dialect}.
+ *
+ * @since 0.24.0
+ * @category guards
+ */
+export const isDialect = (u: unknown): u is Dialect => P.hasProperty(u, DialectTypeId);
+
+/**
+ * The bracket grammar of the filter profile, the default {@link Dialect}:
+ * the shorthand (`filter[f]=v`, `filter[f]=a,b`, `filter[f][op]=v`) and the
+ * group form (`filter[id][group][conjunction]=OR`,
+ * `filter[id][condition][path]=…`), with `\,` and `\\` escapes.
+ *
+ * @since 0.24.0
+ * @category constants
+ */
+export const bracket: Dialect = bracketDialect;
 
 // ---------------------------------------------------------------------------
 // Profile (design §5)

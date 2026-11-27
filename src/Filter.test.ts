@@ -205,7 +205,9 @@ describe("Filter AST", () => {
     // the tree: test/rejected-calls.types.ts
     // the untyped Node admits anything
     expectTypeOf(Filter.eq("anything", now())).toMatchTypeOf<Filter.Node>();
-    expectTypeOf<Filter.Node>().toEqualTypeOf<Filter.Ast<Filter.FieldTypes, string>>();
+    expectTypeOf<Filter.Node>().toEqualTypeOf<
+      Filter.Ast<Filter.FieldTypes, string, Filter.Custom>
+    >();
   });
 
   it("validates a tree's shape with the runtime Ast schema", () => {
