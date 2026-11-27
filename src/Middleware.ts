@@ -131,7 +131,8 @@ import {
   ServedTypes,
 } from "./internal/servedTypes.js";
 import { requestedFieldsets } from "./internal/linkage.js";
-import { unlinkedOnWire, withCreatedLocation } from "./internal/responseBody.js";
+import { sparseOnWire, unlinkedOnWire, withCreatedLocation } from "./internal/responseBody.js";
+import type { Fieldsets } from "./internal/wireFieldsets.js";
 import { wireLeaves } from "./internal/wireNames.js";
 import {
   admitsNoValue,
@@ -143,7 +144,12 @@ import {
 import { isMemberName } from "./internal/memberName.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
 import { someMember } from "./internal/members.js";
-import { type AcceptWithoutJsonApi, defaults, JsonApiConfig } from "./JsonApiConfig.js";
+import {
+  type AcceptWithoutJsonApi,
+  defaults,
+  JsonApiConfig,
+  type SparseFieldsets,
+} from "./JsonApiConfig.js";
 import { render } from "./internal/json.js";
 
 // ---------------------------------------------------------------------------
@@ -760,6 +766,28 @@ export interface SchemaErrorsOptions extends QueryParameterOptions, VaryOptions 
    * the check also covers a document built without the builders.
    */
   readonly checkLinkage?: boolean;
+  /**
+   * What the middleware does with a request's sparse fieldsets
+   * (`?fields[TYPE]=…`) on the **encoded** 2xx document. JSON:API 1.1
+   * §Sparse Fieldsets: an endpoint MUST NOT include fields the request
+   * excludes in resource objects of that type.
+   *
+   * - `"project"` (the default) removes them, in the primary data and in
+   *   `included` alike, so a handler that returns whole resources still
+   *   answers to spec. A `relationships` member left empty is omitted.
+   * - `"verify"` leaves the document alone and answers one that carries an
+   *   excluded field as it answers a full-linkage violation: a defect, which
+   *   the client receives as the opaque JSON:API 500.
+   * - `"handler"` leaves sparse fieldsets to the handler
+   *   (`Handlers.project(query.fields)`), unchecked.
+   *
+   * A document that already honours the fieldsets passes through every
+   * mode unchanged, so a handler that projects itself costs one parse.
+   * Falls back to `JsonApiConfig.sparseFieldsets`.
+   *
+   * @since 0.23.0
+   */
+  readonly sparseFieldsets?: SparseFieldsets;
 }
 
 /**
@@ -1394,6 +1422,33 @@ const checkWireLinkage = (
       ),
   });
 
+// The encoded success with the request's sparse fieldsets applied, or as it
+// stands under "handler" and when it already honours them; under "verify",
+// the defect a document carrying an excluded field dies with.
+const applySparseFieldsets = (
+  response: HttpServerResponse.HttpServerResponse,
+  fields: Fieldsets,
+  mode: SparseFieldsets,
+) =>
+  mode === "handler"
+    ? Effect.succeed(response)
+    : Option.match(sparseOnWire(response, fields), {
+        onNone: () => Effect.succeed(response),
+        onSome: (projected) =>
+          mode === "project"
+            ? Effect.succeed(projected.response)
+            : Effect.die(
+                new ResponseEncodeError({
+                  message:
+                    `JSON:API sparse fieldset violation: the response includes ` +
+                    `${projected.excluded.map(({ type, id, field }) => `"${field}" of ${type}:${id}`).join(", ")}, ` +
+                    `which the request's fields[TYPE] excludes ` +
+                    `(https://jsonapi.org/format/1.1/#fetching-sparse-fieldsets)`,
+                  cause: undefined,
+                }),
+              ),
+      });
+
 /**
  * Creates the live {@link SchemaErrors} implementation, optionally accepting
  * extra query parameters the check would reject — all-lowercase names, an
@@ -1430,8 +1485,10 @@ const checkWireLinkage = (
  * `fields`, `sort`, `page`, `filter`) or a bracketed name of one
  * (`page[size]`, `include[]`).
  *
- * Then every 2xx document the endpoint encoded is checked for full linkage,
- * unless `checkLinkage` is `false` ({@link SchemaErrorsOptions.checkLinkage}).
+ * Then every 2xx document the endpoint encoded is projected to the request's
+ * sparse fieldsets ({@link SchemaErrorsOptions.sparseFieldsets}) and checked
+ * for full linkage, unless `checkLinkage` is `false`
+ * ({@link SchemaErrorsOptions.checkLinkage}).
  *
  * {@link SchemaErrorsLive} is `schemaErrorsLayer()`; {@link layerWith} takes
  * the same options. A host that negotiates content itself composes this with
@@ -1471,20 +1528,31 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
   return Layer.effect(
     SchemaErrors,
     Effect.map(Effect.service(JsonApiConfig), (config) =>
-      schemaErrorsMiddleware(
-        Option.getOrElse(explicit, () => allowedBaseNames(config)),
-        options?.checkLinkage ?? config.checkLinkage,
-        options?.varyAccept ?? config.varyAccept,
-      ),
+      schemaErrorsMiddleware({
+        allowedQueryParameters: Option.getOrElse(explicit, () => allowedBaseNames(config)),
+        checkLinkage: options?.checkLinkage ?? config.checkLinkage,
+        varyAccept: options?.varyAccept ?? config.varyAccept,
+        sparseFieldsets: options?.sparseFieldsets ?? config.sparseFieldsets,
+      }),
     ),
   );
 };
 
-const schemaErrorsMiddleware = (
-  allowedQueryParameters: ReadonlyArray<string>,
-  checkLinkage: boolean,
-  varyAccept: boolean,
-): typeof SchemaErrors.Service =>
+// The policies `schemaErrorsLayer` resolved from its options and
+// `JsonApiConfig`.
+interface SchemaErrorsPolicy {
+  readonly allowedQueryParameters: ReadonlyArray<string>;
+  readonly checkLinkage: boolean;
+  readonly varyAccept: boolean;
+  readonly sparseFieldsets: SparseFieldsets;
+}
+
+const schemaErrorsMiddleware = ({
+  allowedQueryParameters,
+  checkLinkage,
+  varyAccept,
+  sparseFieldsets,
+}: SchemaErrorsPolicy): typeof SchemaErrors.Service =>
   // Untraced: the middleware's span surface is `Span.schemaError` alone.
   Effect.fnUntraced(function* (httpEffect, { endpoint }) {
     yield* registerVaryAccept(varyAccept);
@@ -1500,14 +1568,16 @@ const schemaErrorsMiddleware = (
     }
     const mismatched = yield* mismatchedId(endpoint);
     if (Option.isSome(mismatched)) return yield* idConflictResponse(mismatched.value);
-    // The linkage check reads the encoded success only: a defect it dies
-    // with passes `catch`, which sees failures alone.
+    const fields = requestedFieldsets(searchPairs(params));
+    // The fieldset and linkage checks read the encoded success only: a
+    // defect they die with passes `catch`, which sees failures alone.
+    const sparse = Effect.flatMap(httpEffect, (response) =>
+      applySparseFieldsets(response, fields, sparseFieldsets),
+    );
     return yield* Effect.catchFilter(
       checkLinkage
-        ? Effect.flatMap(httpEffect, (response) =>
-            checkWireLinkage(response, requestedFieldsets(searchPairs(params))),
-          )
-        : httpEffect,
+        ? Effect.flatMap(sparse, (response) => checkWireLinkage(response, fields))
+        : sparse,
       Filter.make((error) =>
         HttpApiError.HttpApiSchemaError.is(error) ? Result.succeed(error) : Result.fail(error),
       ),

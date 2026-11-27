@@ -138,6 +138,7 @@ const HTTP_TIER = [
   "internal/servedTypes.ts",
   "internal/sparse.ts",
   "internal/vocabulary.ts",
+  "internal/wireFieldsets.ts",
   "internal/wireNames.ts",
 ];
 
