@@ -511,10 +511,26 @@ export const parsePointer = (value: string): Option.Option<PointerMember> => {
   return Option.none();
 };
 
-const errorLinks = Schema.Struct({
+/**
+ * An error object's `links`: `about`, a link to details of this occurrence,
+ * and `type` (new in JSON:API 1.1), a link identifying the type of error this
+ * one is an instance of.
+ *
+ * @since 0.23.0
+ * @category schemas
+ */
+export const ErrorLinks = Schema.Struct({
   about: Schema.optionalKey(Link),
   type: Schema.optionalKey(Link),
 });
+
+/**
+ * The decoded type of {@link ErrorLinks}.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export type ErrorLinks = typeof ErrorLinks.Type;
 
 /**
  * A JSON:API error object with an open `code`.
@@ -526,7 +542,7 @@ const errorLinks = Schema.Struct({
  */
 export const ErrorObject = Schema.Struct({
   id: Schema.optionalKey(Schema.String),
-  links: Schema.optionalKey(errorLinks),
+  links: Schema.optionalKey(ErrorLinks),
   status: Schema.optionalKey(Schema.String),
   code: Schema.optionalKey(Schema.String),
   title: Schema.optionalKey(Schema.String),
