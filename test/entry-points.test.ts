@@ -113,6 +113,7 @@ const HTTP_TIER = [
   "Query.ts",
   "Registry.ts",
   "ResourceHandlers.ts",
+  "ResourceService.ts",
   "ServerErrors.ts",
   "internal/canonical.ts",
   "internal/codecs.ts",
@@ -139,6 +140,7 @@ const HTTP_TIER = [
   "internal/linkRoutes.ts",
   "internal/linkage.ts",
   "internal/members.ts",
+  "internal/operation.ts",
   "internal/responseBody.ts",
   "internal/servedTypes.ts",
   "internal/sparse.ts",
@@ -532,6 +534,7 @@ describe("root entry point", { timeout: LOAD_TIMEOUT }, () => {
       "Relationship",
       "Resource",
       "ResourceHandlers",
+      "ResourceService",
       "ServerErrors",
       "Sort",
     ]);

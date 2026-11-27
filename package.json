@@ -133,6 +133,10 @@
       "types": "./dist/ResourceHandlers.d.ts",
       "default": "./dist/ResourceHandlers.js"
     },
+    "./ResourceService": {
+      "types": "./dist/ResourceService.d.ts",
+      "default": "./dist/ResourceService.js"
+    },
     "./ServerErrors": {
       "types": "./dist/ServerErrors.d.ts",
       "default": "./dist/ServerErrors.js"

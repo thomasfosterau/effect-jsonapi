@@ -933,7 +933,7 @@ const judgeAnswer = (judging: Judging, found: Found, observation: Observation): 
     ToOne: ({ member }) =>
       one(member, "answers a different resource from the one its linkage names"),
     Empty: () =>
-      data === null
+      Option.exists(data, P.isNull)
         ? Verdict.Held()
         : broken(rule, found, Option.some(observation), {
             detail:

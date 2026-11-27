@@ -44,6 +44,25 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
 
 The document builders (`Handlers.data` / `Handlers.collection`) enforce the compound-document rules at runtime: `included` is **deduplicated** by `(type, id)` — against itself and against the primary `data`, so a resource that is both a hit and an include target is emitted once, as primary data — and checked for **full linkage** (every included resource must be reachable from the primary data through resource linkage), with the spec's one exemption: a relationship a sparse fieldset excludes still counts as the linkage it would otherwise carry ([§Compound Documents](https://jsonapi.org/format/1.1/#document-compound-documents); see [the per-resource transform pass](#the-per-resource-transform-pass-onresource)). The builders check the value they return; encoding through the endpoint's schema then drops any relationship the resource does not declare, so `Middleware.SchemaErrorsLive` checks full linkage again on the document as encoded and answers a violation with a JSON:API 500. Any `included` array is emitted, even an empty one or one the dedupe empties — a response to a request carrying `include` MUST have an `included` key, "even if that `included` key holds an empty array" ([§Fetching Includes](https://jsonapi.org/format/1.1/#fetching-includes)) — so pass an array whenever the request carried `include`, and leave the option out when it did not, which omits the member. Their `onResource` option applies per-resource processing — sparse fieldsets, computed `meta` — uniformly across the whole document ([below](#the-per-resource-transform-pass-onresource)).
 
+## Serving a group from a service (`ResourceService`)
+
+Most handlers of a spec-shaped group do the same work: map the decoded query to a data source, resolve `included`, build `self` and pagination links, answer the spec's statuses. `ResourceService` does that work once, over a contract an application (or an adapter) implements per resource:
+
+```ts skip-type-checking
+const ArticlesLive = ResourceService.layer(Api, "articles", Article, ArticleService, {
+  include: { people: ResourceService.includeTarget(peopleService) },
+  missingTarget: (identifier) => new NotFound({ id: identifier.id }),
+});
+```
+
+- **The service.** A `ResourceService.Service<typeof Article, E, R>` has `find` and, for each endpoint the group declares, the member it calls: `list` (answering a `Page` of items and the unpaged total), `create`, `update`, `delete`, `related` for a to-many it pages itself, and `setRelationship` / `addToRelationship` / `removeFromRelationship`. `findMany` is the batch loader `included` resolution calls; it defaults to `find` per id. Building the layer dies when a member an endpoint calls is missing.
+- **Dispatch.** Every `Endpoint.*` constructor annotates the endpoint with the operation it implements, so `layer` serves a group from `Group.resource` or one assembled with `Group.make`, renamed and re-pathed endpoints included. An endpoint no constructor built (an `Endpoint.action`) is a defect: implement that group with `HttpApiBuilder.group`.
+- **Errors.** The service fails with the group's own errors, and the layer's type refuses one the group does not declare. The layer never invents a 404: `find` fails with the group's not-found error. `missingTarget` checks every identifier a write carries through the include targets and answers the first missing one with the error it builds.
+- **Reads.** `?include=` goes through the batched walk of [Resolving `included`](#resolving-included--one-batch-per-level) with the service's own loader and the `include` targets; `?fields[TYPE]=` is projected; collections carry offset or number pagination links built from the request's canonical query.
+- **Policy as wrappers.** Authorisation, field visibility and lifecycle hooks wrap a service rather than configure the layer: build a new `Service` from an existing one with `Effect.tap` before a write or `Effect.map` over what a read answers.
+
+`ResourceService.memory(resource, { notFound, initial })` is an in-memory implementation for tests, examples and prototypes: equality filter maps, attribute sorts, offset and number pages, and relationship writes stored as given. Over it, `ResourceService.layer` passes the conformance kit's spec tier, reads and writes.
+
 ## Resolving `included` — one batch per level
 
 `Handlers.resolveIncluded` is the other half: the walk that _produces_ `included` from the paths the client requested. It takes the primary data (one resource, or a whole page), the validated `include` paths, and a registry of **batch loaders keyed by resource type** — and nothing else. There is no service to provide and no runtime to set up; it is a plain `Effect` a handler composes.
