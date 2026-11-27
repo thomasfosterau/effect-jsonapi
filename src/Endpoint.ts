@@ -529,6 +529,47 @@ type DefaultGetQuery<
   }
 >;
 
+// The query schema a write declares by default: `get`'s, once its `include`
+// or `fields` option turns a family on; else none, as a write that declares
+// neither has always had.
+type DefaultWriteQuery<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<unknown, string>,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
+  Fields extends boolean,
+> = [Include] extends [false]
+  ? [Fields] extends [false]
+    ? never
+    : DefaultGetQuery<Type, Attributes, Rels, Meta, IdSchema, Include, Fields>
+  : DefaultGetQuery<Type, Attributes, Rels, Meta, IdSchema, Include, Fields>;
+
+// A write's query schema: the `query` option, or the families its `include` /
+// `fields` options declare, or none at all.
+interface WriteQueryOptions {
+  readonly include?: IncludeArgument;
+  readonly fields?: boolean;
+  readonly query?: Override<never, Schema.Top>;
+}
+
+const writeQuery = (resource: Any, options?: WriteQueryOptions): Option.Option<Schema.Top> => {
+  const query = Option.fromUndefinedOr(options?.query);
+  const declares =
+    (options?.include !== undefined && options.include !== false) || options?.fields === true;
+  return Option.isNone(query) && !declares
+    ? Option.none()
+    : Option.some(
+        override(
+          query,
+          () =>
+            // SAFETY: the options are a write's `include` / `fields`, which `get` takes too.
+            Query.schema(resource as never, queryConfig(options) as never) as never,
+        ),
+      );
+};
+
 /**
  * `GET /<type>/:id` — fetch a single resource.
  *
@@ -1148,6 +1189,18 @@ export const create = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "create",
   const Path extends `/${string}` = `/${Type}`,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> =
+    false,
+  const Fields extends boolean = false,
+  QuerySchema extends Schema.Top = DefaultWriteQuery<
+    Type,
+    Attributes,
+    Rels,
+    Meta,
+    IdSchema,
+    Include,
+    Fields
+  >,
   DocMeta extends Schema.Top = Meta,
   const ClientId extends false | ClientIdPresence = false,
   Payload extends Schema.Top = DefaultCreatePayload<
@@ -1158,13 +1211,51 @@ export const create = <
     IdSchema,
     ClientId
   >,
-  Success extends Responses = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
+  Success extends Responses = DefaultDocument<
+    Type,
+    Attributes,
+    Rels,
+    Meta,
+    IdSchema,
+    DocMeta,
+    Include,
+    Fields
+  >,
   const Idem extends Idempotency.Option = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Override the success document's `meta` schema. */
     readonly meta?: DocMeta;
+    /**
+     * Enable `?include=` on the response, as {@link get} takes it: `POST
+     * /articles?include=author` answers with the created resource and its
+     * author in one round trip. The default success document's `included`
+     * then admits every resource a legal path reaches. Off by default, so
+     * `include` is a 400.
+     *
+     * @since 0.23.0
+     */
+    readonly include?: Include;
+    /**
+     * Enable `?fields[TYPE]=` sparse fieldsets on the response, as
+     * {@link get} takes it; the handler projects with
+     * `Handlers.project(query.fields)`.
+     *
+     * @since 0.23.0
+     */
+    readonly fields?: Fields;
+    /**
+     * Override the query schema the `include` / `fields` options compose, or
+     * declare one on a write that has none; a function of the derived query
+     * extends it.
+     *
+     * @since 0.23.0
+     */
+    readonly query?: Override<
+      DefaultGetQuery<Type, Attributes, Rels, Meta, IdSchema, Include, Fields>,
+      QuerySchema
+    >;
     /**
      * Override the request payload schema. Defaults to the resource's
      * `createPayload` (the JSON:API envelope); pass `resource.createInput` for
@@ -1207,7 +1298,7 @@ export const create = <
      * @since 0.10.0
      */
     readonly success?: Override<
-      DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
+      DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta, Include, Fields>,
       Success
     >;
     /**
@@ -1234,6 +1325,11 @@ export const create = <
       (options?.name ?? "create") as Name,
       (options?.path ?? `/${resource.type}`) as Path,
       {
+        // SAFETY: the options' `include` / `fields` / `query` are those `WriteQueryOptions` names.
+        // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
+        query: Option.getOrUndefined(
+          writeQuery(resource, options as WriteQueryOptions),
+        ) as QuerySchema,
         headers: Option.getOrUndefined(
           Idempotency.headersFor(options?.idempotency),
         ) as Idempotency.HeadersFor<Idem>,
@@ -1247,12 +1343,9 @@ export const create = <
           options?.payloadMediaType ?? MEDIA_TYPE,
         ),
         success: served(
-          override(Option.fromUndefinedOr(options?.success), () =>
-            resource.document(
-              (options?.meta !== undefined ? { meta: options.meta } : {}) as {
-                readonly meta?: DocMeta;
-              },
-            ),
+          override(
+            Option.fromUndefinedOr(options?.success),
+            () => defaultDocument(resource, "document", options) as never,
           ) as Success,
           profilesOf(options),
           options?.status ?? 201,
@@ -1346,15 +1439,65 @@ export const update = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "update",
   const Path extends `/${string}` = `/${Type}/:id`,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> =
+    false,
+  const Fields extends boolean = false,
+  QuerySchema extends Schema.Top = DefaultWriteQuery<
+    Type,
+    Attributes,
+    Rels,
+    Meta,
+    IdSchema,
+    Include,
+    Fields
+  >,
   DocMeta extends Schema.Top = Meta,
   Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta, IdSchema>["updatePayload"],
-  Success extends Responses = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
+  Success extends Responses = DefaultDocument<
+    Type,
+    Attributes,
+    Rels,
+    Meta,
+    IdSchema,
+    DocMeta,
+    Include,
+    Fields
+  >,
   const Idem extends Idempotency.Option = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Override the success document's `meta` schema. */
     readonly meta?: DocMeta;
+    /**
+     * Enable `?include=` on the response, as {@link get} takes it: `POST
+     * /articles?include=author` answers with the created resource and its
+     * author in one round trip. The default success document's `included`
+     * then admits every resource a legal path reaches. Off by default, so
+     * `include` is a 400.
+     *
+     * @since 0.23.0
+     */
+    readonly include?: Include;
+    /**
+     * Enable `?fields[TYPE]=` sparse fieldsets on the response, as
+     * {@link get} takes it; the handler projects with
+     * `Handlers.project(query.fields)`.
+     *
+     * @since 0.23.0
+     */
+    readonly fields?: Fields;
+    /**
+     * Override the query schema the `include` / `fields` options compose, or
+     * declare one on a write that has none; a function of the derived query
+     * extends it.
+     *
+     * @since 0.23.0
+     */
+    readonly query?: Override<
+      DefaultGetQuery<Type, Attributes, Rels, Meta, IdSchema, Include, Fields>,
+      QuerySchema
+    >;
     /**
      * Override the request payload schema. Defaults to the resource's
      * `updatePayload` (the JSON:API envelope); pass `resource.updateInput` for
@@ -1387,7 +1530,7 @@ export const update = <
      * @since 0.10.0
      */
     readonly success?: Override<
-      DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
+      DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta, Include, Fields>,
       Success
     >;
     /**
@@ -1414,6 +1557,11 @@ export const update = <
       (options?.path ?? `/${resource.type}/:id`) as Path,
       {
         params: Schema.Struct({ id: resource.Id }),
+        // SAFETY: the options' `include` / `fields` / `query` are those `WriteQueryOptions` names.
+        // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
+        query: Option.getOrUndefined(
+          writeQuery(resource, options as WriteQueryOptions),
+        ) as QuerySchema,
         headers: Option.getOrUndefined(
           Idempotency.headersFor(options?.idempotency),
         ) as Idempotency.HeadersFor<Idem>,
@@ -1425,12 +1573,9 @@ export const update = <
           options?.payloadMediaType ?? MEDIA_TYPE,
         ),
         success: served(
-          override(Option.fromUndefinedOr(options?.success), () =>
-            resource.document(
-              (options?.meta !== undefined ? { meta: options.meta } : {}) as {
-                readonly meta?: DocMeta;
-              },
-            ),
+          override(
+            Option.fromUndefinedOr(options?.success),
+            () => defaultDocument(resource, "document", options) as never,
           ) as Success,
           profilesOf(options),
           options?.status,
@@ -3885,11 +4030,27 @@ export interface ListConfig<Res extends Any, Meta extends Schema.Top> extends Ge
  * @since 0.1.0
  * @category models
  */
-export interface WriteConfig<Meta extends Schema.Top> {
+export interface WriteConfig<Meta extends Schema.Top, Res extends Any = Any> {
   readonly name?: string;
   readonly path?: `/${string}`;
   readonly errors?: ReadonlyArray<ErrorClass>;
   readonly meta?: MetaOption<Meta>;
+  /**
+   * Enable `?include=` on this write's response, as {@link create} and
+   * {@link update} take it. Off by default; the top-level `include` applies
+   * to `get` and `list` only.
+   *
+   * @since 0.23.0
+   */
+  readonly include?: Query.IncludeOption<Res>;
+  /**
+   * Enable `?fields[TYPE]=` on this write's response, as {@link create} and
+   * {@link update} take it. Off by default; the top-level `fields` applies
+   * to `get` and `list` only.
+   *
+   * @since 0.23.0
+   */
+  readonly fields?: boolean;
   /**
    * Override the request payload schema. Defaults to the resource's
    * `createPayload` / `updatePayload` (the JSON:API envelope); pass the
@@ -3971,8 +4132,8 @@ export interface DeleteConfig {
 export interface EndpointsOption<Res extends Any, Meta extends Schema.Top> {
   readonly get?: boolean | GetConfig<Meta, Res>;
   readonly list?: boolean | ListConfig<Res, Meta>;
-  readonly create?: boolean | WriteConfig<Meta>;
-  readonly update?: boolean | WriteConfig<Meta>;
+  readonly create?: boolean | WriteConfig<Meta, Res>;
+  readonly update?: boolean | WriteConfig<Meta, Res>;
   readonly delete?: boolean | DeleteConfig;
 }
 
@@ -4328,12 +4489,32 @@ type GeneratedCreate<
           FieldOr<C, "path", `/${Type}`> extends `/${string}`
             ? FieldOr<C, "path", `/${Type}`>
             : `/${Type}`,
+          ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, false>,
+          ListFields<C, false>,
+          DefaultWriteQuery<
+            Type,
+            Attributes,
+            Rels,
+            Meta,
+            IdSchema,
+            ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, false>,
+            ListFields<C, false>
+          >,
           EffMeta<C, GMeta, Meta>,
           false,
           EffPayload<C, Resource<Type, Attributes, Rels, Meta, IdSchema>["createPayload"]>,
           EffSuccess<
             C,
-            DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>
+            DefaultDocument<
+              Type,
+              Attributes,
+              Rels,
+              Meta,
+              IdSchema,
+              EffMeta<C, GMeta, Meta>,
+              ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, false>,
+              ListFields<C, false>
+            >
           >,
           EffIdem<C, GIdem>
         >
@@ -4367,11 +4548,31 @@ type GeneratedUpdate<
           FieldOr<C, "path", `/${Type}/:id`> extends `/${string}`
             ? FieldOr<C, "path", `/${Type}/:id`>
             : `/${Type}/:id`,
+          ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, false>,
+          ListFields<C, false>,
+          DefaultWriteQuery<
+            Type,
+            Attributes,
+            Rels,
+            Meta,
+            IdSchema,
+            ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, false>,
+            ListFields<C, false>
+          >,
           EffMeta<C, GMeta, Meta>,
           EffPayload<C, Resource<Type, Attributes, Rels, Meta, IdSchema>["updatePayload"]>,
           EffSuccess<
             C,
-            DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>
+            DefaultDocument<
+              Type,
+              Attributes,
+              Rels,
+              Meta,
+              IdSchema,
+              EffMeta<C, GMeta, Meta>,
+              ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, false>,
+              ListFields<C, false>
+            >
           >,
           EffIdem<C, GIdem>
         >
@@ -5126,12 +5327,20 @@ export const resource = <
     ...definedMember("payloadMediaType", config.payloadMediaType),
   });
 
+  // A write's `include` / `fields` are per-endpoint only: the top-level
+  // options configure the reads.
+  const writeQueryOpts = (config: R.ReadonlyRecord<string, unknown>) => ({
+    ...definedMember("include", config.include),
+    ...definedMember("fields", config.fields),
+  });
+
   const createOp = opConfig("create");
   if (createOp.emit) {
     endpoints.push(
       create(resource, {
         ...commonOpts(createOp.config, true),
         ...payloadOpt(createOp.config),
+        ...writeQueryOpts(createOp.config),
         ...successOpt(createOp.config),
         ...statusOpt(createOp.config),
         ...idempotencyOpt(createOp.config),
@@ -5144,6 +5353,7 @@ export const resource = <
       update(resource, {
         ...commonOpts(updateOp.config, true),
         ...payloadOpt(updateOp.config),
+        ...writeQueryOpts(updateOp.config),
         ...successOpt(updateOp.config),
         ...statusOpt(updateOp.config),
         ...idempotencyOpt(updateOp.config),
