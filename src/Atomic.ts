@@ -67,10 +67,11 @@ import type { LinksValue, MetaValue, ResourceValue } from "./Handlers.js";
 import { ATOMIC_EXTENSION_URI, ATOMIC_MEDIA_TYPE } from "./internal/media.js";
 import { refusingClientId } from "./internal/refusedClientId.js";
 import {
-  closedStruct,
   defaultMaxUndeclaredMemberErrors,
   validateCarriedCap,
+  wireStruct,
 } from "./internal/schemaExt.js";
+import { renamedLiterals } from "./internal/codecs.js";
 import * as Relationship from "./Relationship.js";
 import type { Relationships } from "./Relationship.js";
 import type {
@@ -82,10 +83,13 @@ import type {
   RelationshipName,
   ToManyName,
   UpdateAttributes,
+  WireNameOf,
+  WireStruct,
 } from "./Resource.js";
 import {
   createAttributeFields,
   declaredAttributes,
+  memberNames,
   Ref,
   updateAttributeFields,
 } from "./Resource.js";
@@ -193,15 +197,27 @@ export interface RelationshipRef<Res extends Any, K extends string> extends Sche
     Schema.Struct<{
       readonly type: Schema.tag<Res["type"]>;
       readonly id: Res["Id"];
-      readonly relationship: Schema.tag<K>;
+      readonly relationship: RelationshipTag<Res, K>;
     }>,
     Schema.Struct<{
       readonly type: Schema.tag<Res["type"]>;
       readonly lid: Schema.String;
-      readonly relationship: Schema.tag<K>;
+      readonly relationship: RelationshipTag<Res, K>;
     }>,
   ]
 > {}
+
+/**
+ * A relationship ref's `relationship` member: relationship `K`'s key once
+ * decoded, its wire name (`Resource.make`'s `memberNames`) on the wire.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export type RelationshipTag<Res extends Any, K extends string> =
+  WireNameOf<Res["relationships"][K], K> extends K
+    ? Schema.tag<K>
+    : Schema.Codec<K, WireNameOf<Res["relationships"][K], K>>;
 
 /**
  * Creates the relationship-ref schema for one of a resource's relationships.
@@ -212,19 +228,23 @@ export interface RelationshipRef<Res extends Any, K extends string> extends Sche
 export const RelationshipRef = <Res extends Any, const K extends RelationshipName<Res>>(
   resource: Res,
   relationship: K,
-): RelationshipRef<Res, K> =>
-  Schema.Union([
-    Schema.Struct({
-      type: Schema.tag(resource.type),
-      id: resource.Id,
-      relationship: Schema.tag(relationship),
-    }),
-    Schema.Struct({
-      type: Schema.tag(resource.type),
-      lid: Schema.String,
-      relationship: Schema.tag(relationship),
-    }),
-  ]) as RelationshipRef<Res, K>;
+): RelationshipRef<Res, K> => {
+  const wire = memberNames(resource)[relationship];
+  const tag =
+    wire === undefined
+      ? Schema.tag(relationship)
+      : renamedLiterals(
+          [relationship],
+          () => wire,
+          () => ({}),
+        );
+  // SAFETY: `tag` decodes to `relationship` and encodes to its wire name,
+  // which is what `RelationshipTag` types.
+  return Schema.Union([
+    Schema.Struct({ type: Schema.tag(resource.type), id: resource.Id, relationship: tag }),
+    Schema.Struct({ type: Schema.tag(resource.type), lid: Schema.String, relationship: tag }),
+  ]) as never;
+};
 
 // ---------------------------------------------------------------------------
 // Relationship linkage inside operations (refs may be lid-based)
@@ -326,8 +346,8 @@ export type AddRelationshipFields<Rels extends Relationships> = {
  */
 export type AddRelationshipsMember<Rels extends Relationships> =
   HasRequiredRelationship<Rels> extends true
-    ? Schema.Struct<AsFields<AddRelationshipFields<Rels>>>
-    : Schema.optionalKey<Schema.Struct<AsFields<AddRelationshipFields<Rels>>>>;
+    ? WireStruct<Schema.Struct<AsFields<AddRelationshipFields<Rels>>>, Rels>
+    : Schema.optionalKey<WireStruct<Schema.Struct<AsFields<AddRelationshipFields<Rels>>>, Rels>>;
 
 /**
  * The relationship fields of an `update` operation's `data` — mirrors the
@@ -356,7 +376,8 @@ const maxUndeclaredMemberErrorsOf = (operation: string, resource: Any): number =
   );
 
 // Runtime construction of the add / update operation relationship members.
-const addRelationshipMembers = (relationships: Relationships, cap: number) => {
+const addRelationshipMembers = (resource: Any, cap: number) => {
+  const relationships = resource.relationships;
   const fields: Record<string, Schema.Top> = {};
   const entries = R.toEntries(relationships);
   Arr.forEach(entries, ([key, descriptor]) => {
@@ -367,16 +388,16 @@ const addRelationshipMembers = (relationships: Relationships, cap: number) => {
         : Schema.optionalKey(refSchemaFor(descriptor));
   });
   const required = Arr.some(entries, ([, descriptor]) => descriptor.kind === "one");
-  return { struct: closedStruct(fields, cap), required };
+  return { struct: wireStruct(fields, memberNames(resource), cap), required };
 };
 
-const updateRelationshipFields = (relationships: Relationships, cap: number): Schema.Top => {
+const updateRelationshipFields = (resource: Any, cap: number): Schema.Top => {
   const fields: Record<string, Schema.Top> = {};
-  Arr.forEach(R.toEntries(relationships), ([key, descriptor]) => {
+  Arr.forEach(R.toEntries(resource.relationships), ([key, descriptor]) => {
     if (descriptor.kind === "paginated") return;
     fields[key] = Schema.optionalKey(refSchemaFor(descriptor));
   });
-  return closedStruct(fields, cap);
+  return wireStruct(fields, memberNames(resource), cap);
 };
 
 // ---------------------------------------------------------------------------
@@ -402,7 +423,10 @@ export interface AddOperation<Res extends Any> extends Schema.Struct<{
   readonly data: Schema.Struct<{
     readonly type: Schema.tag<Res["type"]>;
     readonly lid: Schema.optionalKey<Schema.String>;
-    readonly attributes: Schema.Struct<CreateAttributes<DeclaredAttributesOf<Res>>>;
+    readonly attributes: WireStruct<
+      Schema.Struct<CreateAttributes<DeclaredAttributesOf<Res>>>,
+      DeclaredAttributesOf<Res>
+    >;
     readonly relationships: AddRelationshipsMember<Res["relationships"]>;
   }>;
   readonly meta: Schema.optionalKey<typeof AnyMeta>;
@@ -423,7 +447,7 @@ export interface AddOperation<Res extends Any> extends Schema.Struct<{
  */
 export const AddOperation = <Res extends Any>(resource: Res): AddOperation<Res> => {
   const cap = maxUndeclaredMemberErrorsOf("AddOperation", resource);
-  const { required, struct } = addRelationshipMembers(resource.relationships, cap);
+  const { required, struct } = addRelationshipMembers(resource, cap);
   return Schema.Struct({
     op: Schema.tag("add"),
     // A `data.id` is a client-generated id, which this operation does not
@@ -435,7 +459,11 @@ export const AddOperation = <Res extends Any>(resource: Res): AddOperation<Res> 
         lid: Schema.optionalKey(Schema.String),
         // From the *declared* map, so input-only attributes (`resource: false`)
         // are accepted here exactly as in `createPayload`.
-        attributes: closedStruct(createAttributeFields(declaredAttributes(resource)), cap),
+        attributes: wireStruct(
+          createAttributeFields(declaredAttributes(resource)),
+          memberNames(resource),
+          cap,
+        ),
         relationships: required ? struct : Schema.optionalKey(struct),
       }),
     ),
@@ -461,10 +489,16 @@ export interface UpdateOperation<Res extends Any> extends Schema.Struct<{
     readonly id: Schema.optionalKey<Res["Id"]>;
     readonly lid: Schema.optionalKey<Schema.String>;
     readonly attributes: Schema.optionalKey<
-      Schema.Struct<UpdateAttributes<DeclaredAttributesOf<Res>>>
+      WireStruct<
+        Schema.Struct<UpdateAttributes<DeclaredAttributesOf<Res>>>,
+        DeclaredAttributesOf<Res>
+      >
     >;
     readonly relationships: Schema.optionalKey<
-      Schema.Struct<AsFields<UpdateRelationshipFields<Res["relationships"]>>>
+      WireStruct<
+        Schema.Struct<AsFields<UpdateRelationshipFields<Res["relationships"]>>>,
+        Res["relationships"]
+      >
     >;
   }>;
   readonly meta: Schema.optionalKey<typeof AnyMeta>;
@@ -488,9 +522,9 @@ export const UpdateOperation = <Res extends Any>(resource: Res): UpdateOperation
       id: Schema.optionalKey(resource.Id),
       lid: Schema.optionalKey(Schema.String),
       attributes: Schema.optionalKey(
-        closedStruct(updateAttributeFields(declaredAttributes(resource)), cap),
+        wireStruct(updateAttributeFields(declaredAttributes(resource)), memberNames(resource), cap),
       ),
-      relationships: Schema.optionalKey(updateRelationshipFields(resource.relationships, cap)),
+      relationships: Schema.optionalKey(updateRelationshipFields(resource, cap)),
     }),
     meta: Schema.optionalKey(AnyMeta),
   }) as UpdateOperation<Res>;

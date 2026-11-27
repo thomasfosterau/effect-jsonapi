@@ -60,6 +60,9 @@ const SCHEMA_TIER = [
   // The §Member Names grammar `Resource.make` checks declared names against;
   // a regular expression, importing nothing.
   "internal/memberName.ts",
+  // The `memberNames` presets `Resource.make` formats wire names with, at
+  // runtime and at the type level; imports only `effect` modules.
+  "internal/memberNames.ts",
   "internal/operators.ts",
   // `Resource.createPayload` refuses a client-generated `data.id` with the
   // issue `Middleware.SchemaErrorsLive` answers 403; pure schema.

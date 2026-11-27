@@ -25,7 +25,7 @@ import type {
   IncludePathsTo,
   ResolveIncludePath,
 } from "../Resource.js";
-import { directTargets, includePaths, isFamily } from "../Resource.js";
+import { directTargets, includePaths, isFamily, memberNames } from "../Resource.js";
 
 // Each resource once, by identity, first occurrence first.
 const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> =>
@@ -172,3 +172,22 @@ export const includedResources = (
       resources.flatMap((resource) => reachedBy(resource, path.split("."))),
     ),
   ]);
+
+/**
+ * An include path spelled in wire names: each segment the name the resource
+ * declaring it gives that relationship (`Resource.make`'s `memberNames`), the
+ * path walked from `resources` (a family's members standing for it). A
+ * segment no resource on the way declares keeps its spelling.
+ */
+export const wireIncludePath = (resources: ReadonlyArray<Any>, path: string): string =>
+  Arr.mapAccum(path.split("."), expandFamilies(resources), (current, segment) => {
+    const owner = Arr.findFirst(current, (resource) => R.has(resource.relationships, segment));
+    return Option.match(owner, {
+      onNone: (): readonly [ReadonlyArray<Any>, string] => [[], segment],
+      onSome: (resource) => {
+        const descriptor = resource.relationships[segment];
+        const next = descriptor.kind === "paginated" ? [] : expandFamilies([descriptor.ref()]);
+        return [next, Option.getOrElse(R.get(memberNames(resource), segment), () => segment)];
+      },
+    });
+  })[1].join(".");

@@ -226,6 +226,33 @@ const asManager: typeof Manager.Id.Type = Account.Id.make("2");
 
 `inheritId` defaults to `false` — by default an extended resource gets a fresh, independent brand.
 
+## Member names on the wire
+
+By default a member's name on the wire is its key. `memberNames` gives the wire a different spelling, so code keeps `createdAt` while clients see `created-at`:
+
+```ts
+const Article = Resource.make("articles", {
+  attributes: { title: Schema.String, createdAt: Schema.String },
+  relationships: { blogAuthor: Relationship.one(() => Person) },
+  memberNames: "kebab", // or "snake", "camel", { createdAt: "created" }, (key) => …
+});
+
+// Wire: { "attributes": { "title": "…", "created-at": "…" },
+//         "relationships": { "blog-author": { "data": … } } }
+// Decoded: article.attributes.createdAt, article.relationships.blogAuthor
+```
+
+The wire names are used everywhere on the wire, and the keys everywhere decoded, so handlers never change:
+
+| Surface | On the wire | Decoded |
+| --- | --- | --- |
+| Resource objects, create and update payloads, `createInput` / `updateInput`, atomic operations | `created-at` | `createdAt` |
+| `fields[articles]=created-at`, `sort=-created-at`, `filter[created-at]=…`, `include=blog-author` | wire names | keys (`{ field: "createdAt" }`, `Filter.Ast` fields, include paths) |
+| Relationship routes and `Handlers.links` | `/articles/1/relationships/blog-author` | — |
+| Error `source.pointer` and vocabulary `meta` (`sortableFields`, …), OpenAPI | wire names | — |
+
+The presets and a record are typed per key, so `typeof Article.Encoded` names `"created-at"`. A function's wire names are typed `string`. `Resource.make` refuses a wire name that is not a legal member name, `type` or `id`, two members sharing one, and a record naming a key the resource does not declare. `extend` keeps the base's names and takes its own `memberNames` for the members it declares, and `Resource.memberNames(Article)` reads back the renamed members. `Query.Sort(fields)` takes names rather than a resource, so it decodes them as given, and `Handlers.paginatedRelationship(type, id, name)` writes `name` into its links verbatim: give it the wire name.
+
 ## Update payloads: set / unset / leave unchanged
 
 A PATCH must distinguish three intents per attribute. `updatePayload` models them with `Schema.optional` (`= optionalKey(UndefinedOr(...))`), so each attribute is genuinely tri-state:

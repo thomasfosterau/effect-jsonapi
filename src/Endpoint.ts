@@ -142,10 +142,16 @@ import type {
   Resource,
   Target,
   ToManyName,
+  WireNameOf,
 } from "./Resource.js";
-import { clientIdPayload, directTargets } from "./Resource.js";
+import { clientIdPayload, directTargets, memberNames } from "./Resource.js";
 import { definedMember, someMember } from "./internal/members.js";
 import { declarationError } from "./internal/errors.js";
+
+// The name relationship `name` of `resource` carries on the wire, and so in
+// its routes: `Resource.make`'s `memberNames`, or the key itself.
+const wireMember = (resource: Any, name: string): string =>
+  Option.getOrElse(R.get(memberNames(resource), name), () => name);
 
 // ---------------------------------------------------------------------------
 // Error classes
@@ -2807,7 +2813,7 @@ export const related = <
   const Name extends keyof Rels & string,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = Name,
-  const Path extends `/${string}` = `/${Type}/:id/${Name}`,
+  const Path extends `/${string}` = `/${Type}/:id/${WireNameOf<Rels[Name], Name>}`,
   const Include extends Query.IncludeOption<
     Target<Resource<Type, Attributes, Rels, Meta, IdSchema>, Name>
   > = false,
@@ -2879,7 +2885,7 @@ export const related = <
 
   return HttpApiEndpoint.get(
     (options?.name ?? name) as EndpointName,
-    (options?.path ?? `/${resource.type}/:id/${name}`) as Path,
+    (options?.path ?? `/${resource.type}/:id/${wireMember(resource, name)}`) as Path,
     {
       params: Schema.Struct({ id: resource.Id }),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
@@ -3016,7 +3022,7 @@ export const getRelationship = <
   const Name extends keyof Rels & string,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `${Name}Relationship`,
-  const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
+  const Path extends `/${string}` = `/${Type}/:id/relationships/${WireNameOf<Rels[Name], Name>}`,
   const PageFields extends Schema.Struct.Fields = never,
   DocMeta extends Schema.Top = typeof AnyMeta,
   const Include extends RelationshipIncludeOption<
@@ -3123,7 +3129,7 @@ export const getRelationship = <
 
   return HttpApiEndpoint.get(
     (options?.name ?? `${name}Relationship`) as EndpointName,
-    (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
+    (options?.path ?? `/${resource.type}/:id/relationships/${wireMember(resource, name)}`) as Path,
     {
       params: Schema.Struct({ id: resource.Id }),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
@@ -3222,7 +3228,7 @@ export const updateRelationship = <
   const Name extends keyof Rels & string,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `update${Capitalize<Name>}Relationship`,
-  const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
+  const Path extends `/${string}` = `/${Type}/:id/relationships/${WireNameOf<Rels[Name], Name>}`,
   DocMeta extends Schema.Top = typeof AnyMeta,
   Success extends Responses = RelationshipSuccess<
     Resource<Type, Attributes, Rels, Meta, IdSchema>,
@@ -3252,7 +3258,8 @@ export const updateRelationship = <
   return Idempotency.applied(
     HttpApiEndpoint.patch(
       (options?.name ?? `update${capitalize(name)}Relationship`) as EndpointName,
-      (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
+      (options?.path ??
+        `/${resource.type}/:id/relationships/${wireMember(resource, name)}`) as Path,
       {
         params: Schema.Struct({ id: resource.Id }),
         headers: Option.getOrUndefined(
@@ -3340,7 +3347,7 @@ export const addRelationship = <
   const Name extends ToManyName<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `add${Capitalize<Name>}Relationship`,
-  const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
+  const Path extends `/${string}` = `/${Type}/:id/relationships/${WireNameOf<Rels[Name], Name>}`,
   DocMeta extends Schema.Top = typeof AnyMeta,
   Success extends Responses = RelationshipSuccess<
     Resource<Type, Attributes, Rels, Meta, IdSchema>,
@@ -3370,7 +3377,8 @@ export const addRelationship = <
   return Idempotency.applied(
     HttpApiEndpoint.post(
       (options?.name ?? `add${capitalize(name)}Relationship`) as EndpointName,
-      (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
+      (options?.path ??
+        `/${resource.type}/:id/relationships/${wireMember(resource, name)}`) as Path,
       {
         params: Schema.Struct({ id: resource.Id }),
         headers: Option.getOrUndefined(
@@ -3456,7 +3464,7 @@ export const removeRelationship = <
   const Name extends ToManyName<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `remove${Capitalize<Name>}Relationship`,
-  const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
+  const Path extends `/${string}` = `/${Type}/:id/relationships/${WireNameOf<Rels[Name], Name>}`,
   Success extends Responses = HttpApiSchema.NoContent,
   const Idem extends Idempotency.Option = false,
 >(
@@ -3475,7 +3483,8 @@ export const removeRelationship = <
   return Idempotency.applied(
     HttpApiEndpoint.delete(
       (options?.name ?? `remove${capitalize(name)}Relationship`) as EndpointName,
-      (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
+      (options?.path ??
+        `/${resource.type}/:id/relationships/${wireMember(resource, name)}`) as Path,
       {
         params: Schema.Struct({ id: resource.Id }),
         headers: Option.getOrUndefined(
@@ -4659,7 +4668,7 @@ type GeneratedRelated<
           K,
           RelErrors<RC, GErrors>,
           K,
-          `/${Type}/:id/${K}`,
+          `/${Type}/:id/${WireNameOf<Rels[K], K>}`,
           RelInclude<RC, GInclude>,
           RelFields<RC, GFields>,
           EnabledSort<FieldOr<RC, "sort", GSort>>,
@@ -4678,7 +4687,7 @@ type GeneratedRelated<
           K,
           RelErrors<RC, GErrors>,
           K,
-          `/${Type}/:id/${K}`,
+          `/${Type}/:id/${WireNameOf<Rels[K], K>}`,
           RelInclude<RC, GInclude>,
           RelFields<RC, GFields>,
           false,
@@ -4732,7 +4741,7 @@ type GeneratedRelationships<
                 K,
                 RelErrors<RelConfigObject<RO, K>, GErrors>,
                 `${K}Relationship`,
-                `/${Type}/:id/relationships/${K}`,
+                `/${Type}/:id/relationships/${WireNameOf<Rels[K], K>}`,
                 Rels[K] extends Relationship.ToMany<Any>
                   ? RelPage<RelConfigObject<RO, K>, GPage>
                   : never,
@@ -4756,7 +4765,7 @@ type GeneratedRelationships<
                 K,
                 RelErrors<RelConfigObject<RO, K>, GErrors>,
                 `update${Capitalize<K>}Relationship`,
-                `/${Type}/:id/relationships/${K}`,
+                `/${Type}/:id/relationships/${WireNameOf<Rels[K], K>}`,
                 typeof AnyMeta
               >
             >
@@ -4777,7 +4786,7 @@ type GeneratedRelationships<
                 K,
                 RelErrors<RelConfigObject<RO, K>, GErrors>,
                 `add${Capitalize<K>}Relationship`,
-                `/${Type}/:id/relationships/${K}`,
+                `/${Type}/:id/relationships/${WireNameOf<Rels[K], K>}`,
                 typeof AnyMeta
               >
             >
@@ -4791,7 +4800,7 @@ type GeneratedRelationships<
                 K,
                 RelErrors<RelConfigObject<RO, K>, GErrors>,
                 `remove${Capitalize<K>}Relationship`,
-                `/${Type}/:id/relationships/${K}`
+                `/${Type}/:id/relationships/${WireNameOf<Rels[K], K>}`
               >
             >
         : never;

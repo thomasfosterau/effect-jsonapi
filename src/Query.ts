@@ -69,6 +69,7 @@ import {
   flatten,
   nest,
   Repeatable,
+  renamedLiterals,
   repeatable,
   Sort as SortCodec,
 } from "./internal/codecs.js";
@@ -80,6 +81,7 @@ import {
   literalEncoder,
   operatorCheck,
   prepare,
+  renameFields,
 } from "./internal/filter.js";
 import type {
   ExpandFamilies,
@@ -87,7 +89,7 @@ import type {
   IncludeEnabled,
   LegalIncludePaths,
 } from "./internal/includeGraph.js";
-import { includePathsFor } from "./internal/includeGraph.js";
+import { expandFamilies, includePathsFor, wireIncludePath } from "./internal/includeGraph.js";
 import type { IncludeArgument } from "./internal/sparse.js";
 import { fieldsetResources } from "./internal/sparse.js";
 import { isFamily, vocabularyAnnotation, vocabularyAnnotations } from "./internal/vocabulary.js";
@@ -103,7 +105,7 @@ import type {
   IncludePath,
   IncludePathsTo,
 } from "./Resource.js";
-import { attributeKeys, fieldKeys, filterable } from "./Resource.js";
+import { attributeKeys, fieldKeys, filterable, memberNames } from "./Resource.js";
 import { declarationError } from "./internal/errors.js";
 
 // ---------------------------------------------------------------------------
@@ -749,9 +751,8 @@ export const Include = <Res extends Any, const O extends IncludeOptions<Res> | A
   resource: Res | ReadonlyArray<Res>,
   options?: O,
 ): Include<Res, IncludeOptionPaths<Res, O>> => {
-  const paths = includePathsFor(toResources(resource), options) as ReadonlyArray<
-    IncludeOptionPaths<Res, O>
-  >;
+  const resources = toResources(resource);
+  const paths = includePathsFor(resources, options) as ReadonlyArray<IncludeOptionPaths<Res, O>>;
   return repeatable(
     CommaSeparated(
       // The whitelist rides on the literal schema as the `include`
@@ -761,11 +762,14 @@ export const Include = <Res extends Any, const O extends IncludeOptions<Res> | A
       // legal paths without a second call. An empty set makes `include`
       // unsupported, and its rejection says so rather than "Expected
       // never".
-      Schema.Literals(paths).annotate(
-        vocabularyAnnotations(
-          { family: "include", values: paths },
-          "This endpoint supports no include paths.",
-        ),
+      renamedLiterals(
+        paths,
+        (path) => wireIncludePath(resources, path),
+        (values) =>
+          vocabularyAnnotations(
+            { family: "include", values },
+            "This endpoint supports no include paths.",
+          ),
       ),
     ),
   );
@@ -1119,7 +1123,7 @@ export interface Fieldset<Field extends string> extends Schema.decodeTo<
  * @category constructors
  */
 export const Fieldset = <Res extends Any>(resource: Res): Fieldset<FieldKeys<Res>> =>
-  fieldsetOf(resource.type, fieldKeys(resource));
+  fieldsetOf(resource.type, fieldKeys(resource), wireNamer([resource]));
 
 // The fieldset schema of the wire type `type` over the vocabulary `fields`.
 // `Query.schema` builds one per wire type from the fields of every
@@ -1127,6 +1131,7 @@ export const Fieldset = <Res extends Any>(resource: Res): Fieldset<FieldKeys<Res
 const fieldsetOf = <Field extends string>(
   type: string,
   fields: ReadonlyArray<Field>,
+  toWire: (field: string) => string,
 ): Fieldset<Field> =>
   repeatable(
     CommaSeparated(
@@ -1135,9 +1140,9 @@ const fieldsetOf = <Field extends string>(
       // treats a `fields[TYPE]` whose type has no field to select as
       // unsupported, that type alone. Its rejection says so rather
       // than "Expected never".
-      Schema.Literals(fields).annotate(
+      renamedLiterals(fields, toWire, (values) =>
         vocabularyAnnotations(
-          { family: "fields", type, values: fields },
+          { family: "fields", type, values },
           `This endpoint supports no sparse fieldset for type "${type}".`,
         ),
       ),
@@ -1353,9 +1358,39 @@ const filterIssues = (
         options,
       );
 
-// Decodes a record of `filter[...]` keys to a normal-form tree.
+// Each of `resources`' members' wire name (`Resource.memberNames`), a
+// family's members standing for it, and the key each wire name stands for.
+interface Naming {
+  readonly toWire: (key: string) => string;
+  readonly toKey: (wire: string) => string;
+}
+
+const naming = (resources: ReadonlyArray<Any>): Naming => {
+  const names = Arr.reduce(
+    expandFamilies(resources),
+    {} as R.ReadonlyRecord<string, string>,
+    (acc, resource) => ({ ...acc, ...memberNames(resource) }),
+  );
+  const keys = R.fromEntries(R.toEntries(names).map(([key, wire]) => [wire, key] as const));
+  return {
+    toWire: (key) => Option.getOrElse(R.get(names, key), () => key),
+    toKey: (wire) => Option.getOrElse(R.get(keys, wire), () => wire),
+  };
+};
+
+const wireNamer = (resources: ReadonlyArray<Any>): ((key: string) => string) =>
+  naming(resources).toWire;
+
+// A filter declaration keyed by its fields' wire names, which the grammar
+// reads and writes; the tree it decodes is renamed back to the keys.
+const wireFields = (fields: FieldCodecs, toWire: (key: string) => string): FieldCodecs =>
+  R.mapKeys(fields, toWire);
+
+// Decodes a record of `filter[...]` keys to a normal-form tree, over the wire
+// names of `fields` (see `wireFields`), naming the fields by their keys.
 const decodeFilterRecord = (
   fields: FieldCodecs,
+  names: Naming,
   ast: SchemaAST.AST,
   input: Parameters<typeof decodeFilter>[1],
   options: SchemaAST.ParseOptions,
@@ -1365,7 +1400,7 @@ const decodeFilterRecord = (
     return Effect.fail(filterIssues(ast, input, decoded.issues, options));
   return Effect.fromResult(
     Result.try({
-      try: () => prepare(decoded.node, literalEncoder(fields)).node,
+      try: () => renameFields(prepare(decoded.node, literalEncoder(fields)).node, names.toKey),
       catch: (error) => new SchemaIssue.InvalidValue({ message: messageOf(error) }, input, options),
     }),
   );
@@ -1375,12 +1410,16 @@ const decodeFilterRecord = (
 // against the declaration) to its canonical `filter[...]` pairs.
 const encodeFilterNode = (
   fields: FieldCodecs,
+  names: Naming,
   node: Node,
   options: SchemaAST.ParseOptions,
 ): Effect.Effect<Record<string, string>, SchemaIssue.Issue> =>
   Effect.fromResult(
     Result.try({
-      try: () => encodeFilter(prepare(node, literalEncoder(fields), operatorCheck(fields))),
+      try: () =>
+        encodeFilter(
+          prepare(renameFields(node, names.toWire), literalEncoder(fields), operatorCheck(fields)),
+        ),
       catch: (error) => new SchemaIssue.InvalidValue({ message: messageOf(error) }, node, options),
     }),
   );
@@ -1443,7 +1482,8 @@ const messageOf = (cause: unknown): string => (P.isError(cause) ? cause.message 
  * @category constructors
  */
 export const Filter = <Res extends Any>(resource: Res): Filter<Res> => {
-  const fields = filterable(resource) as FieldCodecs;
+  const names = naming([resource]);
+  const fields = wireFields(filterable(resource) as FieldCodecs, names.toWire);
   const from = Schema.Record(Schema.String, FilterWireValue);
   return from.pipe(
     Schema.decodeTo(
@@ -1452,8 +1492,8 @@ export const Filter = <Res extends Any>(resource: Res): Filter<Res> => {
         Node,
         { readonly [key: string]: string | ReadonlyArray<string> }
       >({
-        decode: (record, options) => decodeFilterRecord(fields, from.ast, record, options),
-        encode: (node, options) => encodeFilterNode(fields, node, options),
+        decode: (record, options) => decodeFilterRecord(fields, names, from.ast, record, options),
+        encode: (node, options) => encodeFilterNode(fields, names, node, options),
       }),
     ),
   ) as Filter<Res>;
@@ -1876,7 +1916,9 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
     const fieldsetFields = R.map(
       Arr.groupBy(fieldsetTargets, (target) => target.type),
       (targets, type) =>
-        Schema.optionalKey(fieldsetOf(type, Arr.dedupe(targets.flatMap((t) => fieldKeys(t))))),
+        Schema.optionalKey(
+          fieldsetOf(type, Arr.dedupe(targets.flatMap((t) => fieldKeys(t))), wireNamer(targets)),
+        ),
     );
     Object.assign(
       flatFields,
@@ -1896,7 +1938,7 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
       options.sort === true
         ? Arr.dedupe(resources.flatMap((r) => attributeKeys(r)))
         : (options.sort as ReadonlyArray<string>);
-    nestedFields.sort = Schema.optionalKey(Sort(sortable));
+    nestedFields.sort = Schema.optionalKey(repeatable(SortCodec(sortable, wireNamer(resources))));
     flatFields.sort = Schema.optionalKey(Repeatable);
   }
 
@@ -1909,6 +1951,7 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
 
   // The grammar's field declaration, when `filter: true` is on.
   let filterFields = Option.none<FieldCodecs>();
+  const filterNames = naming(resources);
   if (options.filter === true) {
     if (resources.length !== 1) {
       throw declarationError(
@@ -1916,7 +1959,7 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
           "a heterogeneous endpoint (several resources) must use the per-key `filter: { … }` map instead",
       );
     }
-    const declared = filterable(resources[0]);
+    const declared = wireFields(filterable(resources[0]) as FieldCodecs, filterNames.toWire);
     filterFields = Option.some(declared);
     // The grammar's filterable fields ride on the decoded tree's schema as
     // the `filter` vocabulary, so `Middleware`'s support check treats
@@ -1982,7 +2025,7 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
               const nestedValues = nest(others);
               if (R.isEmptyRecord(filterKeys)) return Effect.succeed(nestedValues);
               return Effect.map(
-                decodeFilterRecord(fields, flat.ast, filterKeys, parseOptions),
+                decodeFilterRecord(fields, filterNames, flat.ast, filterKeys, parseOptions),
                 (filter) => ({
                   ...nestedValues,
                   filter,
@@ -1994,7 +2037,7 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
               const flatValues = flatten(others);
               if (filter === undefined) return Effect.succeed(flatValues);
               return Effect.map(
-                encodeFilterNode(fields, filter as Node, parseOptions),
+                encodeFilterNode(fields, filterNames, filter as Node, parseOptions),
                 (pairs) => ({
                   ...flatValues,
                   ...pairs,
