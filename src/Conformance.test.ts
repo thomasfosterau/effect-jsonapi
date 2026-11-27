@@ -130,9 +130,10 @@ const cannedClient = (serve: (request: CannedRequest) => Canned): HttpClient.Htt
         request,
         new Response(hasBody ? stringify(canned.body) : null, {
           status,
+          // `Vary: Accept` unless the fixture sets a `Vary` of its own.
           headers: hasBody
-            ? { ...canned.headers, "content-type": contentType }
-            : { ...canned.headers },
+            ? { vary: "Accept", ...canned.headers, "content-type": contentType }
+            : { vary: "Accept", ...canned.headers },
         }),
       );
     }),
@@ -1231,6 +1232,19 @@ describe("Conformance: detects a deliberately broken server", () => {
       (canned.status ?? 200) === 200
         ? { ...canned, contentType: `${MEDIA_TYPE};charset=utf-8` }
         : canned,
+  );
+
+  broken(
+    "a success that does not vary on Accept",
+    "spec/content-negotiation/vary-accept",
+    (canned) =>
+      (canned.status ?? 200) === 200
+        ? { ...canned, headers: { ...canned.headers, vary: "Origin" } }
+        : canned,
+  );
+
+  broken("a 406 that does not vary on Accept", "spec/content-negotiation/vary-accept", (canned) =>
+    canned.status === 406 ? { ...canned, headers: { ...canned.headers, vary: "" } } : canned,
   );
 
   broken(

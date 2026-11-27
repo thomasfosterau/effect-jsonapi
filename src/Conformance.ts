@@ -89,6 +89,7 @@
  * @since 0.15.0
  */
 import * as Arr from "effect/Array";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -100,7 +101,13 @@ import * as Schema from "effect/Schema";
 import type { FileSystem } from "effect/FileSystem";
 import type { Path } from "effect/Path";
 import type { Scope } from "effect/Scope";
-import { HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import {
+  HttpClient,
+  HttpEffect,
+  HttpRouter,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/http";
 import type { Etag } from "effect/http";
 import type { HttpPlatform } from "effect/http/HttpPlatform";
 import { HttpApiBuilder } from "effect/http-api";
@@ -1125,10 +1132,13 @@ export const verify = Effect.fnUntraced(function* <
       // answers it, not a defect that kills the rule that requested it (a
       // link the server emitted, say). Any other failure, and any defect,
       // still dies, as a transport that throws does.
-      const response = yield* Core.answeredAsDeployed(
-        Effect.provideService(handler, HttpServerRequest.HttpServerRequest, serverRequest),
-      );
-      return HttpServerResponse.toClientResponse(response);
+      // Through `toHandled`, as a server adapter sends it, so the pre-response
+      // handlers the api registers (`Vary: Accept`, say) shape the answer.
+      const sent = yield* Deferred.make<HttpServerResponse.HttpServerResponse>();
+      yield* HttpEffect.toHandled(Core.answeredAsDeployed(handler), (_, response) =>
+        Deferred.succeed(sent, response),
+      ).pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, serverRequest));
+      return HttpServerResponse.toClientResponse(yield* Deferred.await(sent));
     }, Effect.scoped),
   );
   return yield* execute(api, client, "in-process", IN_PROCESS_ORIGIN, options ?? {});

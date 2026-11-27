@@ -98,7 +98,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaIssue from "effect/SchemaIssue";
-import { Headers, HttpServerRespondable } from "effect/http";
+import { Headers, HttpEffect, HttpServerRespondable } from "effect/http";
 import { HttpServerRequest, ParsedSearchParams } from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import type { HttpApiEndpoint } from "effect/http-api";
@@ -116,7 +116,12 @@ import { pointer } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
 import { declaredNames, declaresName } from "./internal/declaredQuery.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
-import { MEDIA_TYPE, parametersAreAcceptable, parseMediaType } from "./internal/media.js";
+import {
+  MEDIA_TYPE,
+  parametersAreAcceptable,
+  parseMediaType,
+  varyAccept,
+} from "./internal/media.js";
 import { CLIENT_ID_UNSUPPORTED, refusedClientIdPointer } from "./internal/refusedClientId.js";
 import { conflictingType, isTypePath, ServedTypes } from "./internal/servedTypes.js";
 import { requestedFieldsets } from "./internal/linkage.js";
@@ -192,7 +197,7 @@ export const Span = {
  * @since 0.1.0
  * @category models
  */
-export interface NegotiationOptions {
+export interface NegotiationOptions extends VaryOptions {
   /**
    * The JSON:API extension URIs this api supports (e.g.
    * `Atomic.EXTENSION_URI`). Media types carrying `ext` parameters whose URIs
@@ -220,6 +225,29 @@ export interface ContentNegotiationOptions extends NegotiationOptions {
    * `JsonApiConfig.acceptWithoutJsonApi` in the middleware layers.
    */
   readonly acceptWithoutJsonApi?: AcceptWithoutJsonApi;
+}
+
+/**
+ * The `Vary` option {@link NegotiationOptions} and {@link SchemaErrorsOptions}
+ * share: each middleware adds `Accept` to the responses it answers or passes
+ * on, so pass the same value to both ({@link layerWith} does).
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export interface VaryOptions {
+  /**
+   * Whether every response the middleware handles, success and error alike,
+   * carries `Accept` in its `Vary` header, merged with any `Vary` already set
+   * (JSON:API 1.1 §6.3: a server supporting `ext` or `profile` SHOULD, which
+   * every api built on this package does). `false` leaves `Vary` to the api.
+   * Falls back to `JsonApiConfig.varyAccept`.
+   *
+   * Defaults to `true`.
+   *
+   * @since 0.23.0
+   */
+  readonly varyAccept?: boolean;
 }
 
 /**
@@ -700,7 +728,7 @@ export interface QueryParameterOptions {
  * @since 0.17.0
  * @category models
  */
-export interface SchemaErrorsOptions extends QueryParameterOptions {
+export interface SchemaErrorsOptions extends QueryParameterOptions, VaryOptions {
   /**
    * `false` skips the full-linkage check on the **encoded** response, which is
    * on by default. The document builders (`Handlers.data`,
@@ -1105,6 +1133,16 @@ export class SchemaErrors extends HttpApiMiddleware.Service<SchemaErrors>()(
  * @since 0.1.0
  * @category constructors
  */
+const withVaryAccept: HttpEffect.PreResponseHandler = (_, response) =>
+  Effect.succeed(
+    HttpServerResponse.setHeader(response, "vary", varyAccept(response.headers["vary"])),
+  );
+
+// Both middlewares register it, since either may answer first; the merge is
+// idempotent, so running it twice adds `Accept` once.
+const registerVaryAccept = (varyAccept: boolean) =>
+  varyAccept ? HttpEffect.appendPreResponseHandler(withVaryAccept) : Effect.void;
+
 export const contentNegotiationLayer = (
   options?: ContentNegotiationOptions,
 ): Layer.Layer<ContentNegotiation> =>
@@ -1114,9 +1152,13 @@ export const contentNegotiationLayer = (
       const resolved: ContentNegotiationOptions = {
         extensions: options?.extensions ?? config.extensions,
         acceptWithoutJsonApi: options?.acceptWithoutJsonApi ?? config.acceptWithoutJsonApi,
+        varyAccept: options?.varyAccept ?? config.varyAccept,
       };
       return Effect.fnUntraced(function* (httpEffect) {
         const request = yield* HttpServerRequest;
+        // Registered before anything can fail, so a 406 / 415, a handler's
+        // error and a success all carry it.
+        yield* registerVaryAccept(resolved.varyAccept !== false);
         const error = yield* Effect.sync(() => negotiate(request.headers, resolved)).pipe(
           Effect.tap((error) =>
             Effect.annotateCurrentSpan(
@@ -1398,6 +1440,7 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
       schemaErrorsMiddleware(
         Option.getOrElse(explicit, () => allowedBaseNames(config)),
         options?.checkLinkage ?? config.checkLinkage,
+        options?.varyAccept ?? config.varyAccept,
       ),
     ),
   );
@@ -1406,9 +1449,11 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
 const schemaErrorsMiddleware = (
   allowedQueryParameters: ReadonlyArray<string>,
   checkLinkage: boolean,
+  varyAccept: boolean,
 ): typeof SchemaErrors.Service =>
   // Untraced: the middleware's span surface is `Span.schemaError` alone.
   Effect.fnUntraced(function* (httpEffect, { endpoint }) {
+    yield* registerVaryAccept(varyAccept);
     const declared = declaredFor(endpoint);
     const params = yield* ParsedSearchParams;
     if (Option.isSome(declared)) {

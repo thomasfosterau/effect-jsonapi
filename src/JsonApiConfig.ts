@@ -72,6 +72,12 @@ export interface Policy {
    * `true`.
    */
   readonly checkLinkage: boolean;
+  /**
+   * `false` leaves `Vary` to the api, rather than the middleware adding
+   * `Accept` to every response it handles; see
+   * `Middleware.VaryOptions.varyAccept`. Defaults to `true`.
+   */
+  readonly varyAccept: boolean;
 }
 
 /**
@@ -86,8 +92,8 @@ export type Options = Partial<Policy>;
 /**
  * Today's behaviour, the policy an app gets when it provides no
  * {@link JsonApiConfig}: no extensions, a 406 for an `Accept` without the
- * JSON:API media type, `_` admitted as a query parameter, and the
- * full-linkage check on.
+ * JSON:API media type, `_` admitted as a query parameter, the full-linkage
+ * check on, and `Vary: Accept` on every response.
  *
  * @since 0.23.0
  * @category constants
@@ -97,6 +103,7 @@ export const defaults: Policy = {
   acceptWithoutJsonApi: "notAcceptable",
   allowedQueryParameters: ["_"],
   checkLinkage: true,
+  varyAccept: true,
 };
 
 /**

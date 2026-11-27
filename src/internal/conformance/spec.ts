@@ -26,7 +26,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { declaresName } from "../declaredQuery.js";
 import * as Linkage from "../linkage.js";
-import { MEDIA_TYPE } from "../media.js";
+import { MEDIA_TYPE, variesOnAccept } from "../media.js";
 import { counted, listed } from "./crawl.js";
 import {
   relatedDereferences,
@@ -193,6 +193,46 @@ const responseMediaType: RuleImpl = {
         }
       });
       return settle(responseMediaType.rule, resolved.length, findings, coverageNote(unresolved));
+    }),
+};
+
+const varyAccept: RuleImpl = {
+  rule: rule(
+    "spec/content-negotiation/vary-accept",
+    "Content Negotiation",
+    "content-negotiation-servers",
+    "SHOULD",
+    "Servers that support the `ext` or `profile` media type parameters SHOULD specify the `Vary` header with `Accept` as one of its values. This applies to responses with and without any profiles or extensions applied.",
+  ),
+  run: (ctx) =>
+    Effect.gen(function* () {
+      const { resolved, unresolved } = readable(ctx);
+      const target = resolved[0];
+      if (target === undefined)
+        return skip(varyAccept.rule, noProbeReason("JSON:API read endpoint", unresolved));
+      const findings: Array<Finding> = [];
+      const check = (what: string, observation: Observation) => {
+        if (variesOnAccept(observation.headers["vary"])) return;
+        findings.push(
+          finding(varyAccept.rule, {
+            detail: `${what} carried no \`Vary: Accept\``,
+            expected: "a `Vary` header naming `Accept`",
+            observed: render(observation.headers["vary"] ?? null),
+            probe: observation.probe,
+          }),
+        );
+      };
+      yield* eachSuccessfulRead(ctx, resolved, (path, observation) =>
+        check(`the ${observation.status} from ${path}`, observation),
+      );
+      // A response without the negotiated representation: the 406 a
+      // parameterised `Accept` provokes.
+      const refused = yield* ctx.request({
+        url: target.path,
+        headers: { accept: `${MEDIA_TYPE};charset=utf-8` },
+      });
+      if (refused.status === 406) check(`the 406 from ${target.path}`, refused);
+      return settle(varyAccept.rule, resolved.length + 1, findings, coverageNote(unresolved));
     }),
 };
 
@@ -2788,6 +2828,7 @@ const reachable: RuleImpl = {
 export const rules: ReadonlyArray<RuleImpl> = [
   reachable,
   responseMediaType,
+  varyAccept,
   contentTypeParameters,
   acceptParameters,
   acceptWeight,

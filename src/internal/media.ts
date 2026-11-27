@@ -173,3 +173,28 @@ export const parametersAreAcceptable = (
     return false;
   });
 };
+
+/**
+ * Whether a `Vary` header value names `Accept`, or is `*`, which varies on
+ * every request header.
+ *
+ * @internal
+ */
+export const variesOnAccept = (vary?: string): boolean =>
+  vary !== undefined &&
+  Arr.some(vary.split(","), (field) => {
+    const name = field.trim().toLowerCase();
+    return name === "accept" || name === "*";
+  });
+
+/**
+ * `existing` (a `Vary` header value, possibly absent) with `Accept` added
+ * unless {@link variesOnAccept} already holds. JSON:API 1.1 §6.3: a server
+ * that supports `ext` or `profile` SHOULD send `Vary: Accept` on every response.
+ *
+ * @internal
+ */
+export const varyAccept = (existing?: string): string => {
+  if (existing === undefined || existing.trim() === "") return "Accept";
+  return variesOnAccept(existing) ? existing : `${existing}, Accept`;
+};
