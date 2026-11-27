@@ -110,8 +110,10 @@ import * as Option from "effect/Option";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import { Headers, HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
-import type { HttpApi, HttpApiGroup } from "effect/http-api";
+import * as Stream from "effect/Stream";
+import { Headers, HttpClient, HttpClientError, HttpClientRequest, UrlParams } from "effect/http";
+import type { HttpMethod } from "effect/http";
+import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { HttpApiClient } from "effect/http-api";
 import type { JsonApiObject, Wire } from "./Document.js";
 import { ErrorDocument as ErrorDocumentSchema, ErrorObject } from "./Document.js";
@@ -931,6 +933,165 @@ export const readTotalCount = (
  */
 export const hasNextPage = (offset: number, limit: number, totalCount: number): boolean =>
   offset + limit < totalCount;
+
+// ---------------------------------------------------------------------------
+// Walking a paginated collection
+// ---------------------------------------------------------------------------
+
+/**
+ * The part of an `HttpApiEndpoint` {@link pages} reads: its query schema,
+ * which decodes the `links.next` href's parameters into the next call's
+ * query. Any endpoint in the api is one, e.g. `Endpoint.list(Article, …)`
+ * or `Api.groups.articles.endpoints.list`.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export type PagedEndpoint<Query extends Schema.Top> = Pick<
+  HttpApiEndpoint.HttpApiEndpoint<string, HttpMethod.HttpMethod, string, never, Query>,
+  "~Query" | "query"
+>;
+
+/**
+ * Options of {@link pages} and {@link items}.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface PagesOptions {
+  /**
+   * The most pages fetched, the first included. Without it the stream follows
+   * `links.next` for as long as the server sends one.
+   */
+  readonly maxPages?: number;
+}
+
+// A link is a string or a link object (`{ href, … }`); `null` or absent ends the walk.
+const nextHref = (document: PagedDocument): Option.Option<string> => {
+  const next = document.links?.["next"];
+  if (P.isString(next)) return Option.some(next);
+  return P.hasProperty(next, "href") && P.isString(next.href)
+    ? Option.some(next.href)
+    : Option.none();
+};
+
+/**
+ * The part of a collection document {@link pages} reads: its top-level
+ * `links`, whose `next` member is the next page's href.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface PagedDocument {
+  readonly links?: R.ReadonlyRecord<string, unknown>;
+}
+
+/**
+ * Every page of a paginated collection, as a `Stream` of the endpoint's
+ * documents: `request` is called with `query` for the first page, then with
+ * the query of each response's `links.next` until a response has none.
+ *
+ * Whatever pagination the server uses — `page[offset]`, `page[number]`, an
+ * opaque `page[cursor]` — the next href is the server's own, so the walk
+ * needs no page arithmetic. Its parameters are decoded through the
+ * endpoint's query schema and passed to the same typed call, so each page is
+ * decoded by the endpoint's success schema with its `included` intact, and a
+ * client made with `decodeErrors` fails the stream with the
+ * {@link ErrorResponse} of the page that failed. A `links.next` whose query
+ * the endpoint can't decode fails it with the `SchemaError`.
+ *
+ * Pages are fetched one at a time, as the stream is pulled, so `Stream.take`
+ * or {@link PagesOptions.maxPages} stops the requests too.
+ *
+ * @example
+ * ```ts
+ * import { Effect, Schema, Stream } from "effect"
+ * import { FetchHttpClient } from "effect/http"
+ * import { HttpApi } from "effect/http-api"
+ * import { Client, Endpoint, Group, Query, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.NonEmptyString }
+ * })
+ * const list = Endpoint.list(Article, { page: Query.Page.Offset })
+ * const Api = HttpApi.make("blog").add(Group.make(Article, list))
+ *
+ * const titles = Effect.gen(function* () {
+ *   const client = yield* Client.make(Api, { baseUrl: "https://example.com" })
+ *   const articles = Client.items(
+ *     list,
+ *     (query) => client.articles.list({ query }),
+ *     { page: { limit: 50 } },
+ *     { maxPages: 20 }
+ *   )
+ *   return yield* Stream.runCollect(Stream.map(articles, (article) => article.attributes.title))
+ * }).pipe(Effect.provide(FetchHttpClient.layer))
+ *
+ * console.log(typeof titles.pipe) // the program is built, not run
+ * ```
+ *
+ * @since 0.24.0
+ * @category constructors
+ */
+export const pages = <Query extends Schema.Top, Doc extends PagedDocument, E, R>(
+  endpoint: PagedEndpoint<Query>,
+  request: (query: Query["Type"]) => Effect.Effect<Doc, E, R>,
+  query: Query["Type"],
+  options?: PagesOptions,
+): Stream.Stream<Doc, E | Schema.SchemaError, R | Query["DecodingServices"]> => {
+  const schema = endpoint.query;
+  const decodeNext = (href: string) =>
+    schema === undefined
+      ? Effect.succeedNone
+      : Effect.asSome(
+          Schema.decodeEffect(schema)(
+            UrlParams.toReadonlyRecord(
+              UrlParams.fromInput(new URL(href, "http://next.invalid").searchParams),
+            ),
+          ),
+        );
+  const walk = Stream.paginate(query, (current: Query["Type"]) =>
+    Effect.flatMap(request(current), (document) =>
+      Option.match(nextHref(document), {
+        onNone: () => Effect.succeed([[document], Option.none<Query["Type"]>()] as const),
+        onSome: (href) =>
+          Effect.map(
+            // SAFETY: `schema` is the endpoint's query schema, whose decoded type is `Query["Type"]`.
+            decodeNext(href) as Effect.Effect<
+              Option.Option<Query["Type"]>,
+              Schema.SchemaError,
+              Query["DecodingServices"]
+            >,
+            (next) => [[document], next] as const,
+          ),
+      }),
+    ),
+  );
+  return options?.maxPages === undefined ? walk : Stream.take(walk, options.maxPages);
+};
+
+/**
+ * The resources of every page of a paginated collection, in order: {@link pages}
+ * with each document's `data` flattened. Reach for {@link pages} instead when
+ * the pages' `included`, `meta` or `links` matter.
+ *
+ * @since 0.24.0
+ * @category constructors
+ */
+export const items = <
+  Query extends Schema.Top,
+  Doc extends PagedDocument & { readonly data: ReadonlyArray<unknown> },
+  E,
+  R,
+>(
+  endpoint: PagedEndpoint<Query>,
+  request: (query: Query["Type"]) => Effect.Effect<Doc, E, R>,
+  query: Query["Type"],
+  options?: PagesOptions,
+): Stream.Stream<Doc["data"][number], E | Schema.SchemaError, R | Query["DecodingServices"]> =>
+  Stream.flattenIterable(
+    Stream.map(pages(endpoint, request, query, options), (document) => document.data),
+  );
 
 // ---------------------------------------------------------------------------
 // Call-site inputs

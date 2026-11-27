@@ -85,3 +85,20 @@ const href = Client.filteredPageHref("/people", Client.stripUndefined({ q })); /
 const next = Client.canonicalPageHref("/people", pairs, { offset: 24, limit: 24 }); // the server's own link spelling
 const window = Client.pageWindow(cursor, total); // first, last, siblings, gaps — for the control to render
 ```
+
+## Walking every page
+
+`Client.pages` follows a collection's `links.next` until the server sends none, as a `Stream` of the endpoint's documents; `Client.items` flattens them to the resources. The next href is the server's own, so the same walk covers `page[offset]`, `page[number]` and an opaque `page[cursor]`: its parameters are decoded through the endpoint's query schema and passed to the same typed call, so every page is decoded with its `included` intact.
+
+```ts
+const list = Endpoint.list(Article, { page: Query.Page.Offset });
+
+const articles = Client.items(
+  list, // the endpoint, for its query schema
+  (query) => client.articles.list({ query }),
+  { page: { limit: 50 } }, // the first page's query
+  { maxPages: 20 }, // optional guard
+);
+```
+
+Pages are requested one at a time as the stream is pulled, so `Stream.take` stops the requests too. A failed page fails the stream with whatever the call failed with (a `Client.ErrorResponse` with `decodeErrors`), and a `links.next` whose query the endpoint can't decode fails it with the `SchemaError`.
