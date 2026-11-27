@@ -22,6 +22,8 @@ import { HttpApiBuilder } from "effect/http-api";
 import * as Handlers from "./Handlers.js";
 import { declarationError } from "./internal/errors.js";
 import { type Kind, Operation } from "./internal/operation.js";
+import type { ErasedService } from "./internal/erasedService.js";
+import { forResource } from "./internal/erasedService.js";
 import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
 import type * as Resource from "./Resource.js";
@@ -195,6 +197,25 @@ export interface Service<Res extends Definition, E = never, R = never> {
 }
 
 /**
+ * A {@link Service} with every member, as a built-in implementation
+ * ({@link memory}, `SqlService.make`) answers one.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface Complete<Res extends Definition, E = never, R = never> extends Service<Res, E, R> {
+  readonly findMany: NonNullable<Service<Res, E, R>["findMany"]>;
+  readonly list: NonNullable<Service<Res, E, R>["list"]>;
+  readonly create: NonNullable<Service<Res, E, R>["create"]>;
+  readonly update: NonNullable<Service<Res, E, R>["update"]>;
+  readonly delete: NonNullable<Service<Res, E, R>["delete"]>;
+  readonly related: NonNullable<Service<Res, E, R>["related"]>;
+  readonly setRelationship: NonNullable<Service<Res, E, R>["setRelationship"]>;
+  readonly addToRelationship: NonNullable<Service<Res, E, R>["addToRelationship"]>;
+  readonly removeFromRelationship: NonNullable<Service<Res, E, R>["removeFromRelationship"]>;
+}
+
+/**
  * Options of {@link layer}.
  *
  * @since 0.24.0
@@ -227,9 +248,10 @@ export interface LayerOptions<Targets extends Handlers.IncludeTargets, NE = neve
  * @since 0.24.0
  * @category constructors
  */
-export const includeTarget = <Res extends Definition, E, R>(
-  service: Service<Res, E, R>,
-): Handlers.IncludeTarget<ValueOf<Res>, E, R> =>
+export const includeTarget = <A extends Handlers.ResourceValue, Id extends string, E, R>(service: {
+  readonly find: (id: Id, query: ReadQuery) => Effect.Effect<A, E, R>;
+  readonly findMany?: (ids: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<A>, E, R>;
+}): Handlers.IncludeTarget<A, E, R> =>
   service.findMany ??
   ((ids) =>
     Effect.map(
@@ -237,7 +259,7 @@ export const includeTarget = <Res extends Definition, E, R>(
         ids,
         // SAFETY: the include walk hands a loader the ids its own type's
         // linkage carries, which the router decoded through the same `Id`.
-        (id) => Effect.option(service.find(id as IdOf<Res>, {})),
+        (id) => Effect.option(service.find(id as Id, {})),
         { concurrency: "unbounded" },
       ),
       Arr.getSomes,
@@ -262,29 +284,6 @@ export type GroupError<
 type Identifier = Handlers.ResourceIdentifierValue;
 type Value = Handlers.ResourceValue;
 type Erased<A = unknown> = Effect.Effect<A, unknown, unknown>;
-
-// A service with its resource erased. Method signatures, whose parameters
-// compare bivariantly, so every `Service<Res, E, R>` is one.
-interface ErasedService {
-  find(id: string, query: ReadQuery): Erased<Value>;
-  findMany?(ids: ReadonlyArray<string>): Erased<ReadonlyArray<Value>>;
-  list?(query: ListQuery): Erased<Page<Value>>;
-  create?(data: WriteData): Erased<Value>;
-  update?(id: string, data: WriteData): Erased<Value>;
-  delete?(id: string): Erased<void>;
-  related?(id: string, relationship: string, query: ListQuery): Erased<Page<Value>>;
-  setRelationship?(id: string, relationship: string, data: Handlers.LinkageValue): Erased<void>;
-  addToRelationship?(
-    id: string,
-    relationship: string,
-    data: ReadonlyArray<Identifier>,
-  ): Erased<void>;
-  removeFromRelationship?(
-    id: string,
-    relationship: string,
-    data: ReadonlyArray<Identifier>,
-  ): Erased<void>;
-}
 
 // The service member each operation calls, beyond `find`.
 const requiredMember: R.ReadonlyRecord<Kind["_tag"], Option.Option<keyof ErasedService>> = {
@@ -852,8 +851,8 @@ const unsupported = (message: string) =>
 export const memory = <Res extends Definition, E>(
   resource: Res,
   options: MemoryOptions<Res, E>,
-): Effect.Effect<Service<Res, E>> =>
-  Effect.map(Ref.make<ReadonlyArray<Stored>>(options.initial ?? []), (store): Service<Res, E> => {
+): Effect.Effect<Complete<Res, E>> =>
+  Effect.map(Ref.make<ReadonlyArray<Stored>>(options.initial ?? []), (store): Complete<Res, E> => {
     const counter = Ref.makeUnsafe((options.initial ?? []).length);
     const nextId = Option.match(Option.fromUndefinedOr(options.id), {
       onNone: () =>
@@ -923,7 +922,7 @@ export const memory = <Res extends Definition, E>(
         write({ ...value, relationships: { ...value.relationships, [name]: { data } } }),
       );
 
-    const service: ErasedService = {
+    const service: Required<ErasedService<E, never>> = {
       find: read,
       findMany: (ids) =>
         Effect.map(Ref.get(store), (values) =>
@@ -1002,8 +1001,8 @@ export const memory = <Res extends Definition, E>(
           ),
         ),
     };
-    // SAFETY: the store holds the values the resource decodes to (its
-    // `initial` values, and the ones built here from decoded payloads), and
-    // each operation reads its arguments through the resource's own shapes.
-    return service as Service<Res, E>;
+    // The store holds the values the resource decodes to (its `initial`
+    // values, and the ones built here from decoded payloads), and each
+    // operation reads its arguments through the resource's own shapes.
+    return forResource<Res, E>(service);
   });

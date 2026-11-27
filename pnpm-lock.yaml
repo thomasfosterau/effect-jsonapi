@@ -182,6 +182,9 @@ catalogs:
     '@effect/language-service':
       specifier: ^0.87.3
       version: 0.87.5
+    '@effect/sql-sqlite-node':
+      specifier: 4.1.5
+      version: 4.1.5
     '@effect/tsgo':
       specifier: 0.73.4
       version: 0.73.4
@@ -240,6 +243,9 @@ importers:
       '@effect/language-service':
         specifier: 'catalog:'
         version: 0.87.5
+      '@effect/sql-sqlite-node':
+        specifier: 'catalog:'
+        version: 4.1.5(effect@4.1.5)
       '@effect/tsgo':
         specifier: 'catalog:'
         version: 0.73.4
@@ -482,6 +488,11 @@ packages:
     peerDependencies:
       effect: 4.1.5
       redis: '>=5.1.0 <7.0.0'
+
+  '@effect/sql-sqlite-node@4.1.5':
+    resolution: {integrity: sha512-eo+1W3lX/2cT3ATzjqhya/WvnhEByjG7DWfmWSPcENG04jjywV5p0eZ+COr+4nsXTMSoA9H2TdaqYWTnXNM9Qw==}
+    peerDependencies:
+      effect: 4.1.5
 
   '@effect/tsgo-darwin-arm64@0.73.4':
     resolution: {integrity: sha512-ssm9LJHOn+m/Q74iCwBPOYEwRirZ+47+kEjdfOOLy8RIBt03zYBtHcrcDzQZMZSCehhmvIeHRrWCIUiMkjsCzw==}
@@ -2589,6 +2600,10 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+
+  '@effect/sql-sqlite-node@4.1.5(effect@4.1.5)':
+    dependencies:
+      effect: 4.1.5
 
   '@effect/tsgo-darwin-arm64@0.73.4':
     optional: true

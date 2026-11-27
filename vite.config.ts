@@ -156,6 +156,7 @@ export default defineConfig({
           "src/Endpoint.relationshipInclude.test.ts",
           "src/Endpoint.memberNames.test.ts",
           "src/ResourceService.test.ts",
+          "src/SqlService.test.ts",
           "examples/*/test/conformance.test.ts",
         ],
         rules: {

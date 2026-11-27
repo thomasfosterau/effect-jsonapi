@@ -149,6 +149,8 @@ Every module is a namespace export of the package root (`import { Resource } fro
 | `Handlers` | Server-side document builders (`Handlers.data`, `Handlers.collection`, …). |
 | `Assemble` | The server-side document assembler over `Handlers`, with capability hooks. |
 | `ResourceHandlers` | The server handler factory, counterpart of `Group.flat`. |
+| `ResourceService` | A per-resource service contract and `ResourceService.layer`, which serves a whole group over it. |
+| `SqlService` | A `ResourceService` over `effect/sql` (subpath only: `@thomasfosterau/effect-jsonapi/SqlService`). |
 | `ServerErrors` | The server's error seam: the domain error catalogue and `ServerErrors.respond`. |
 | `Registry` | The handler registry and router (`Registry.webHandler`). |
 | `Negotiation` | The representation verdict for a host serving JSON:API on its page URLs. |
