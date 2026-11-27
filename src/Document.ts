@@ -252,6 +252,34 @@ export const PaginatedRelationshipLinks = Schema.Struct({
 export type PaginatedRelationshipLinks = typeof PaginatedRelationshipLinks.Type;
 
 /**
+ * The `links` of a to-many relationship whose linkage is paged
+ * (`Relationship.toMany(..., { paginationLinks: true })`): `self` and
+ * `related`, plus the pagination members (each nullable, as at the top level),
+ * which page the relationship's `data`.
+ *
+ * @see {@link https://jsonapi.org/format/1.1/#document-resource-object-relationships}
+ *
+ * @since 0.23.0
+ * @category schemas
+ */
+export const RelationshipPaginationLinks = Schema.Struct({
+  self: Schema.optionalKey(Link),
+  related: Schema.optionalKey(Link),
+  first: Schema.optionalKey(Schema.NullOr(Link)),
+  last: Schema.optionalKey(Schema.NullOr(Link)),
+  prev: Schema.optionalKey(Schema.NullOr(Link)),
+  next: Schema.optionalKey(Schema.NullOr(Link)),
+});
+
+/**
+ * The decoded type of {@link RelationshipPaginationLinks}.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export type RelationshipPaginationLinks = typeof RelationshipPaginationLinks.Type;
+
+/**
  * Top-level `links`: `self`/`related`/`describedby` plus the pagination
  * members (each nullable, per the spec). Other members are stripped on
  * decode; {@link TopLevelLinksOpen} keeps them.

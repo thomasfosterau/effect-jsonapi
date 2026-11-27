@@ -192,7 +192,9 @@ describe("make", () => {
   });
 
   it("rejects a paginated relationship: it carries no inline linkage", () => {
-    expect(() => Include.make(Article, { revisions: Revision } as never)).toThrow(/is paginated/);
+    expect(() => Include.make(Article, { revisions: Revision } as never)).toThrow(
+      /is not includable/,
+    );
   });
 
   it("rejects a key declared against the wrong target", () => {

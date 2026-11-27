@@ -72,7 +72,7 @@ import {
   validateMaxUndeclaredMemberErrors,
 } from "./internal/schemaExt.js";
 import * as Relationship from "./Relationship.js";
-import type { Relationships, RelationshipSchemas } from "./Relationship.js";
+import type { RelationshipFields, Relationships, WriteSchemaFor } from "./Relationship.js";
 import * as Sort from "./Sort.js";
 import { render } from "./internal/json.js";
 import { declarationError } from "./internal/errors.js";
@@ -1082,7 +1082,7 @@ export type ResourceFields<
   readonly id: IdSchema;
   readonly attributes: WireStruct<Schema.Struct<ResourceAttributes<Attributes>>, Attributes>;
   readonly relationships: Schema.optionalKey<
-    WireStruct<Schema.Struct<RelationshipSchemas<Rels>>, Rels>
+    WireStruct<Schema.Struct<RelationshipFields<Rels>>, Rels>
   >;
   readonly links: Schema.optionalKey<typeof ResourceLinks>;
   readonly meta: Schema.optionalKey<Meta>;
@@ -1101,14 +1101,14 @@ export type RelationshipTargets<Rels extends Relationships> = {
 
 /**
  * The union of resource definitions that can appear in a compound document's
- * `included` member: the targets of every relationship *except* `paginated`
- * ones (whose data is never inlined).
+ * `included` member: the targets of every includable relationship (not
+ * `paginated` ones, whose data is never inlined, nor `includable: false`).
  *
  * @since 0.1.0
  * @category type-level
  */
 export type IncludableTargets<Rels extends Relationships> = {
-  [K in keyof Rels]: Rels[K] extends Relationship.Paginated<Any>
+  [K in keyof Rels]: Rels[K]["includable"] extends false
     ? never
     : Rels[K] extends { readonly ref: () => infer Res extends Any }
       ? Res
@@ -1133,7 +1133,11 @@ type AsRelationships<T> = T extends Relationships ? T : never;
  * @category type-level
  */
 export type HasRequiredRelationship<Rels extends Relationships> = {
-  [K in keyof Rels]: Rels[K] extends Relationship.One<Any> ? true : never;
+  [K in keyof Rels]: Rels[K] extends Relationship.One<Any>
+    ? Rels[K]["writable"] extends false
+      ? never
+      : true
+    : never;
 }[keyof Rels] extends never
   ? false
   : true;
@@ -1143,18 +1147,19 @@ export type HasRequiredRelationship<Rels extends Relationships> = {
  *
  *   - `one` relationships are **required** (the resource cannot exist without them)
  *   - `optional` / `many` relationships are optional
- *   - `paginated` relationships are excluded — unbounded collections are
- *     managed through relationship endpoints, not create payloads
+ *   - `paginated` relationships (and any declared `writable: false`) are
+ *     excluded — unbounded collections are managed through relationship
+ *     endpoints, not create payloads
  *
  * @since 0.1.0
  * @category type-level
  */
 export type CreateRelationshipFields<Rels extends Relationships> = {
   readonly [
-    K in keyof Rels as Rels[K] extends Relationship.Paginated<Any> ? never : K
+    K in keyof Rels as Rels[K]["writable"] extends false ? never : K
   ]: Rels[K] extends Relationship.One<Any>
-    ? RelationshipSchemas<Rels>[K]
-    : Schema.optionalKey<RelationshipSchemas<Rels>[K]>;
+    ? WriteSchemaFor<Rels[K]>
+    : Schema.optionalKey<WriteSchemaFor<Rels[K]>>;
 };
 
 /**
@@ -1170,16 +1175,17 @@ export type CreateRelationshipsMember<Rels extends Relationships> =
     : Schema.optionalKey<WireStruct<Schema.Struct<AsFields<CreateRelationshipFields<Rels>>>, Rels>>;
 
 /**
- * The relationship fields of an update payload: every non-`paginated`
- * relationship, each optional (PATCH semantics — omitted means unchanged).
+ * The relationship fields of an update payload: every writable relationship
+ * (not `paginated`, nor `writable: false`), each optional (PATCH semantics —
+ * omitted means unchanged).
  *
  * @since 0.1.0
  * @category type-level
  */
 export type UpdateRelationshipFields<Rels extends Relationships> = {
-  readonly [
-    K in keyof Rels as Rels[K] extends Relationship.Paginated<Any> ? never : K
-  ]: Schema.optionalKey<RelationshipSchemas<Rels>[K]>;
+  readonly [K in keyof Rels as Rels[K]["writable"] extends false ? never : K]: Schema.optionalKey<
+    WriteSchemaFor<Rels[K]>
+  >;
 };
 
 /**
@@ -1905,13 +1911,14 @@ export type TargetsOf<Res extends Any> = Res extends Any
 
 /**
  * The relationship keys of a resource that can appear in `?include=` paths —
- * every key except `paginated` relationships, whose data is never inlined.
+ * every includable key: not `paginated` relationships, whose data is never
+ * inlined, nor ones declared `includable: false`.
  *
  * @since 0.1.0
  * @category type-level
  */
 export type IncludableKeys<Res extends Any> = {
-  [K in keyof Res["relationships"]]: Res["relationships"][K] extends Relationship.Paginated<Any>
+  [K in keyof Res["relationships"]]: Res["relationships"][K]["includable"] extends false
     ? never
     : K;
 }[keyof Res["relationships"]] &
@@ -2240,7 +2247,7 @@ const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => Arr.dedupeWith
 export const directTargets = (resource: Any): ReadonlyArray<Any> =>
   dedupe(
     R.values(resource.relationships)
-      .filter(Relationship.isLinkable)
+      .filter(Relationship.isIncludable)
       .map((descriptor) => descriptor.ref()),
   );
 
@@ -2288,7 +2295,7 @@ export const includePaths = (resource: Any, maxDepth: number = 3): ReadonlyArray
   const visit = (current: Any, prefix: string, depth: number): void => {
     if (depth > maxDepth) return;
     Arr.forEach(R.toEntries(current.relationships), ([key, descriptor]) => {
-      if (descriptor.kind === "paginated") return;
+      if (!descriptor.includable) return;
       const path = prefix === "" ? key : `${prefix}.${key}`;
       paths.push(path);
       visit(descriptor.ref(), path, depth + 1);
@@ -3565,8 +3572,7 @@ const makeNamed = <
   const id = (options.id ?? Id(type)) as IdSchema;
   const identifier = Identifier(type, id);
   const localIdentifier = LocalIdentifier(type);
-  const relationshipSchemas = Relationship.makeRelationshipSchemas(relationships);
-  const schemaByKey = relationshipSchemas as Record<string, Schema.Top>;
+  const relationshipSchemas = Relationship.makeRelationshipFields(relationships);
   // The resource object carries the declared attributes minus the input-only
   // ones (`resource: false`); a descriptor that declares nothing anywhere, or
   // declares an input-only attribute filterable / sortable, is refused here.
@@ -3625,13 +3631,13 @@ const makeNamed = <
   const createRelationshipFields: Record<string, Schema.Top> = {};
   const relationshipEntries = R.toEntries(relationships);
   Arr.forEach(relationshipEntries, ([key, descriptor]) => {
-    if (descriptor.kind === "paginated") return;
-    createRelationshipFields[key] =
-      descriptor.kind === "one" ? schemaByKey[key] : Schema.optionalKey(schemaByKey[key]);
+    if (!descriptor.writable) return;
+    const schema = Relationship.writeSchemaFor(descriptor);
+    createRelationshipFields[key] = descriptor.kind === "one" ? schema : Schema.optionalKey(schema);
   });
   const hasRequiredRelationship = Arr.some(
     relationshipEntries,
-    ([, descriptor]) => descriptor.kind === "one",
+    ([, descriptor]) => descriptor.kind === "one" && descriptor.writable,
   );
   const createRelationshipsStruct = wireStruct(
     createRelationshipFields,
@@ -3658,8 +3664,8 @@ const makeNamed = <
   // Update payload relationships: every non-`paginated` relationship, optional.
   const updateRelationshipFields: Record<string, Schema.Top> = {};
   Arr.forEach(R.toEntries(relationships), ([key, descriptor]) => {
-    if (descriptor.kind === "paginated") return;
-    updateRelationshipFields[key] = Schema.optionalKey(schemaByKey[key]);
+    if (!descriptor.writable) return;
+    updateRelationshipFields[key] = Schema.optionalKey(Relationship.writeSchemaFor(descriptor));
   });
 
   // The update payload's attributes are the tri-state `Schema.optional`
@@ -3702,7 +3708,7 @@ const makeNamed = <
     Schema.Union(
       dedupe(
         R.values(relationships)
-          .filter(Relationship.isLinkable)
+          .filter(Relationship.isIncludable)
           .map((descriptor) => descriptor.ref()),
       ),
     ) as DefaultIncluded<Rels>;
@@ -4271,10 +4277,24 @@ type SharesRelationship<Rest extends ReadonlyArray<Any>, K, D> = Rest extends re
 
 // A to-one descriptor with its `filter` declaration dropped; any other as is.
 type Unfiltered<D> =
-  D extends Relationship.One<infer T>
-    ? Relationship.One<T, false>
-    : D extends Relationship.Optional<infer T>
-      ? Relationship.Optional<T, false>
+  D extends Relationship.One<
+    infer T,
+    Relationship.FilterDeclaration,
+    infer K,
+    infer M,
+    infer Tr,
+    infer P
+  >
+    ? Relationship.One<T, false, K, M, Tr, P>
+    : D extends Relationship.Optional<
+          infer T,
+          Relationship.FilterDeclaration,
+          infer K,
+          infer M,
+          infer Tr,
+          infer P
+        >
+      ? Relationship.Optional<T, false, K, M, Tr, P>
       : D;
 
 /**
