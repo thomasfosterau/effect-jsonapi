@@ -1219,6 +1219,39 @@ const withData = (
 
 describe("Conformance: detects a deliberately broken server", () => {
   broken(
+    "an `included` member the request did not ask for",
+    "spec/document/no-unrequested-included",
+    (canned, request) =>
+      request.path.includes("include=author") && (canned.status ?? 200) === 200
+        ? withData(canned, (body) => ({
+            ...body,
+            included: [
+              ...(Array.isArray(body["included"]) ? body["included"] : []),
+              { type: "people", id: "77", attributes: { firstName: "Un", lastName: "Asked" } },
+            ],
+          }))
+        : canned,
+  );
+
+  broken(
+    "pagination links beside a single resource",
+    "spec/pagination/links-placement",
+    (canned, request) =>
+      request.path.startsWith("/articles/1") && (canned.status ?? 200) === 200
+        ? withData(canned, (body) => ({ ...body, links: { next: "/articles?page[number]=2" } }))
+        : canned,
+  );
+
+  broken(
+    "a pagination link that is neither a link nor null",
+    "spec/pagination/links-placement",
+    (canned, request) =>
+      request.path.split("?")[0] === "/articles" && (canned.status ?? 200) === 200
+        ? withData(canned, (body) => ({ ...body, links: { next: 2 } }))
+        : canned,
+  );
+
+  broken(
     "a non-JSON:API response media type",
     "spec/content-negotiation/response-media-type",
     (canned) =>
@@ -4062,6 +4095,7 @@ describe("Conformance: the write fixture", () => {
     "spec/status/create-conflict-type",
     "spec/status/update-conflict-type",
     "spec/status/update-conflict-id",
+    "spec/document/at-members-ignored",
     "spec/status/create-read-back",
     "spec/status/update-read-back",
     "spec/atomic/response-ext-parameter",
@@ -5061,6 +5095,7 @@ describe("Conformance: the write fixture", () => {
         "cleaned-up",
         "cleaned-up",
         "cleaned-up",
+        "cleaned-up",
       ]);
       expect(MutableHashMap.size(store)).toBe(0);
     }),
@@ -6048,6 +6083,37 @@ describe("Conformance: the write fixture", () => {
   const creates = (request: CannedRequest, canned: Canned) =>
     request.method === "POST" && request.path === "/articles" && canned.status === 201;
 
+  it.effect("fails a create refused for its @-members", () =>
+    Effect.gen(function* () {
+      // The fixture server stores before the refusal replaces its answer, so
+      // the refusal takes the resource back out, as a server refusing it would
+      // never have made it.
+      let held: Store = MutableHashMap.empty();
+      const refuse = (canned: Canned, request: CannedRequest): Canned => {
+        if (
+          !creates(request, canned) ||
+          !P.isObject(request.body) ||
+          !P.isObject(request.body["data"]) ||
+          !("@conformance" in request.body["data"])
+        )
+          return canned;
+        const created = P.isObject(canned.body) ? canned.body["data"] : undefined;
+        if (P.isObject(created) && P.isString(created["id"]))
+          MutableHashMap.remove(held, created["id"]);
+        return { status: 400, body: { errors: [{ status: "400", title: "Bad Request" }] } };
+      };
+      const { report, store } = yield* run(refuse, (store) => {
+        held = store;
+        return {};
+      });
+      expect(failed(report)).toEqual(["spec/document/at-members-ignored"]);
+      const outcome = outcomeFor(report, "spec/document/at-members-ignored");
+      assert(P.isTagged(outcome, "Failed"));
+      expect(outcome.findings[0]?.detail).toContain('`"@conformance"`');
+      expect(MutableHashMap.size(store)).toBe(0);
+    }),
+  );
+
   brokenWrite(
     "a creation answered 200 instead of 201",
     "spec/status/create-response-document",
@@ -6055,14 +6121,14 @@ describe("Conformance: the write fixture", () => {
   );
 
   // A 201 that does not say what it created cannot be cleaned up after: each
-  // of the nine create-endpoint rules that the server lets create leaves its
+  // of the ten create-endpoint rules that the server lets create leaves its
   // resource behind, and the report says so rather than pretending otherwise.
   brokenWrite(
     "a 201 whose primary data is not the created resource",
     "spec/status/create-response-document",
     (canned, request) =>
       creates(request, canned) ? { ...canned, body: { meta: { ok: true } } } : canned,
-    9,
+    10,
   );
 
   brokenWrite("a 201 without a Location header", "spec/status/create-location", (canned, request) =>
@@ -12236,6 +12302,123 @@ describe("Conformance: client-generated ids through atomic operations", () => {
           expect.objectContaining({ _tag: "Skipped", reason: "no atomic operations endpoint" }),
         ),
       );
+    }),
+  );
+});
+
+describe("Conformance: relationship and related reads", () => {
+  const relatedApi = HttpApi.make("related").add(
+    Group.make(
+      Article,
+      Endpoint.get(Article),
+      Endpoint.list(Article),
+      Endpoint.related(Article, "author"),
+      Endpoint.getRelationship(Article, "author"),
+    ),
+  );
+
+  const RULES = [
+    "spec/status/relationship-not-found",
+    "spec/status/related-not-found",
+    "spec/status/related-to-one-null",
+    "spec/document/relationship-data-identifiers",
+  ];
+
+  const dan = { type: "people", id: "9", attributes: { firstName: "Dan", lastName: "G" } };
+
+  // Article 1 has no author; article 2's is Dan. Any other id is absent.
+  const articleOf = (id: string, authored: boolean) => ({
+    type: "articles",
+    id,
+    attributes: { title: "t", body: "b" },
+    relationships: { author: { data: authored ? { type: "people", id: "9" } : null } },
+  });
+
+  const notFound: Canned = { status: 404, body: { errors: [{ status: "404" }] } };
+
+  const relatedServe = (request: CannedRequest): Canned => {
+    const pathname = request.path.split("?")[0] ?? "";
+    if (pathname === "/articles")
+      return { body: { data: [articleOf("1", false), articleOf("2", true)] } };
+    const match = /^\/articles\/([^/]+)(\/.*)?$/.exec(pathname);
+    if (match === null) return notFound;
+    const [, id = "", rest = ""] = match;
+    if (id !== "1" && id !== "2") return notFound;
+    const authored = id === "2";
+    if (rest === "") return { body: { data: articleOf(id, authored) } };
+    if (rest === "/author") return { body: { data: authored ? dan : null } };
+    if (rest === "/relationships/author")
+      return { body: { data: authored ? { type: "people", id: "9" } : null } };
+    return notFound;
+  };
+
+  const runRelated = (serve: (request: CannedRequest) => Canned = relatedServe) =>
+    verifyOver(relatedApi)(serve, { only: RULES });
+
+  it.effect("passes a server that answers each as the spec says", () =>
+    Effect.gen(function* () {
+      const report = yield* runRelated();
+      expect(
+        R.fromEntries(report.outcomes.map((outcome) => [outcome.rule.id, outcome._tag])),
+      ).toEqual(R.fromEntries(RULES.map((id) => [id, "Passed"])));
+    }),
+  );
+
+  it.effect.each([
+    [
+      "a relationship URL under an absent resource",
+      "spec/status/relationship-not-found",
+      /^\/articles\/[^/]+\/relationships\/author$/,
+    ],
+    [
+      "a related URL under an absent resource",
+      "spec/status/related-not-found",
+      /^\/articles\/[^/]+\/author$/,
+    ],
+  ] as const)("fails %s answered 200", ([, id, under]) =>
+    Effect.gen(function* () {
+      const report = yield* runRelated((request) =>
+        under.test(request.path) && !/^\/articles\/[12]\//.test(request.path)
+          ? { body: { data: null } }
+          : relatedServe(request),
+      );
+      expect(failed(report)).toEqual([id]);
+    }),
+  );
+
+  it.effect("fails an empty to-one related URL answered 404", () =>
+    Effect.gen(function* () {
+      const report = yield* runRelated((request) =>
+        request.path === "/articles/1/author" ? notFound : relatedServe(request),
+      );
+      expect(failed(report)).toEqual(["spec/status/related-to-one-null"]);
+    }),
+  );
+
+  it.effect("skips the empty to-one rule when no resource shows one", () =>
+    Effect.gen(function* () {
+      const report = yield* runRelated((request) =>
+        request.path === "/articles"
+          ? { body: { data: [articleOf("2", true)] } }
+          : request.path === "/articles/1"
+            ? { body: { data: articleOf("1", true) } }
+            : relatedServe(request),
+      );
+      expect(outcomeFor(report, "spec/status/related-to-one-null")._tag).toBe("Skipped");
+    }),
+  );
+
+  it.effect("fails a relationship endpoint answering resource objects", () =>
+    Effect.gen(function* () {
+      const report = yield* runRelated((request) =>
+        request.path === "/articles/1/relationships/author"
+          ? { body: { data: dan } }
+          : relatedServe(request),
+      );
+      expect(failed(report)).toEqual(["spec/document/relationship-data-identifiers"]);
+      const outcome = outcomeFor(report, "spec/document/relationship-data-identifiers");
+      assert(P.isTagged(outcome, "Failed"));
+      expect(outcome.findings[0]?.observed).toBe("people:9 carrying attributes");
     }),
   );
 });

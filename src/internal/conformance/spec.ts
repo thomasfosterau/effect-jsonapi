@@ -39,6 +39,15 @@ import {
 } from "./links.js";
 import { linksEnumerateCollection } from "./pagination.js";
 import { atomicRules } from "./atomic.js";
+import {
+  atMembersIgnored,
+  noUnrequestedIncluded,
+  paginationLinks,
+  relatedNotFound,
+  relatedToOneNull,
+  relationshipDataIdentifiers,
+  relationshipNotFound,
+} from "./fetching.js";
 import { atomicClientIdRules, clientIdRules } from "./clientIds.js";
 import { relationshipRules } from "./relationships.js";
 import {
@@ -2908,6 +2917,8 @@ export const rules: ReadonlyArray<RuleImpl> = [
   fullLinkage,
   noDuplicateResources,
   includedOnInclude,
+  noUnrequestedIncluded,
+  relationshipDataIdentifiers,
   resourceIdentification,
   jsonApiObject,
   errorDocumentStructure,
@@ -2932,6 +2943,7 @@ export const rules: ReadonlyArray<RuleImpl> = [
   includeBracketed,
   sortBracketed,
   linksEnumerateCollection,
+  paginationLinks,
   resourceSelfDereferences,
   relatedDereferences,
   relatedMatchesLinkage,
@@ -2940,6 +2952,9 @@ export const rules: ReadonlyArray<RuleImpl> = [
   topLevelSelfDereferences,
   topLevelSelfMatchesDocument,
   resourceNotFound,
+  relationshipNotFound,
+  relatedNotFound,
+  relatedToOneNull,
   createResponseDocument,
   createLocation,
   createLocationMatchesSelf,
@@ -2948,6 +2963,7 @@ export const rules: ReadonlyArray<RuleImpl> = [
   createConflictType,
   updateConflictType,
   updateConflictId,
+  atMembersIgnored,
   createReadBack,
   updateReadBack,
   ...clientIdRules,
