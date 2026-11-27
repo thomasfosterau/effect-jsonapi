@@ -61,6 +61,10 @@
       "types": "./dist/Conformance.d.ts",
       "default": "./dist/Conformance.js"
     },
+    "./CursorPagination": {
+      "types": "./dist/CursorPagination.d.ts",
+      "default": "./dist/CursorPagination.js"
+    },
     "./Document": {
       "types": "./dist/Document.d.ts",
       "default": "./dist/Document.js"

@@ -2,7 +2,7 @@
  * This package's own profile rules — what a server must do *beyond* JSON:API
  * v1.1 to implement the conventions this library bakes in.
  *
- * Three groups:
+ * Four groups:
  *
  *   - **The filter grammar profile** (published at `Filter.PROFILE_URI`). Its §2 surface syntax, §3 canonical encoding, §4
  *     closed operator core, §5 advertisement and §7 error pointers are all
@@ -14,6 +14,10 @@
  *     the 2xx a create or update probe gets from the `writes` fixture; delete
  *     and atomic writes, and what a *retried* write does, are declared as a
  *     coverage gap.
+ *   - **The Cursor Pagination profile** (`CursorPagination.PROFILE_URI`):
+ *     required `prev` / `next`, the page size honoured, and the `page[size]`
+ *     errors, on every collection declaring the profile's parameters
+ *     (`./cursorPagination.ts`).
  *   - **Library conventions** that the spec leaves optional but this package
  *     takes a position on: advertising `jsonapi`, and accepting the
  *     repeated-key spelling of every comma-separated query family.
@@ -74,6 +78,7 @@ import {
   type WriteTarget,
 } from "./write.js";
 import { quote } from "./crawl.js";
+import { rules as cursorPaginationRules } from "./cursorPagination.js";
 import { evaluation } from "./evaluation.js";
 import { render } from "../json.js";
 
@@ -736,4 +741,5 @@ export const rules: ReadonlyArray<RuleImpl> = [
   advertisesIdempotencyProfile,
   jsonApiMember,
   repeatedKeySpelling,
+  ...cursorPaginationRules,
 ];
