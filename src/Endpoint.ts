@@ -184,6 +184,73 @@ const override = <Derived, S>(
     onSome: (value) => (!Schema.isSchema(value) && P.isFunction(value) ? value(derive()) : value),
   });
 
+/**
+ * A write endpoint's `success` option: one schema, served as
+ * `application/vnd.api+json` at the endpoint's `status`, or a list of
+ * responses served exactly as given, for an endpoint that answers with more
+ * than one status: a create's 201 or 204, an update's 200 or 204, a 202 for
+ * work accepted for later. Build each entry of a list with
+ * `MediaType.asJsonApi(schema, status)`, or use `HttpApiSchema.NoContent`
+ * for a 204. `HttpApi` encodes a handler's value with the first entry it
+ * matches, so the handler picks a response by its shape: `undefined` for the
+ * 204, a document for the 200.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export type Responses = Schema.Top | ReadonlyArray<Schema.Top>;
+
+const served = <S extends Responses>(
+  success: S,
+  profiles: ReadonlyArray<string>,
+  status?: number,
+  serve: (
+    schema: Schema.Top,
+    profiles: ReadonlyArray<string>,
+    status?: number,
+  ) => Schema.Top = asJsonApiProfiled,
+): S =>
+  // SAFETY: annotating a schema with its media type and status keeps its type.
+  (Arr.isArray(success) ? success : serve(success as Schema.Top, profiles, status)) as S;
+
+/**
+ * The response and request options of the relationship write endpoints
+ * ({@link updateRelationship}, {@link addRelationship},
+ * {@link removeRelationship}), as {@link create} and {@link update} take
+ * them. §Updating Relationships lets a server answer 200 with the updated
+ * linkage or with a top-level `meta` alone, 202, or 204.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export interface RelationshipWriteOptions<
+  Success extends Responses,
+  Idem extends Idempotency.Option,
+> {
+  /**
+   * Override the success response. Defaults to the linkage document (200)
+   * for `PATCH` and `POST`, and `HttpApiSchema.NoContent` (204) for
+   * `DELETE`. Pass `HttpApiSchema.NoContent` to answer 204, a meta-only
+   * document (`Document.MetaDocument`) to answer without the linkage — a
+   * large to-many relationship then never has to be read back — or a list
+   * of {@link Responses}.
+   */
+  readonly success?: Success;
+  /** The success status of a single `success` schema. */
+  readonly status?: number;
+  /**
+   * The media type the request payload is registered under. Defaults to
+   * `application/vnd.api+json`; see {@link create}'s.
+   */
+  readonly payloadMediaType?: string;
+  /**
+   * Declare the `Idempotency-Key` request header and honour it: `true` to
+   * accept a key, `"required"` to insist on one. Off by default; opting in
+   * needs an `Idempotency.layer(store)`.
+   */
+  readonly idempotency?: Idem;
+}
+
 const wires = <const Errors extends ReadonlyArray<ErrorClass>>(errors?: Errors): Wires<Errors> =>
   ((errors ?? []) as Errors).map((error) => error.wire) as Wires<Errors>;
 
@@ -1045,7 +1112,7 @@ export const create = <
   const Path extends `/${string}` = `/${Type}`,
   DocMeta extends Schema.Top = Meta,
   Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta, IdSchema>["createPayload"],
-  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
+  Success extends Responses = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
   const Idem extends Idempotency.Option = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
@@ -1076,7 +1143,10 @@ export const create = <
      * `document()` (which `meta` then tunes); pass a wire variant of the
      * resource, or any schema of your own — it is served as
      * `application/vnd.api+json`, at the same status as the default. A
-     * function of the derived document extends it instead (since 0.23.0).
+     * function of the derived document extends it instead (since 0.23.0). A
+     * list of {@link Responses} declares several, served as given: a 201
+     * document and `HttpApiSchema.NoContent` for a create that answers 204
+     * when it accepted a client-generated id unchanged (since 0.23.0).
      *
      * @since 0.10.0
      */
@@ -1118,7 +1188,7 @@ export const create = <
           ) as Payload,
           options?.payloadMediaType ?? MEDIA_TYPE,
         ),
-        success: asJsonApiProfiled(
+        success: served(
           override(Option.fromUndefinedOr(options?.success), () =>
             resource.document(
               (options?.meta !== undefined ? { meta: options.meta } : {}) as {
@@ -1220,7 +1290,7 @@ export const update = <
   const Path extends `/${string}` = `/${Type}/:id`,
   DocMeta extends Schema.Top = Meta,
   Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta, IdSchema>["updatePayload"],
-  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
+  Success extends Responses = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
   const Idem extends Idempotency.Option = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
@@ -1251,7 +1321,10 @@ export const update = <
      * `document()` (which `meta` then tunes); pass a wire variant of the
      * resource, or any schema of your own — it is served as
      * `application/vnd.api+json`. A function of the derived document extends
-     * it instead (since 0.23.0).
+     * it instead (since 0.23.0). A list of {@link Responses} declares several,
+     * served as given: a 200 document and `HttpApiSchema.NoContent` for an
+     * update that answers 204 when the server changed nothing else (since
+     * 0.23.0).
      *
      * @since 0.10.0
      */
@@ -1293,7 +1366,7 @@ export const update = <
           ) as Payload,
           options?.payloadMediaType ?? MEDIA_TYPE,
         ),
-        success: asJsonApiProfiled(
+        success: served(
           override(Option.fromUndefinedOr(options?.success), () =>
             resource.document(
               (options?.meta !== undefined ? { meta: options.meta } : {}) as {
@@ -1328,16 +1401,18 @@ export const update = <
 // spec's 204 no-content default; an override is served as a JSON:API body,
 // defaulting to 200 (the status HttpApi gives a success schema that carries
 // one).
-const deleteSuccess = (
-  success?: Schema.Top,
+const noContentSuccess = (
+  success: Option.Option<Responses>,
+  profiles: ReadonlyArray<string>,
   status?: number,
-  profiles?: ReadonlyArray<string>,
-): Schema.Top =>
-  success === undefined
-    ? status === undefined
-      ? HttpApiSchema.NoContent
-      : HttpApiSchema.NoContent.pipe(HttpApiSchema.status(status))
-    : asJsonApiProfiled(success, profiles, status);
+): Responses =>
+  Option.match(success, {
+    onNone: () =>
+      status === undefined
+        ? HttpApiSchema.NoContent
+        : HttpApiSchema.NoContent.pipe(HttpApiSchema.status(status)),
+    onSome: (responses) => served(responses, profiles, status),
+  });
 
 /**
  * `DELETE /<type>/:id` — delete a resource.
@@ -1395,7 +1470,7 @@ const deleteEndpoint = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "delete",
   const Path extends `/${string}` = `/${Type}/:id`,
-  Success extends Schema.Top = HttpApiSchema.NoContent,
+  Success extends Responses = HttpApiSchema.NoContent,
   const Idem extends Idempotency.Option = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
@@ -1433,7 +1508,11 @@ const deleteEndpoint = <
         headers: Option.getOrUndefined(
           Idempotency.headersFor(options?.idempotency),
         ) as Idempotency.HeadersFor<Idem>,
-        success: deleteSuccess(options?.success, options?.status, profilesOf(options)) as Success,
+        success: noContentSuccess(
+          Option.fromUndefinedOr(options?.success),
+          profilesOf(options),
+          options?.status,
+        ) as Success,
         // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
         error: wires(options?.errors),
       },
@@ -2886,7 +2965,9 @@ export const getRelationship = <
  *   - `optional` → `{ data: identifier | null }`
  *   - `many` / `paginated` → `{ data: identifier[] }` (full replacement)
  *
- * Success is a 200 linkage document with the updated linkage.
+ * Success is a 200 linkage document with the updated linkage, unless
+ * `success` declares another of the spec's answers (a 204, a 202, a
+ * meta-only 200; see {@link RelationshipWriteOptions}).
  *
  * @example
  * ```ts
@@ -2940,13 +3021,20 @@ export const updateRelationship = <
   const EndpointName extends string = `update${Capitalize<Name>}Relationship`,
   const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
   DocMeta extends Schema.Top = typeof AnyMeta,
+  Success extends Responses = RelationshipSuccess<
+    Resource<Type, Attributes, Rels, Meta, IdSchema>,
+    Name,
+    DocMeta
+  >,
+  const Idem extends Idempotency.Option = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
-  options?: CommonOptions<EndpointName, Path, Errors> & {
-    /** Override the linkage document's `meta` schema. */
-    readonly meta?: DocMeta;
-  },
+  options?: CommonOptions<EndpointName, Path, Errors> &
+    RelationshipWriteOptions<Success, Idem> & {
+      /** Override the linkage document's `meta` schema. */
+      readonly meta?: DocMeta;
+    },
 ) => {
   type Res = Resource<Type, Attributes, Rels, Meta, IdSchema>;
   const descriptor = descriptorFor(resource, name);
@@ -2958,19 +3046,31 @@ export const updateRelationship = <
     meta: (options?.meta ?? AnyMeta) as DocMeta,
   }) as RelationshipSuccess<Res, Name, DocMeta>;
 
-  return HttpApiEndpoint.patch(
-    (options?.name ?? `update${capitalize(name)}Relationship`) as EndpointName,
-    (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
-    {
-      params: Schema.Struct({ id: resource.Id }),
-      payload: asJsonApi(payload),
-      success: asJsonApiProfiled(success, profilesOf(options)),
-      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-      error: wires(options?.errors),
-    },
-  )
-    .middleware(ContentNegotiation)
-    .middleware(SchemaErrors);
+  return Idempotency.applied(
+    HttpApiEndpoint.patch(
+      (options?.name ?? `update${capitalize(name)}Relationship`) as EndpointName,
+      (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
+      {
+        params: Schema.Struct({ id: resource.Id }),
+        headers: Option.getOrUndefined(
+          Idempotency.headersFor(options?.idempotency),
+        ) as Idempotency.HeadersFor<Idem>,
+        payload: asMediaType(payload, options?.payloadMediaType ?? MEDIA_TYPE),
+        // SAFETY: `Success` is inferred from `options.success` when one is
+        // passed, and otherwise defaults to the linkage document built here.
+        success: served(
+          (options?.success ?? success) as Success,
+          profilesOf(options),
+          options?.status,
+        ),
+        // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+        error: wires(options?.errors),
+      },
+    )
+      .middleware(ContentNegotiation)
+      .middleware(SchemaErrors),
+    options?.idempotency,
+  );
 };
 
 // ---------------------------------------------------------------------------
@@ -2984,7 +3084,8 @@ export const updateRelationship = <
  * Only `many` / `paginated` relationships have this endpoint (the spec defines
  * POST only for to-many relationship URLs). The payload is the identifiers to
  * add; members already present are ignored. Success is a 200 linkage document
- * with the resulting linkage.
+ * with the resulting linkage, unless `success` declares another of the
+ * spec's answers ({@link RelationshipWriteOptions}).
  *
  * @example
  * ```ts
@@ -3038,13 +3139,20 @@ export const addRelationship = <
   const EndpointName extends string = `add${Capitalize<Name>}Relationship`,
   const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
   DocMeta extends Schema.Top = typeof AnyMeta,
+  Success extends Responses = RelationshipSuccess<
+    Resource<Type, Attributes, Rels, Meta, IdSchema>,
+    Name,
+    DocMeta
+  >,
+  const Idem extends Idempotency.Option = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
-  options?: CommonOptions<EndpointName, Path, Errors> & {
-    /** Override the linkage document's `meta` schema. */
-    readonly meta?: DocMeta;
-  },
+  options?: CommonOptions<EndpointName, Path, Errors> &
+    RelationshipWriteOptions<Success, Idem> & {
+      /** Override the linkage document's `meta` schema. */
+      readonly meta?: DocMeta;
+    },
 ) => {
   type Res = Resource<Type, Attributes, Rels, Meta, IdSchema>;
   const descriptor = descriptorFor(resource, name);
@@ -3056,19 +3164,30 @@ export const addRelationship = <
     meta: (options?.meta ?? AnyMeta) as DocMeta,
   }) as RelationshipSuccess<Res, Name, DocMeta>;
 
-  return HttpApiEndpoint.post(
-    (options?.name ?? `add${capitalize(name)}Relationship`) as EndpointName,
-    (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
-    {
-      params: Schema.Struct({ id: resource.Id }),
-      payload: asJsonApi(payload),
-      success: asJsonApiProfiled(success, profilesOf(options)),
-      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-      error: wires(options?.errors),
-    },
-  )
-    .middleware(ContentNegotiation)
-    .middleware(SchemaErrors);
+  return Idempotency.applied(
+    HttpApiEndpoint.post(
+      (options?.name ?? `add${capitalize(name)}Relationship`) as EndpointName,
+      (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
+      {
+        params: Schema.Struct({ id: resource.Id }),
+        headers: Option.getOrUndefined(
+          Idempotency.headersFor(options?.idempotency),
+        ) as Idempotency.HeadersFor<Idem>,
+        payload: asMediaType(payload, options?.payloadMediaType ?? MEDIA_TYPE),
+        // SAFETY: as in `updateRelationship`.
+        success: served(
+          (options?.success ?? success) as Success,
+          profilesOf(options),
+          options?.status,
+        ),
+        // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+        error: wires(options?.errors),
+      },
+    )
+      .middleware(ContentNegotiation)
+      .middleware(SchemaErrors),
+    options?.idempotency,
+  );
 };
 
 // ---------------------------------------------------------------------------
@@ -3081,7 +3200,8 @@ export const addRelationship = <
  *
  * Only `many` / `paginated` relationships have this endpoint. The payload is
  * the identifiers to remove; members not present are ignored. Success is a
- * 204 No Content response.
+ * 204 No Content response, unless `success` declares another of the spec's
+ * answers ({@link RelationshipWriteOptions}).
  *
  * @example
  * ```ts
@@ -3134,10 +3254,12 @@ export const removeRelationship = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `remove${Capitalize<Name>}Relationship`,
   const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
+  Success extends Responses = HttpApiSchema.NoContent,
+  const Idem extends Idempotency.Option = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
-  options?: CommonOptions<EndpointName, Path, Errors>,
+  options?: CommonOptions<EndpointName, Path, Errors> & RelationshipWriteOptions<Success, Idem>,
 ) => {
   type Res = Resource<Type, Attributes, Rels, Meta, IdSchema>;
   const descriptor = descriptorFor(resource, name);
@@ -3147,19 +3269,29 @@ export const removeRelationship = <
     data: Schema.Array(target.identifier),
   }) as LinkagePayload<Res, Name>;
 
-  return HttpApiEndpoint.delete(
-    (options?.name ?? `remove${capitalize(name)}Relationship`) as EndpointName,
-    (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
-    {
-      params: Schema.Struct({ id: resource.Id }),
-      payload: asJsonApi(payload),
-      success: HttpApiSchema.NoContent,
-      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-      error: wires(options?.errors),
-    },
-  )
-    .middleware(ContentNegotiation)
-    .middleware(SchemaErrors);
+  return Idempotency.applied(
+    HttpApiEndpoint.delete(
+      (options?.name ?? `remove${capitalize(name)}Relationship`) as EndpointName,
+      (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
+      {
+        params: Schema.Struct({ id: resource.Id }),
+        headers: Option.getOrUndefined(
+          Idempotency.headersFor(options?.idempotency),
+        ) as Idempotency.HeadersFor<Idem>,
+        payload: asMediaType(payload, options?.payloadMediaType ?? MEDIA_TYPE),
+        success: noContentSuccess(
+          Option.fromUndefinedOr(options?.success),
+          profilesOf(options),
+          options?.status,
+        ) as Success,
+        // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+        error: wires(options?.errors),
+      },
+    )
+      .middleware(ContentNegotiation)
+      .middleware(SchemaErrors),
+    options?.idempotency,
+  );
 };
 
 // ---------------------------------------------------------------------------
@@ -3176,7 +3308,8 @@ export const removeRelationship = <
  * The request payload is an `atomic:operations` document whose operation union
  * spans every operation legal for the given resources (including relationship
  * operations and lid-based refs); success is a 200 `atomic:results` document
- * whose entries correspond to the operations, in order.
+ * whose entries correspond to the operations, in order, or what `success`
+ * declares (a 204 when no operation returns data).
  *
  * Spec-compliant clients send the JSON:API media type with the
  * `ext="https://jsonapi.org/ext/atomic"` parameter — provide the
@@ -3246,6 +3379,7 @@ export const operations = <
   DocMeta extends Schema.Top = typeof AnyMeta,
   const Idem extends Idempotency.Option = false,
   Payload extends Schema.Top = Atomic.RequestDocument<Resources[number]>,
+  Success extends Responses = Atomic.ResultDocument<Resources[number], DocMeta>,
 >(
   resources: Resources,
   options?: CommonOptions<Name, Path, Errors> & {
@@ -3269,6 +3403,30 @@ export const operations = <
      * @since 0.15.0
      */
     readonly idempotency?: Idem;
+    /**
+     * Override the success response. Defaults to the `atomic:results`
+     * document (200). Pass `HttpApiSchema.NoContent` for an api whose
+     * operations never return data (the extension's 204), or a list of
+     * {@link Responses} — the results document and `HttpApiSchema.NoContent`
+     * — to answer 204 when no operation returned data. A single schema is
+     * served under the atomic media type.
+     *
+     * @since 0.23.0
+     */
+    readonly success?: Success;
+    /**
+     * The success status of a single `success` schema.
+     *
+     * @since 0.23.0
+     */
+    readonly status?: number;
+    /**
+     * The media type the request payload is registered under. Defaults to
+     * `application/vnd.api+json`; see {@link create}'s.
+     *
+     * @since 0.23.0
+     */
+    readonly payloadMediaType?: string;
   },
 ) =>
   Idempotency.applied(
@@ -3281,14 +3439,23 @@ export const operations = <
         ) as Idempotency.HeadersFor<Idem>,
         // SAFETY: `Payload` is inferred from `options.payload` when one is
         // passed, and otherwise defaults to the `Atomic.RequestDocument` built here.
-        payload: asJsonApi((options?.payload ?? Atomic.RequestDocument(resources)) as Payload),
-        success: asJsonApiAtomic(
-          Atomic.ResultDocument(
-            resources,
-            (options?.meta !== undefined ? { meta: options.meta } : {}) as {
-              readonly meta?: DocMeta;
-            },
-          ),
+        payload: asMediaType(
+          (options?.payload ?? Atomic.RequestDocument(resources)) as Payload,
+          options?.payloadMediaType ?? MEDIA_TYPE,
+        ),
+        // SAFETY: `Success` is inferred from `options.success` when one is
+        // passed, and otherwise defaults to the `Atomic.ResultDocument` built here.
+        success: served(
+          (options?.success ??
+            Atomic.ResultDocument(
+              resources,
+              (options?.meta !== undefined ? { meta: options.meta } : {}) as {
+                readonly meta?: DocMeta;
+              },
+            )) as Success,
+          [],
+          options?.status,
+          (schema, _profiles, status) => asJsonApiAtomic(schema, status),
         ),
         // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
         error: wires(options?.errors),
