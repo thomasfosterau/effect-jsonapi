@@ -98,6 +98,12 @@ import {
 } from "./internal/httpMedia.js";
 import { closedStruct, defaultMaxUndeclaredMemberErrors } from "./internal/schemaExt.js";
 import { MEDIA_TYPE } from "./internal/media.js";
+import {
+  LinkRoutes,
+  relationshipRelated,
+  relationshipSelf,
+  resourceSelf,
+} from "./internal/linkRoutes.js";
 import { PathIdentified, ServedTypes } from "./internal/servedTypes.js";
 import { ContentNegotiation, CreatedLocation, SchemaErrors } from "./Middleware.js";
 import * as Query from "./Query.js";
@@ -726,6 +732,7 @@ export const get = <
       error: wires(options?.errors),
     },
   )
+    .annotate(LinkRoutes, resourceSelf(resource.type))
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors);
 
@@ -2747,6 +2754,7 @@ export const related = <
       error: wires(options?.errors),
     },
   )
+    .annotate(LinkRoutes, relationshipRelated(resource.type, name))
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors);
 };
@@ -2998,6 +3006,7 @@ export const getRelationship = <
       error: wires(options?.errors),
     },
   )
+    .annotate(LinkRoutes, relationshipSelf(resource.type, name))
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors);
 };
