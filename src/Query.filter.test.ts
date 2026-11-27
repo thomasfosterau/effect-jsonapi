@@ -570,7 +570,7 @@ describe("Query.Filter: rejections name the offending key", () => {
       {
         key: "filter[title][like]",
         message:
-          'Unknown filter operator "like"; expected one of eq, ne, lt, lte, gt, gte, in, nin, isnull',
+          'Unknown filter operator "like"; expected one of eq, ne, lt, lte, gt, gte, in, nin, isnull, contains, startsWith, endsWith',
       },
     ]);
     expect(failures({ "filter[title][gt]": "x" })).toEqual([

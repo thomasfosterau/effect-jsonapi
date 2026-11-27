@@ -79,7 +79,7 @@ describe("Resource.filterable / Resource.sortable", () => {
 
   it("expands `filter: true` to the full operator core and keeps a subset in order", () => {
     const declared = filterable(Product);
-    expect(declared.priceCents.operators).toEqual(Filter.operators);
+    expect(declared.priceCents.operators).toEqual(Filter.coreOperators);
     expect(declared.stock.operators).toEqual(["gte", "eq", "lte"]);
   });
 
@@ -88,7 +88,9 @@ describe("Resource.filterable / Resource.sortable", () => {
       "priceCents" | "stock" | "supplier"
     >();
     expectTypeOf<SortableKeys<typeof Product>>().toEqualTypeOf<"priceCents" | "updatedAt">();
-    expectTypeOf<FilterOperators<typeof Product, "priceCents">>().toEqualTypeOf<Filter.Operator>();
+    expectTypeOf<
+      FilterOperators<typeof Product, "priceCents">
+    >().toEqualTypeOf<Filter.CoreOperator>();
     expectTypeOf<FilterOperators<typeof Product, "stock">>().toEqualTypeOf<"gte" | "eq" | "lte">();
     expectTypeOf<FilterOperators<typeof Product, "supplier">>().toEqualTypeOf<"eq" | "in">();
     const declared = filterable(Product);
@@ -991,7 +993,7 @@ describe("Resource.filterable / Resource.sortable", () => {
       expect(filterable(Spread).n.operators).toEqual(["eq"]);
       expect(sortable(Spread)).toEqual(["n"]);
       expectTypeOf<FilterableKeys<typeof Spread>>().toEqualTypeOf<"n" | "s">();
-      expectTypeOf<FilterOperators<typeof Spread, "s">>().toEqualTypeOf<Filter.Operator>();
+      expectTypeOf<FilterOperators<typeof Spread, "s">>().toEqualTypeOf<Filter.CoreOperator>();
       expectTypeOf<SortableKeys<typeof Spread>>().toEqualTypeOf<"n">();
       const Extended = extend(Base, "extendeds", {
         attributes: { t: Schema.String.pipe(Sort.able()) },

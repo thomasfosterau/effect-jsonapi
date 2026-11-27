@@ -289,8 +289,9 @@ export type AttributePresence = "required" | "optional" | false;
  * The `filter` option of {@link attribute} / {@link readOnlyAttribute} — sugar
  * for `Filter.able`:
  *
- *   - `true` — every operator in the core (`Filter.operators`);
- *   - an array of operator names — that subset, in the order given;
+ *   - `true` — every operator in the core (`Filter.coreOperators`);
+ *   - an array of operator names — that subset, in the order given (the only
+ *     way to declare the text operators, on a string attribute);
  *   - `false` (the default) — not filterable.
  *
  * @since 0.13.0
@@ -406,7 +407,7 @@ type ResolveClearable<S extends Schema.Top, Clearable extends boolean> = [Cleara
 // produce one type. `false` (the default) leaves the schema untouched.
 type WithFilter<S extends Schema.Top, D extends FilterDeclaration, Literal> = [D] extends [false]
   ? S
-  : Filter.Declared<S, DeclaredOperators<D, Filter.Operator>, Literal>;
+  : Filter.Declared<S, DeclaredOperators<D, Filter.CoreOperator, Filter.Operator>, Literal>;
 type WithSort<S extends Schema.Top, Sortable extends boolean> = [Sortable] extends [true]
   ? Sort.Declared<S>
   : S;
@@ -505,7 +506,7 @@ const declare = (
  * {@link filterable} and {@link sortable}. Three further options are sugar for
  * exactly those calls on the inner schema, and stamp nothing else:
  *
- *   - `filter` — `true` (every operator in `Filter.operators`), an array of
+ *   - `filter` — `true` (every operator in `Filter.coreOperators`), an array of
  *     operator names (that subset), or `false` (default); `Filter.able(filter)`.
  *   - `filterLiteral` — an explicit `Codec<Type, string>` for the wire literal,
  *     for the rare attribute whose encoded form is not a JSON scalar;
@@ -566,7 +567,11 @@ export const attribute = <
   schema: S & {
     readonly Type: Schema.NullOr<Schema.Schema<NoInfer<Literal>>>["Type"];
   } & NotAlready<S, Filter.MarkerKey, FilterDecl> &
-    NotAlready<S, Sort.MarkerKey, Sortable>,
+    NotAlready<S, Sort.MarkerKey, Sortable> &
+    Filter.TextOnString<
+      DeclaredOperators<FilterDecl, Filter.CoreOperator, Filter.Operator>,
+      NoInfer<Literal>
+    >,
   options?: {
     // A literal only: a non-literal `boolean` cannot decide, at the type level,
     // whether the attribute is on the resource object.
@@ -662,7 +667,11 @@ export const readOnlyAttribute = <
   schema: S & {
     readonly Type: Schema.NullOr<Schema.Schema<NoInfer<Literal>>>["Type"];
   } & NotAlready<S, Filter.MarkerKey, FilterDecl> &
-    NotAlready<S, Sort.MarkerKey, Sortable>,
+    NotAlready<S, Sort.MarkerKey, Sortable> &
+    Filter.TextOnString<
+      DeclaredOperators<FilterDecl, Filter.CoreOperator, Filter.Operator>,
+      NoInfer<Literal>
+    >,
   {
     filterLiteral,
     ...options
@@ -2221,8 +2230,8 @@ type FilterableIdKey<Res extends Any> = [FilterMarkerOf<Res["Id"]>] extends [nev
 
 // The operators a declaration admits: the whole set for `true`, the subset
 // otherwise.
-type DeclaredOperators<D, All extends string> = D extends true
-  ? All
+type DeclaredOperators<D, Whole extends All, All extends string = Whole> = D extends true
+  ? Whole
   : D extends ReadonlyArray<infer Op extends All>
     ? Op
     : never;
@@ -2597,6 +2606,9 @@ const sortableKeys = (type: string, fields: Schema.Struct.Fields): ReadonlyArray
 // declaration throws) and shared by the accessor; keyed like `filterableCache`.
 const sortableCache = new WeakMap<object, ReadonlyArray<string>>();
 
+const isTextOperator = (operator: Filter.Operator): boolean =>
+  (Filter.textOperators as ReadonlyArray<string>).includes(operator);
+
 // The runtime shape of one `filterable` entry.
 interface RuntimeFilterable {
   readonly operators: ReadonlyArray<Filter.Operator>;
@@ -2647,11 +2659,20 @@ const filterableFields = (
     const declared = filterDeclarationOf(type, `attribute "${key}"`, field as Schema.Top);
     if (Option.isNone(declared)) return;
     const declaration = declared.value;
+    const schema = attributeSchemaOf(field as Schema.Top);
+    const text = declaration.operators.filter(isTextOperator);
+    if (
+      Arr.isArrayNonEmpty(text) &&
+      !Option.contains(scalarKindOf(SchemaAST.toEncoded(nonNullableBase(schema).ast)), "string")
+    ) {
+      throw declarationError(
+        `Resource.make("${type}"): attribute "${key}" declares filter operator ${text.join(", ")}, ` +
+          "but its encoded form is not a string; the text operators apply to string attributes only",
+      );
+    }
     result[key] = {
       operators: declaration.operators,
-      literal:
-        declaration.literal ??
-        deriveFilterLiteral(type, key, attributeSchemaOf(field as Schema.Top)),
+      literal: declaration.literal ?? deriveFilterLiteral(type, key, schema),
     };
   });
   Arr.forEach(R.toEntries(relationships), ([key, descriptor]) => {

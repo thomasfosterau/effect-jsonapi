@@ -69,7 +69,7 @@ priceCents: Resource.attribute(Schema.Int, {
 // ≡ Resource.attribute(Schema.Int.pipe(Filter.able(["eq", "gt", "lt"]), Sort.able()), { create: "optional" })
 ```
 
-The operator vocabulary is a schema, `Filter.Operator` — a `Schema.Literals` over the closed core, from which `Filter.operators` and `Filter.isOperator` derive — and `Filter.Op` spells it as typed constants (`Filter.Op.gt` is the literal `"gt"`), so a typo is a compile error while plain strings stay accepted. Apply `Filter.able` / `Sort.able` as the last step of a pipe: the runtime declaration survives a later `.check(...)`, `.annotate(...)` or `Schema.brand`, but any rebuild drops the type-level marker (`Resource.FilterableKeys` / `SortableKeys` stop naming the attribute); wrapping the declared schema in `Schema.NullOr` or `Schema.optionalKey` afterwards keeps both.
+The operator vocabulary is a schema, `Filter.Operator` — a `Schema.Literals` over the closed vocabulary (the core plus the text operators), from which `Filter.operators` and `Filter.isOperator` derive — and `Filter.Op` spells it as typed constants (`Filter.Op.gt` is the literal `"gt"`), so a typo is a compile error while plain strings stay accepted. Apply `Filter.able` / `Sort.able` as the last step of a pipe: the runtime declaration survives a later `.check(...)`, `.annotate(...)` or `Schema.brand`, but any rebuild drops the type-level marker (`Resource.FilterableKeys` / `SortableKeys` stop naming the attribute); wrapping the declared schema in `Schema.NullOr` or `Schema.optionalKey` afterwards keeps both.
 
 `Resource.filterable(R)` is a read-only record keyed by the declared fields (undeclared ones are absent, so `Object.keys` is the filterable set); each entry carries the declared `operators` and a `literal` codec, `Schema.Codec<Type, string>`. For an attribute the codec is derived from the schema's encoded form — `string`, `number`, `boolean`, or `Schema.NullOr` of one. A wire string is parsed strictly as that scalar (`number` accepts only a finite decimal, `boolean` only `true` / `false`) and then decoded through the attribute schema itself, so refinements, brands, literal unions and `DateFromString` all apply: `filter[priceCents][gt]=abc` fails decoding rather than silently matching nothing. An attribute whose encoded form is not a scalar cannot be declared filterable (`Resource.make` throws, naming it) unless the declaration supplies an explicit codec: `Filter.able(["eq"], { literal: PointFromString })` (or the `filterLiteral` option).
 
@@ -111,6 +111,15 @@ Endpoint.list(Product, { filter: true, sort: Resource.sortable(Product), page: Q
 ```
 
 `filter[name]=x` (undeclared), `filter[priceCents][gte]=1` (undeclared operator) and `filter[priceCents][lt]=cheap` (bad literal) are each a 400 whose `source.parameter` names the key. `Query.Filter(resource)` is the codec on its own (`Schema.Codec<Filter.Ast, Record<string, string>>`); encoding always emits the canonical form (§3 of the grammar: sorted, deduplicated, ids reassigned), and `Filter.normalise` puts a hand-built tree in the same normal form. The per-key map (`filter: { q: Schema.String }`) remains the escape hatch for flags JSON:API has no family for; an endpoint uses one or the other.
+
+Text search stays inside the grammar. The text operators `contains`, `startsWith` and `endsWith` match a string attribute against one string fragment, and an attribute opts into them by name: `filter: true` (and `Filter.able()`) still declares only the core. Declaring one on an attribute whose encoded form is not a string is a compile error and a `Resource.make` error.
+
+```ts skip-type-checking
+title: attribute(Schema.String, { filter: ["eq", Filter.Op.contains, Filter.Op.startsWith] }),
+// ?filter[title][contains]=effect  →  Filter.contains("title", "effect")
+```
+
+A text condition decodes to a `Filter.Text` node (`{ _tag: "Text", op, field, value }`). Its `value` is the unescaped wire string, never decoded through the attribute's schema, since a fragment of a valid value need not be one (`startsWith=dra` on a `"draft" | "published"` attribute). The value is one scalar, so a comma is written `\,`. Matching is case-sensitive and by code point, with no Unicode normalisation or collation. The empty fragment matches every value, and a NULL value gives UNKNOWN, as every comparison does. `Query.FilterAst` includes `Text` only for the fields that declare a text operator (`Query.FilterTextFields`), so an exhaustive match over a resource with none needs no new case. The untyped `Filter.Node` includes it.
 
 The grammar is a JSON:API **profile**, `Filter.PROFILE_URI` (`https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1`). Advertise it on the media type of responses from endpoints that speak it — `Content-Type: application/vnd.api+json; profile="…"` — clients that do not name it are served the same way, since unknown profiles are ignored, never rejected.
 

@@ -3400,6 +3400,8 @@ describe("Conformance: the filter evaluation oracle", () => {
         In: ({ field, values }) => Option.map(valueIn(row, field), (v) => member(values, v)),
         NotIn: ({ field, values }) => Option.map(valueIn(row, field), (v) => !member(values, v)),
         IsNull: ({ field, negated }) => Option.some(Option.isNone(valueIn(row, field)) !== negated),
+        // No probe sends a text operator.
+        Text: () => Option.none(),
         Not: ({ member }) => Option.map(self(member, row), (inner) => !inner),
         And: ({ members }) =>
           kleene(
@@ -3433,6 +3435,7 @@ describe("Conformance: the filter evaluation oracle", () => {
         In: ({ field, values }) => Arr.some(values, (value) => is(field, value)),
         NotIn: ({ field, values }) => !Arr.some(values, (value) => is(field, value)),
         IsNull: ({ field, negated }) => Option.isNone(valueIn(row, field)) !== negated,
+        Text: () => false,
         Not: ({ member }) => !holds(member),
         And: ({ members }) => Arr.every(members, holds),
         Or: ({ members }) => Arr.some(members, holds),
