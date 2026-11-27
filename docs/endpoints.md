@@ -541,6 +541,31 @@ const articles = Group.resource(Article, {
 });
 ```
 
+## Custom actions
+
+An operation that isn't CRUD, such as publishing an article or importing a batch, is `Endpoint.action` for one resource and `Endpoint.collectionAction` for the collection. Both carry the same conventions as the other constructors: the JSON:API media type on both sides, content negotiation and the schema-error middleware, `errors` as error documents, `idempotency` and `profiles`.
+
+```ts
+Group.make(
+  Article,
+  // POST /articles/:id/publish → 200 with the article's document; params.id is an Article.Id
+  Endpoint.action(Article, "publish", { errors: [AlreadyPublished] }),
+  // PUT /articles/:id/title with a payload of your own
+  Endpoint.action(Article, "rename", {
+    method: "PUT",
+    path: "/articles/:id/title",
+    payload: Schema.Struct({ title: Schema.String }),
+  }),
+  // POST /articles/import → 204
+  Endpoint.collectionAction(Article, "import", {
+    payload: ImportPayload,
+    success: HttpApiSchema.NoContent,
+  }),
+);
+```
+
+`method` defaults to `POST`. `success` defaults to the resource's `document()` and takes any schema or list of `Responses`, as a write does. `query` declares query parameters.
+
 ## Heterogeneous endpoints (search, feeds)
 
 `Endpoint.collection` builds collection endpoints whose `data` mixes several resource types, discriminated by their `type` tags — the natural fit for search results, feeds and timelines. A polymorphic collection has no single owning resource, so `name` and `path` are required:

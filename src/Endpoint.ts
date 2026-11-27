@@ -82,6 +82,7 @@ import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Types from "effect/Types";
+import type { HttpMethod } from "effect/http";
 import { HttpApiEndpoint, HttpApiSchema } from "effect/http-api";
 import * as Atomic from "./Atomic.js";
 import { AnyMeta, CollectionDocument, DataDocument, LinkageDocument, wire } from "./Document.js";
@@ -3343,6 +3344,272 @@ export const removeRelationship = <
     options?.idempotency,
   );
 };
+
+// ---------------------------------------------------------------------------
+// action / collectionAction — custom operations beside CRUD
+// ---------------------------------------------------------------------------
+
+/**
+ * The HTTP methods a custom action can be served under.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export type ActionMethod = "POST" | "PUT" | "PATCH" | "DELETE";
+
+/**
+ * Options of {@link action} and {@link collectionAction}.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface ActionOptions<
+  Method extends ActionMethod,
+  Path extends `/${string}`,
+  Errors,
+  Payload extends Schema.Top,
+  Success extends Responses,
+  QuerySchema extends Schema.Top,
+  Idem extends Idempotency.Option,
+> extends CommonOptions<never, Path, Errors> {
+  /** The HTTP method. Defaults to `"POST"`. */
+  readonly method?: Method;
+  /**
+   * The request body, served under `payloadMediaType`. Defaults to none: a
+   * bodyless action such as `POST /articles/1/publish`.
+   */
+  readonly payload?: Payload;
+  /**
+   * The media type the payload is registered under. Defaults to
+   * `application/vnd.api+json`.
+   */
+  readonly payloadMediaType?: string;
+  /**
+   * The success response. Defaults to the resource's `document()` (200).
+   * Pass `HttpApiSchema.NoContent` for a 204, any schema (served as
+   * `application/vnd.api+json`), or a list of {@link Responses}.
+   */
+  readonly success?: Success;
+  /** The success status of a single `success` schema. */
+  readonly status?: number;
+  /** The query parameters, as a schema. Defaults to none. */
+  readonly query?: QuerySchema;
+  /**
+   * Declare the `Idempotency-Key` request header and honour it, as
+   * {@link create} does. Off by default.
+   */
+  readonly idempotency?: Idem;
+}
+
+// The endpoint `E` served under `Method` instead of the method it was built with.
+type WithMethod<E, Method extends ActionMethod> =
+  E extends HttpApiEndpoint.HttpApiEndpoint<
+    infer Name,
+    HttpMethod.HttpMethod,
+    infer Path,
+    infer Params,
+    infer Query,
+    infer Payload,
+    infer Headers,
+    infer Success,
+    infer Error,
+    infer Middleware,
+    infer MiddlewareServices
+  >
+    ? HttpApiEndpoint.HttpApiEndpoint<
+        Name,
+        Method,
+        Path,
+        Params,
+        Query,
+        Payload,
+        Headers,
+        Success,
+        Error,
+        Middleware,
+        MiddlewareServices
+      >
+    : never;
+
+const withMethod =
+  <Method extends ActionMethod>() =>
+  <E>(endpoint: E): WithMethod<E, Method> =>
+    endpoint as WithMethod<E, Method>;
+
+// The request body of an action: none, or `payload` under its media type.
+const actionPayload = <Payload extends Schema.Top>(options?: {
+  readonly payload?: Payload;
+  readonly payloadMediaType?: string;
+}): Payload =>
+  // SAFETY: an absent payload stays absent, which `HttpApiEndpoint` reads as
+  // no body; `asMediaType` keeps the schema's type.
+  Option.getOrUndefined(
+    Option.map(Option.fromUndefinedOr(options?.payload), (payload) =>
+      asMediaType(payload, options?.payloadMediaType ?? MEDIA_TYPE),
+    ),
+  ) as Payload;
+
+/**
+ * A custom operation on one resource, beside the CRUD endpoints:
+ * `POST /<type>/:id/<name>` by default (`POST /articles/1/publish`), with
+ * `params.id` decoded by the resource's `Id`.
+ *
+ * It carries the conventions the other constructors do: JSON:API media type
+ * on the payload and the response, content negotiation and the schema-error
+ * middleware, `errors` declared as error documents, `idempotency` and
+ * `profiles`. The response defaults to the resource's document; pass
+ * `success: HttpApiSchema.NoContent` for a 204. {@link collectionAction} is
+ * the same for the collection (`POST /<type>/<name>`).
+ *
+ * @example
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { HttpApi, HttpApiBuilder } from "effect/http-api"
+ * import { Endpoint, Group, Handlers, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.String, published: Schema.Boolean }
+ * })
+ *
+ * const Api = HttpApi.make("blog").add(
+ *   Group.make(
+ *     Article,
+ *     Endpoint.get(Article),
+ *     // POST /articles/:id/publish → 200 with the published article
+ *     Endpoint.action(Article, "publish")
+ *   )
+ * )
+ *
+ * const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
+ *   handlers
+ *     .handle("get", ({ params }) =>
+ *       Effect.succeed(
+ *         Handlers.data(Article.make({ id: params.id, attributes: { title: "Hi", published: false } }))
+ *       )
+ *     )
+ *     .handle("publish", ({ params }) =>
+ *       Effect.succeed(
+ *         Handlers.data(Article.make({ id: params.id, attributes: { title: "Hi", published: true } }))
+ *       )
+ *     )
+ * )
+ *
+ * console.log(typeof ArticlesLive) // object
+ * ```
+ *
+ * @since 0.24.0
+ * @category constructors
+ */
+export const action = <
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
+  const Name extends string = string,
+  const Method extends ActionMethod = "POST",
+  const Path extends `/${string}` = `/${Type}/:id/${Name}`,
+  const Errors extends ReadonlyArray<ErrorClass> = readonly [],
+  Payload extends Schema.Top = never,
+  Success extends Responses = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, Meta>,
+  QuerySchema extends Schema.Top = never,
+  const Idem extends Idempotency.Option = false,
+>(
+  resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
+  name: Name,
+  options?: ActionOptions<Method, Path, Errors, Payload, Success, QuerySchema, Idem>,
+) =>
+  Idempotency.applied(
+    // SAFETY: every `ActionMethod` takes a body, so the endpoint built as a
+    // `POST` has the types the one built under `Method` has; `withMethod`
+    // names the method back.
+    withMethod<Method>()(
+      HttpApiEndpoint.make((options?.method ?? "POST") as "POST")(
+        name,
+        (options?.path ?? `/${resource.type}/:id/${name}`) as Path,
+        {
+          params: Schema.Struct({ id: resource.Id }),
+          // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
+          query: options?.query as QuerySchema,
+          headers: Option.getOrUndefined(
+            Idempotency.headersFor(options?.idempotency),
+          ) as Idempotency.HeadersFor<Idem>,
+          payload: actionPayload<Payload>(options),
+          // SAFETY: `Success` is inferred from `options.success` when one is
+          // passed, and otherwise defaults to the resource's document.
+          success: served(
+            (options?.success ?? resource.document()) as Success,
+            profilesOf(options),
+            options?.status,
+          ),
+          // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+          error: wires(options?.errors),
+        },
+      )
+        .middleware(ContentNegotiation)
+        .middleware(SchemaErrors),
+    ),
+    options?.idempotency,
+  );
+
+/**
+ * A custom operation on a resource's collection, beside the CRUD endpoints:
+ * `POST /<type>/<name>` by default (`POST /articles/import`). Everything else
+ * is as {@link action}.
+ *
+ * @since 0.24.0
+ * @category constructors
+ */
+export const collectionAction = <
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
+  const Name extends string = string,
+  const Method extends ActionMethod = "POST",
+  const Path extends `/${string}` = `/${Type}/${Name}`,
+  const Errors extends ReadonlyArray<ErrorClass> = readonly [],
+  Payload extends Schema.Top = never,
+  Success extends Responses = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, Meta>,
+  QuerySchema extends Schema.Top = never,
+  const Idem extends Idempotency.Option = false,
+>(
+  resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
+  name: Name,
+  options?: ActionOptions<Method, Path, Errors, Payload, Success, QuerySchema, Idem>,
+) =>
+  Idempotency.applied(
+    // SAFETY: every `ActionMethod` takes a body, so the endpoint built as a
+    // `POST` has the types the one built under `Method` has; `withMethod`
+    // names the method back.
+    withMethod<Method>()(
+      HttpApiEndpoint.make((options?.method ?? "POST") as "POST")(
+        name,
+        (options?.path ?? `/${resource.type}/${name}`) as Path,
+        {
+          // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
+          query: options?.query as QuerySchema,
+          headers: Option.getOrUndefined(
+            Idempotency.headersFor(options?.idempotency),
+          ) as Idempotency.HeadersFor<Idem>,
+          payload: actionPayload<Payload>(options),
+          // SAFETY: `Success` is inferred from `options.success` when one is
+          // passed, and otherwise defaults to the resource's document.
+          success: served(
+            (options?.success ?? resource.document()) as Success,
+            profilesOf(options),
+            options?.status,
+          ),
+          // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+          error: wires(options?.errors),
+        },
+      )
+        .middleware(ContentNegotiation)
+        .middleware(SchemaErrors),
+    ),
+    options?.idempotency,
+  );
 
 // ---------------------------------------------------------------------------
 // operations — POST /operations, atomic operations extension
