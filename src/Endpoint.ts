@@ -1706,7 +1706,13 @@ const polymorphicDocument = (
  * shared id, and `?include=` / `?fields[TYPE]=` span all members' graphs.
  *
  * For the collection case (`GET /nodes`) use {@link collection} with
- * `family.members`.
+ * `family.members`, and for creation through the family {@link polymorphicCreate}.
+ *
+ * Each instance keeps one canonical URL, the one its `type` names. A handler
+ * whose instance is of another member answers with `Handlers.redirect` (a
+ * 308 to the member's address) rather than the document; a client derived by
+ * `Client.make` follows it and decodes the member's document as this
+ * endpoint's.
  *
  * @example
  * ```ts
@@ -1795,6 +1801,110 @@ export const polymorphic = <
   )
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors);
+
+// ---------------------------------------------------------------------------
+// polymorphicCreate — POST /<family> (create any family member)
+// ---------------------------------------------------------------------------
+
+/**
+ * A family member that can be created: one {@link Resource.make} or
+ * `Resource.extend` built, carrying its `createPayload`.
+ *
+ * @since 0.23.0
+ * @category type-level
+ */
+export type CreatableMember = Any & { readonly createPayload: Schema.Top };
+
+/**
+ * The request body {@link polymorphicCreate} accepts: any member's
+ * `createPayload`, discriminated by `data.type`.
+ *
+ * @since 0.23.0
+ * @category type-level
+ */
+export type MemberCreatePayload<Members extends ReadonlyArray<CreatableMember>> = Schema.Union<{
+  readonly [K in keyof Members]: Members[K]["createPayload"];
+}>;
+
+/**
+ * `POST /<family>` — create a resource of any member of a
+ * {@link Resource.family} through the family's address (`POST /nodes` with
+ * `"type": "people"` creates a person).
+ *
+ * The request payload is any member's `createPayload`, chosen by `data.type`;
+ * a `type` outside the family is answered with 409 Conflict naming
+ * `/data/type`, as on {@link create}. Success is a 201 single-resource
+ * document whose primary `data` is the member union, and its `Location`
+ * header is the created resource's `links.self`, which names the member's own
+ * address, not the family's (`Middleware.CreatedLocation`).
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Node = Resource.make("nodes", { attributes: { name: Schema.NonEmptyString } })
+ * const Person = Resource.extend(Node, "people", { inheritId: true })
+ * const Organisation = Resource.extend(Node, "organisations", { inheritId: true })
+ * const AnyNode = Resource.family(Node, [Person, Organisation])
+ *
+ * const nodes = Group.make(
+ *   AnyNode,
+ *   Endpoint.polymorphic(AnyNode), // GET /nodes/:id
+ *   Endpoint.polymorphicCreate(AnyNode) // POST /nodes → 201 person | organisation
+ * )
+ * ```
+ *
+ * @since 0.23.0
+ * @category constructors
+ */
+export const polymorphicCreate = <
+  FamilyName extends string,
+  Members extends ReadonlyArray<CreatableMember>,
+  Base extends Any = never,
+  const Errors extends ReadonlyArray<ErrorClass> = readonly [],
+  const Name extends string = "create",
+  const Path extends `/${string}` = `/${FamilyName}`,
+  DocMeta extends Schema.Top = typeof AnyMeta,
+>(
+  family: Family<FamilyName, Members, Base>,
+  options?: CommonOptions<Name, Path, Errors> & {
+    /** Override the success document's `meta` schema. */
+    readonly meta?: DocMeta;
+    /** The success status. Defaults to 201, as on {@link create}. */
+    readonly status?: number;
+  },
+) =>
+  HttpApiEndpoint.post(
+    (options?.name ?? "create") as Name,
+    (options?.path ?? `/${family.type}`) as Path,
+    {
+      payload: asMediaType(
+        // SAFETY: `Array.map` over the member tuple keeps its order, so the
+        // union's members are the tuple's `createPayload`s, element for element.
+        Schema.Union(
+          family.members.map((member) => member.createPayload),
+        ) as MemberCreatePayload<Members>,
+        MEDIA_TYPE,
+      ),
+      success: asJsonApi(
+        family.document<FamilyDefaultIncluded<Members>, DocMeta>(
+          definedMember("meta", options?.meta) as { readonly meta?: DocMeta },
+        ),
+        options?.status ?? 201,
+      ),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+      error: wires(options?.errors),
+    },
+  )
+    .middleware(ContentNegotiation)
+    .middleware(SchemaErrors)
+    .middleware(CreatedLocation)
+    // `SchemaErrors` answers a `data.type` outside the family with 409.
+    .annotate(
+      ServedTypes,
+      family.members.map((member) => member.type),
+    );
 
 // ---------------------------------------------------------------------------
 // Relationship endpoints — shared type machinery

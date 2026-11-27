@@ -51,6 +51,7 @@ import * as MutableHashSet from "effect/MutableHashSet";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as HashMap from "effect/HashMap";
 import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
@@ -1808,6 +1809,47 @@ export const collection = <
  */
 export const relationshipLink = (type: string, id: string, name: string): string =>
   `/${type}/${id}/relationships/${name}`;
+
+/**
+ * A `308 Permanent Redirect` to `location`, with no body: what a handler
+ * returns, in place of a document, to send a client from a supertype's address
+ * to the instance's own.
+ *
+ * Under a `Resource.family`, an instance keeps one canonical URL, the
+ * one its resource object's `type` names, while a family's address still
+ * resolves: `GET /nodes/1` answers with a redirect to `/people/1` when node 1
+ * is a person. 308 keeps the method and body, and a client derived by
+ * `Client.make` follows it, decoding the member's document against the
+ * family endpoint's own. `location` is sent as given, so pass the member's
+ * `links.self` when it carries one.
+ *
+ * @example
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { Handlers, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Node = Resource.make("nodes", { attributes: { name: Schema.NonEmptyString } })
+ * const Person = Resource.extend(Node, "people", { inheritId: true })
+ * const AnyNode = Resource.family(Node, [Node, Person])
+ *
+ * // The handler of `Endpoint.polymorphic(AnyNode)`: a node is served here, any
+ * // other member is sent to its own address.
+ * const getNode = (id: string, instanceType: string) =>
+ *   Effect.succeed(
+ *     instanceType === AnyNode.type
+ *       ? Handlers.data(Node.make({ id: Node.Id.make(id), attributes: { name: "n" } }))
+ *       : Handlers.redirect(`/${instanceType}/${id}`)
+ *   )
+ *
+ * const response = Effect.runSync(getNode("1", Person.type))
+ * console.log("status" in response && response.status) // 308
+ * ```
+ *
+ * @since 0.23.0
+ * @category constructors
+ */
+export const redirect = (location: string): HttpServerResponse.HttpServerResponse =>
+  HttpServerResponse.empty({ status: 308, headers: { location } });
 
 /**
  * The canonical related-resource URL: `/<type>/<id>/<name>`.
