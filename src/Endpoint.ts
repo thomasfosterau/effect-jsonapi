@@ -121,6 +121,8 @@ import { fieldsetTypes, sparseMember, sparseResource, sparseUnion } from "./inte
 import type {
   Any,
   AttributeKeys,
+  ClientIdPayload,
+  ClientIdPresence,
   DefaultIncluded,
   Family,
   FamilyDefaultIncluded,
@@ -134,7 +136,7 @@ import type {
   Target,
   ToManyName,
 } from "./Resource.js";
-import { directTargets } from "./Resource.js";
+import { clientIdPayload, directTargets } from "./Resource.js";
 import { definedMember, someMember } from "./internal/members.js";
 import { declarationError } from "./internal/errors.js";
 
@@ -991,6 +993,34 @@ export const list = <
 // create — POST /<type>
 // ---------------------------------------------------------------------------
 
+// A create's default payload: the resource's `createPayload`, or the one that
+// accepts a client-generated id when `clientId` opts in.
+// A create's default request payload: the resource's `createPayload`, or the
+// `clientId` option's variant of it.
+type DefaultCreatePayload<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<unknown, string>,
+  ClientId extends false | ClientIdPresence,
+> = [ClientId] extends [ClientIdPresence]
+  ? ClientIdPayload<
+      Resource<Type, Attributes, Rels, Meta, IdSchema>["createPayload"]["fields"]["data"]["fields"],
+      ClientId,
+      IdSchema
+    >
+  : Resource<Type, Attributes, Rels, Meta, IdSchema>["createPayload"];
+
+const defaultCreatePayload = (
+  resource: {
+    readonly Id: Schema.Top;
+    readonly createPayload: Schema.Struct<{ readonly data: Schema.Struct<Schema.Struct.Fields> }>;
+  },
+  clientId: false | ClientIdPresence = false,
+): Schema.Top =>
+  clientId === false ? resource.createPayload : clientIdPayload(resource, { presence: clientId });
+
 /**
  * `POST /<type>` — create a resource.
  *
@@ -1041,11 +1071,11 @@ export const list = <
  *
  * The default payload does not support client-generated ids: a `data.id` is
  * answered with 403 Forbidden, `source.pointer` `/data/id`, and the handler
- * never runs (§Client-Generated IDs). To support them, pass a `payload` whose
- * resource object declares an `id` — `createPayload`'s own fields plus one,
- * `Schema.Struct({ data: Schema.Struct({ ...Article.createPayload.fields.data.fields,
- * id: Schema.optionalKey(Schema.String) }) })` — and the handler receives it;
- * answering a duplicate with 409 is then the handler's to do.
+ * never runs (§Client-Generated IDs). To support them, pass `clientId:
+ * "optional"` (or `"required"`): `data.id` is decoded with the resource's `Id`
+ * schema and reaches the handler, which answers a taken id with
+ * `ApiError.DuplicateId` (409). `Resource.clientIdPayload` builds the same
+ * payload with a narrower id schema.
  *
  * @example
  * ```ts
@@ -1111,7 +1141,15 @@ export const create = <
   const Name extends string = "create",
   const Path extends `/${string}` = `/${Type}`,
   DocMeta extends Schema.Top = Meta,
-  Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta, IdSchema>["createPayload"],
+  const ClientId extends false | ClientIdPresence = false,
+  Payload extends Schema.Top = DefaultCreatePayload<
+    Type,
+    Attributes,
+    Rels,
+    Meta,
+    IdSchema,
+    ClientId
+  >,
   Success extends Responses = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
   const Idem extends Idempotency.Option = false,
 >(
@@ -1126,7 +1164,7 @@ export const create = <
      * the derived payload extends it instead (since 0.23.0).
      */
     readonly payload?: Override<
-      Resource<Type, Attributes, Rels, Meta, IdSchema>["createPayload"],
+      DefaultCreatePayload<Type, Attributes, Rels, Meta, IdSchema, ClientId>,
       Payload
     >;
     /**
@@ -1138,6 +1176,16 @@ export const create = <
      * @since 0.11.0
      */
     readonly payloadMediaType?: string;
+    /**
+     * Accept a client-generated `data.id` (JSON:API 1.1 §Client-Generated
+     * IDs): `"optional"` or `"required"`, decoded with the resource's `Id`
+     * schema (`Resource.clientIdPayload`). Defaults to `false`, which
+     * answers a `data.id` with 403. Ignored when `payload` is given. Answer
+     * a taken id with `ApiError.DuplicateId` (409).
+     *
+     * @since 0.23.0
+     */
+    readonly clientId?: ClientId;
     /**
      * Override the success document schema. Defaults to the resource's
      * `document()` (which `meta` then tunes); pass a wire variant of the
@@ -1184,7 +1232,9 @@ export const create = <
         payload: asMediaType(
           override(
             Option.fromUndefinedOr(options?.payload),
-            () => resource.createPayload,
+            () =>
+              // SAFETY: `defaultCreatePayload` builds the schema `DefaultCreatePayload` names.
+              defaultCreatePayload(resource, options?.clientId) as never,
           ) as Payload,
           options?.payloadMediaType ?? MEDIA_TYPE,
         ),
@@ -4003,6 +4053,7 @@ type GeneratedCreate<
             ? FieldOr<C, "path", `/${Type}`>
             : `/${Type}`,
           EffMeta<C, GMeta, Meta>,
+          false,
           EffPayload<C, Resource<Type, Attributes, Rels, Meta, IdSchema>["createPayload"]>,
           EffSuccess<
             C,

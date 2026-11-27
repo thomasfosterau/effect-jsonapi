@@ -56,6 +56,7 @@ import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
+import type * as Types from "effect/Types";
 import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as SchemaTransformation from "effect/SchemaTransformation";
@@ -4172,3 +4173,114 @@ export function family(nameOrBase: string | Any, members: ReadonlyArray<Any>): A
 
   return fam;
 }
+
+// ---------------------------------------------------------------------------
+// Client-generated ids
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a create payload that accepts a client-generated id makes it
+ * optional (the server assigns one when it is absent) or required.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export type ClientIdPresence = "optional" | "required";
+
+/**
+ * Options for {@link clientIdPayload}.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export interface ClientIdOptions<P extends ClientIdPresence, IdSchema extends Schema.Top> {
+  /** `"optional"` (the default) or `"required"`. */
+  readonly presence?: P;
+  /**
+   * The schema `data.id` decodes with. Defaults to the resource's own `Id`;
+   * pass a narrower one, such as `Schema.UUID` piped into the resource's
+   * brand, to hold clients to the specification's "universally unique
+   * identifier".
+   */
+  readonly id?: IdSchema;
+}
+
+// The fields of a create payload's `data`, with an `id` member added.
+type ClientIdDataFields<
+  Data extends Schema.Struct.Fields,
+  P extends ClientIdPresence,
+  IdSchema extends Schema.Top,
+> =
+  Types.Simplify<
+    Data & { readonly id: P extends "required" ? IdSchema : Schema.optionalKey<IdSchema> }
+  > extends infer F extends Schema.Struct.Fields
+    ? F
+    : never;
+
+/**
+ * A create payload that accepts a client-generated id: {@link clientIdPayload}'s
+ * result.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export interface ClientIdPayload<
+  Data extends Schema.Struct.Fields,
+  P extends ClientIdPresence,
+  IdSchema extends Schema.Top,
+> extends Schema.Struct<{
+  readonly data: Schema.Struct<ClientIdDataFields<Data, P, IdSchema>>;
+}> {}
+
+/**
+ * The resource's `createPayload` with a client-generated `data.id` accepted
+ * (JSON:API 1.1 §Client-Generated IDs) and decoded with the resource's `Id`
+ * schema, or the one `options.id` names. Every other member is the default
+ * payload's, so an undeclared attribute or relationship is still a 400.
+ * `Endpoint.create(R, { clientId: "optional" })` builds its payload with it.
+ *
+ * A server that accepts client ids answers one that already exists with 409
+ * Conflict; `ApiError.DuplicateId` is that error.
+ *
+ * @example
+ * ```ts
+ * import { strictEqual } from "node:assert"
+ * import { Schema } from "effect"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", { attributes: { title: Schema.String } })
+ * const payload = Resource.clientIdPayload(Article)
+ *
+ * const decoded = Schema.decodeUnknownSync(payload)({
+ *   data: { type: "articles", id: "a1", attributes: { title: "Hello" } }
+ * })
+ * strictEqual(decoded.data.id, "a1")
+ * ```
+ *
+ * @since 0.23.0
+ * @category constructors
+ */
+export const clientIdPayload = <
+  Res extends {
+    readonly Id: Schema.Top;
+    readonly createPayload: Schema.Struct<{
+      readonly data: Schema.Struct<Schema.Struct.Fields>;
+    }>;
+  },
+  const P extends ClientIdPresence = "optional",
+  IdSchema extends Schema.Top = Res["Id"],
+>(
+  resource: Res,
+  options?: ClientIdOptions<P, IdSchema>,
+): ClientIdPayload<Res["createPayload"]["fields"]["data"]["fields"], P, IdSchema> => {
+  const id = options?.id ?? resource.Id;
+  return Schema.Struct({
+    // A plain struct over the default `data`'s fields: it drops the check
+    // that refuses an `id`, and keeps the closed `attributes` and
+    // `relationships` members.
+    data: Schema.Struct({
+      ...resource.createPayload.fields.data.fields,
+      id: options?.presence === "required" ? id : Schema.optionalKey(id),
+    }),
+  }) as never;
+};

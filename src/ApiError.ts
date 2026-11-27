@@ -614,6 +614,33 @@ export class Conflict extends make<Conflict>()("Conflict", {
 }) {}
 
 /**
+ * 409 Conflict for a client-generated id that already exists (JSON:API 1.1
+ * §Client-Generated IDs: a server MUST answer 409 to a create whose id is
+ * taken). Its `source.pointer` names the id: `/data/id` by default, or the
+ * `pointer` given (an atomic `add` names `/atomic:operations/N/data/id`).
+ *
+ * @example
+ * ```ts
+ * import { deepStrictEqual } from "node:assert"
+ * import { ApiError } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const [error] = ApiError.toDocument(new ApiError.DuplicateId({ id: "a1" })).errors
+ * deepStrictEqual(error?.source, { pointer: "/data/id" })
+ * ```
+ *
+ * @since 0.23.0
+ * @category errors
+ */
+export class DuplicateId extends make<DuplicateId>()("DuplicateId", {
+  status: 409,
+  code: "duplicate_id",
+  title: "Conflict",
+  fields: { id: Schema.String, pointer: Schema.optionalKey(Schema.String) },
+  detail: (e) => `A resource with id "${e.id}" already exists`,
+  source: (e) => ({ pointer: e.pointer ?? "/data/id" }),
+}) {}
+
+/**
  * 415 Unsupported Media Type: JSON:API §5 content negotiation — the request
  * `Content-Type` is the JSON:API media type with media type parameters.
  *
