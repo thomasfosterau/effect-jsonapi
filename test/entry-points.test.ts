@@ -439,6 +439,20 @@ describe("schema-only entry point", () => {
   });
 });
 
+/**
+ * The skeleton barrel re-exports the flat server skeleton, an opt-in layer
+ * over the core: its modules stay root namespaces (deprecated there) and
+ * subpaths of their own, so the barrel adds a grouping, not a module.
+ */
+describe("skeleton entry point", () => {
+  const SKELETON_MODULES = namespacesOf(path.join(SRC, "skeleton.ts"));
+
+  it("re-exports the skeleton's modules, each also a public module", () => {
+    expect(SKELETON_MODULES).toEqual(["Assemble", "FlatQuery", "Registry", "ResourceHandlers"]);
+    expect(SKELETON_MODULES.filter((module) => !PUBLIC_MODULES.includes(module))).toEqual([]);
+  });
+});
+
 describe("module subpaths", () => {
   it("publish every public module, and only those", () => {
     // `vp pack` takes every `src/[A-Z]*.ts` as an entry (vite.config.ts), so
@@ -609,6 +623,7 @@ describe("package exports map", () => {
     expect(manifest.exports).toEqual({
       ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
       "./schema": { types: "./dist/schema.d.ts", default: "./dist/schema.js" },
+      "./skeleton": { types: "./dist/skeleton.d.ts", default: "./dist/skeleton.js" },
       ...R.fromEntries(
         SUBPATH_MODULES.map(
           (module) =>
@@ -654,7 +669,7 @@ describe("built artifact", () => {
   );
 
   it.skipIf(!hasDist)("ships JavaScript and declarations for every entry point", () => {
-    const missing = ["index", "schema", ...SUBPATH_MODULES]
+    const missing = ["index", "schema", "skeleton", ...SUBPATH_MODULES]
       .flatMap((entry) => [`${entry}.js`, `${entry}.d.ts`])
       .filter((file) => !fs.existsSync(path.join(DIST, file)));
     expect(missing).toEqual([]);

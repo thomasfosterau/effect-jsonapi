@@ -149,6 +149,7 @@ import {
   defaults,
   JsonApiConfig,
   type SparseFieldsets,
+  type UnknownQueryParameters,
 } from "./JsonApiConfig.js";
 import { render } from "./internal/json.js";
 
@@ -732,6 +733,25 @@ export interface QueryParameterOptions {
    * cannot switch that 400 off, so a spec family is never silently ignored.
    */
   readonly allowedQueryParameters?: ReadonlyArray<string>;
+  /**
+   * What to do with a parameter whose family base name is not one of the
+   * specification's families and that the endpoint does not declare or the
+   * allow-list admit: a reserved name (`?lang=en`), an extension's
+   * (`?ext:param=1`), or one that is not a legal member name.
+   *
+   * - `"reject"` (the default) answers it with a 400 naming it, as JSON:API
+   *   1.1 requires of a server that does not know how to process it.
+   * - `"ignore"` passes it over, for an api migrating to JSON:API whose
+   *   clients already send such names. The specification's own families
+   *   (`include`, `fields`, `sort`, `page`, `filter`) are still refused when
+   *   undeclared, so a filter or page the endpoint cannot honour is never
+   *   silently dropped.
+   *
+   * Falls back to `JsonApiConfig.unknownQueryParameters`.
+   *
+   * @since 0.23.0
+   */
+  readonly unknownQueryParameters?: UnknownQueryParameters;
 }
 
 /**
@@ -930,11 +950,13 @@ const isSupported = (
   name: string,
   declared: ReadonlyArray<string>,
   allowed: ReadonlyArray<string>,
+  unknown: UnknownQueryParameters,
 ): boolean => {
   const base = baseName(name);
   const kind = kindOf(base);
   if (kind === "implementation" || allowed.includes(base)) return true;
   if (kind === "family") return declaresName(declared, name);
+  if (unknown === "ignore") return true;
   return declared.some((entry) => baseName(entry) === base);
 };
 
@@ -971,9 +993,10 @@ const rejectQueryParameters = (
   names: Iterable<string>,
   declared: ReadonlyArray<string>,
   allowed: ReadonlyArray<string>,
+  unknown: UnknownQueryParameters,
 ): Option.Option<typeof WireDocument.Type> => {
   const rejected = Arr.dedupe(
-    Arr.filter(Arr.fromIterable(names), (name) => !isSupported(name, declared, allowed)),
+    Arr.filter(Arr.fromIterable(names), (name) => !isSupported(name, declared, allowed, unknown)),
   );
   if (!Arr.isReadonlyArrayNonEmpty(rejected)) return Option.none();
   return Option.some({
@@ -1091,7 +1114,12 @@ export const checkQueryParameters = (
   names: Iterable<string>,
   options?: QueryParameterCheck,
 ): Option.Option<typeof WireDocument.Type> =>
-  rejectQueryParameters(names, options?.declared ?? [], allowedBaseNames(options));
+  rejectQueryParameters(
+    names,
+    options?.declared ?? [],
+    allowedBaseNames(options),
+    options?.unknownQueryParameters ?? defaults.unknownQueryParameters,
+  );
 
 // What an endpoint supports, for `checkQueryParameters`: the wire names its
 // query schema declares (`declaredNames`; none when it could accept a name
@@ -1530,6 +1558,7 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
     Effect.map(Effect.service(JsonApiConfig), (config) =>
       schemaErrorsMiddleware({
         allowedQueryParameters: Option.getOrElse(explicit, () => allowedBaseNames(config)),
+        unknownQueryParameters: options?.unknownQueryParameters ?? config.unknownQueryParameters,
         checkLinkage: options?.checkLinkage ?? config.checkLinkage,
         varyAccept: options?.varyAccept ?? config.varyAccept,
         sparseFieldsets: options?.sparseFieldsets ?? config.sparseFieldsets,
@@ -1542,6 +1571,7 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
 // `JsonApiConfig`.
 interface SchemaErrorsPolicy {
   readonly allowedQueryParameters: ReadonlyArray<string>;
+  readonly unknownQueryParameters: UnknownQueryParameters;
   readonly checkLinkage: boolean;
   readonly varyAccept: boolean;
   readonly sparseFieldsets: SparseFieldsets;
@@ -1549,6 +1579,7 @@ interface SchemaErrorsPolicy {
 
 const schemaErrorsMiddleware = ({
   allowedQueryParameters,
+  unknownQueryParameters,
   checkLinkage,
   varyAccept,
   sparseFieldsets,
@@ -1563,6 +1594,7 @@ const schemaErrorsMiddleware = ({
         R.keys(params),
         declared.value,
         allowedQueryParameters,
+        unknownQueryParameters,
       );
       if (Option.isSome(rejected)) return yield* badRequestResponse("Query", rejected.value);
     }

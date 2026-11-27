@@ -1,8 +1,10 @@
 import { describe, expect } from "vite-plus/test";
 import { it } from "@effect/vitest";
 import { SqliteClient } from "@effect/sql-sqlite-node";
+import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
@@ -195,6 +197,22 @@ describe("SqlService.make", () => {
       ).toEqual(["2"]);
       expect(yield* where({ _tag: "And", members: [] })).toEqual(["2", "1", "3"]);
       expect(yield* where({ _tag: "Or", members: [] })).toEqual([]);
+    }).pipe(Effect.provide(database)),
+  );
+
+  it.effect("translates a custom operator through its SQL, and dies without one", () =>
+    Effect.gen(function* () {
+      const like = yield* SqlService.make(Article, {
+        table: "articles",
+        notFound,
+        relationships: { tags: { table: "article_tags", from: "article_id", to: "tag_id" } },
+        operators: { like: (sql, column, value) => sql`${column} LIKE ${value as string}` },
+      });
+      const node: Filter.Custom = { _tag: "Custom", op: "like", field: "title", value: "%har%" };
+      expect(ids(yield* like.list({ filter: node as never }))).toEqual(["3"]);
+      const { articles } = yield* services();
+      const exit = yield* Effect.exit(articles.list({ filter: node as never }));
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
     }).pipe(Effect.provide(database)),
   );
 

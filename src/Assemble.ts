@@ -270,7 +270,7 @@ export type CapabilitiesHook<V = unknown> = (
  *
  * @example
  * ```ts
- * import { Assemble } from "@thomasfosterau/effect-jsonapi"
+ * import { Assemble } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * interface User { readonly id: string; readonly role: "user" | "admin" }
  * const adminOnly = Assemble.roleCapabilities((viewer?: User) => viewer?.role === "admin")
@@ -315,7 +315,7 @@ export interface OwnedCapabilitiesOptions<V> {
  *
  * @example
  * ```ts
- * import { Assemble } from "@thomasfosterau/effect-jsonapi"
+ * import { Assemble } from "@thomasfosterau/effect-jsonapi/skeleton"
  * import * as Option from "effect/Option"
  *
  * interface User { readonly id: string; readonly role: "user" | "moderator" }
@@ -583,7 +583,7 @@ const readRelationship = (
  *
  * @example
  * ```ts
- * import { Assemble } from "@thomasfosterau/effect-jsonapi"
+ * import { Assemble } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const contest = {
  *   type: "contests", id: "1", attributes: {},
@@ -637,7 +637,7 @@ const wireRelationshipLinks = (value: RelationshipObject): RelationshipObject =>
  *
  * @example
  * ```ts
- * import { Assemble } from "@thomasfosterau/effect-jsonapi"
+ * import { Assemble } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const wired = Assemble.stringifyLinks({
  *   type: "people", id: "1", attributes: {},
@@ -734,7 +734,7 @@ const toWireValue = <A>(value: A): WireValue => {
  *
  * @example
  * ```ts
- * import { Assemble } from "@thomasfosterau/effect-jsonapi"
+ * import { Assemble } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * console.log(Assemble.toWireSafeResource({
  *   type: "t", id: "1",
@@ -855,7 +855,8 @@ export type IncludeError = ApiError.UnsupportedIncludeDepth | ApiError.Unsupport
  * @example
  * ```ts
  * import { Effect } from "effect"
- * import { Assemble, Handlers } from "@thomasfosterau/effect-jsonapi"
+ * import { Handlers } from "@thomasfosterau/effect-jsonapi"
+ * import { Assemble } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const person = {
  *   type: "people", id: "1", attributes: { name: "Ada" },
@@ -1002,7 +1003,7 @@ const paginationLinks = (pagination: Pagination): Handlers.LinksValue => {
  * @example
  * ```ts
  * import { Effect } from "effect"
- * import { Assemble } from "@thomasfosterau/effect-jsonapi"
+ * import { Assemble } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const people = [1, 2, 3].map((n) => ({ type: "people", id: `${n}`, attributes: { name: `P${n}` } }))
  * const document = Effect.runSync(Assemble.collection(people, {
@@ -1017,7 +1018,7 @@ const paginationLinks = (pagination: Pagination): Handlers.LinksValue => {
  * @example
  * ```ts
  * import { Effect } from "effect"
- * import { Assemble } from "@thomasfosterau/effect-jsonapi"
+ * import { Assemble } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * // A search with no corpus count: `next` exists exactly when there is more,
  * // and the last page is unknown.
@@ -1093,7 +1094,8 @@ export const collection = <
  * @example
  * ```ts
  * import { Effect } from "effect"
- * import { Assemble, Handlers } from "@thomasfosterau/effect-jsonapi"
+ * import { Handlers } from "@thomasfosterau/effect-jsonapi"
+ * import { Assemble } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const colours = ["red", "green"].map((id) => ({
  *   type: "colours", id, attributes: { name: id },
@@ -1238,7 +1240,7 @@ export interface RelationshipInput<Res extends ResourceLike, I extends ResourceL
  *
  * @example
  * ```ts
- * import { Assemble } from "@thomasfosterau/effect-jsonapi"
+ * import { Assemble } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const list = {
  *   type: "lists", id: "1", attributes: {},
@@ -1308,7 +1310,7 @@ export const relationship = <Res extends ResourceLike, I extends ResourceLike = 
  * @example
  * ```ts
  * import { Effect } from "effect"
- * import { Assemble } from "@thomasfosterau/effect-jsonapi"
+ * import { Assemble } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const page = Effect.runSync(
  *   Assemble.edgePage(

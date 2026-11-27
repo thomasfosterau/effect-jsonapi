@@ -374,7 +374,13 @@ export default defineConfig({
       // https://tsdown.dev/options/dependencies#deps-resolvedepsubpath
       resolveDepSubpath: true,
     },
-    entry: ["src/index.ts", "src/schema.ts", "src/[A-Z]*.ts", "!src/**/*.test.ts"],
+    entry: [
+      "src/index.ts",
+      "src/schema.ts",
+      "src/skeleton.ts",
+      "src/[A-Z]*.ts",
+      "!src/**/*.test.ts",
+    ],
     format: "esm",
     platform: "neutral",
     dts: false,

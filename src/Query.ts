@@ -918,7 +918,8 @@ export type FlatList<
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { FlatQuery, Query } from "@thomasfosterau/effect-jsonapi"
+ * import { Query } from "@thomasfosterau/effect-jsonapi"
+ * import { FlatQuery } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const ListArticles = Schema.Struct({
  *   ...FlatQuery.pagination({ maxLimit: 100 }),
