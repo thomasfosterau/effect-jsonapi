@@ -196,6 +196,15 @@ export * as Relationship from "./Relationship.js";
 export * as Resource from "./Resource.js";
 
 /**
+ * The seam between a decoded request and an application's data: a
+ * `ResourceService.Service` per resource, `ResourceService.layer` to serve a
+ * whole group over it, and `ResourceService.memory` for tests and examples.
+ *
+ * @since 0.24.0
+ */
+export * as ResourceService from "./ResourceService.js";
+
+/**
  * The server handler factory (`ResourceHandlers.make`,
  * `ResourceHandlers.readOnly`, `ResourceHandlers.related`) — the handler-side
  * counterpart of `Group.flat` / `Group.flatReadOnly`.

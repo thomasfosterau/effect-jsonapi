@@ -4,7 +4,7 @@
 | --- | --- |
 | [Resources](resources.md) | `Resource.make`, relationships, payloads, families, metadata |
 | [Errors and endpoints](endpoints.md) | `ApiError`, `Endpoint`, `Group`, relationship endpoints, atomic operations, idempotency |
-| [Handlers](handlers.md) | Document builders, `included` resolution, middleware, sparse fieldsets |
+| [Handlers](handlers.md) | Document builders, serving a group from a `ResourceService`, `included` resolution, middleware, sparse fieldsets |
 | [Query parameters](query.md) | `include`, `fields`, `sort`, `page`, `filter`, the canonical query string |
 | [The client](client.md) | `Client.make`, include narrowing, error documents, hydration, page cursors |
 | [The server skeleton](server.md) | Flat contracts, the error seam, negotiation, the assembler and registry |

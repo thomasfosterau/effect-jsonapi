@@ -105,6 +105,7 @@ import {
   relationshipSelf,
   resourceSelf,
 } from "./internal/linkRoutes.js";
+import { Operation } from "./internal/operation.js";
 import { PathIdentified, ServedTypes } from "./internal/servedTypes.js";
 import { ContentNegotiation, CreatedLocation, SchemaErrors } from "./Middleware.js";
 import * as Query from "./Query.js";
@@ -781,6 +782,7 @@ export const get = <
     },
   )
     .annotate(LinkRoutes, resourceSelf(resource.type))
+    .annotate(Operation, { _tag: "get", type: resource.type })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors);
 
@@ -1039,6 +1041,7 @@ export const list = <
       error: wires(options?.errors),
     },
   )
+    .annotate(Operation, { _tag: "list", type: resource.type })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors);
 
@@ -1358,6 +1361,7 @@ export const create = <
         error: wires(options?.errors),
       },
     )
+      .annotate(Operation, { _tag: "create", type: resource.type })
       .middleware(ContentNegotiation)
       .middleware(SchemaErrors)
       // Before `Idempotency.applied`, so inside its middleware: the recorded
@@ -1588,6 +1592,7 @@ export const update = <
         error: wires(options?.errors),
       },
     )
+      .annotate(Operation, { _tag: "update", type: resource.type })
       .middleware(ContentNegotiation)
       .middleware(SchemaErrors)
       // `SchemaErrors` answers a `data.type` of another type with 409, and,
@@ -1724,6 +1729,7 @@ const deleteEndpoint = <
         error: wires(options?.errors),
       },
     )
+      .annotate(Operation, { _tag: "delete", type: resource.type })
       .middleware(ContentNegotiation)
       .middleware(SchemaErrors),
     options?.idempotency,
@@ -2905,6 +2911,7 @@ export const related = <
     },
   )
     .annotate(LinkRoutes, relationshipRelated(resource.type, name))
+    .annotate(Operation, { _tag: "related", type: resource.type, relationship: name })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors);
 };
@@ -3157,6 +3164,7 @@ export const getRelationship = <
     },
   )
     .annotate(LinkRoutes, relationshipSelf(resource.type, name))
+    .annotate(Operation, { _tag: "relationship", type: resource.type, relationship: name })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors);
 };
@@ -3277,6 +3285,7 @@ export const updateRelationship = <
         error: wires(options?.errors),
       },
     )
+      .annotate(Operation, { _tag: "updateRelationship", type: resource.type, relationship: name })
       .middleware(ContentNegotiation)
       .middleware(SchemaErrors),
     options?.idempotency,
@@ -3395,6 +3404,7 @@ export const addRelationship = <
         error: wires(options?.errors),
       },
     )
+      .annotate(Operation, { _tag: "addRelationship", type: resource.type, relationship: name })
       .middleware(ContentNegotiation)
       .middleware(SchemaErrors),
     options?.idempotency,
@@ -3500,6 +3510,7 @@ export const removeRelationship = <
         error: wires(options?.errors),
       },
     )
+      .annotate(Operation, { _tag: "removeRelationship", type: resource.type, relationship: name })
       .middleware(ContentNegotiation)
       .middleware(SchemaErrors),
     options?.idempotency,

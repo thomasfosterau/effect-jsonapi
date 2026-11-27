@@ -155,6 +155,7 @@ export default defineConfig({
           "src/Conformance.test.ts",
           "src/Endpoint.relationshipInclude.test.ts",
           "src/Endpoint.memberNames.test.ts",
+          "src/ResourceService.test.ts",
           "examples/*/test/conformance.test.ts",
         ],
         rules: {
