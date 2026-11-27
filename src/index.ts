@@ -64,6 +64,14 @@ export * as Client from "./Client.js";
 export * as Conformance from "./Conformance.js";
 
 /**
+ * The Cursor Pagination profile: `page[size]` / `page[after]` /
+ * `page[before]`, its errors, `meta.page` members and `prev` / `next` links.
+ *
+ * @since 0.23.0
+ */
+export * as CursorPagination from "./CursorPagination.js";
+
+/**
  * JSON:API document-level schemas (links, meta, error objects, document
  * shapes).
  *

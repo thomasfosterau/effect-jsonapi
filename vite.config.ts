@@ -153,6 +153,7 @@ export default defineConfig({
       {
         files: [
           "src/Conformance.test.ts",
+          "src/CursorPagination.test.ts",
           "src/Endpoint.relationshipInclude.test.ts",
           "src/Endpoint.memberNames.test.ts",
           "src/ResourceService.test.ts",

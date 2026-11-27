@@ -301,3 +301,22 @@ const query2 = ListArticles2.pipe(
 // wire:    { "page[offset]": …, "page[limit]": …, "filter[status]": …, authorId: … }
 // decoded: { offset, limit, status, authorId }   ← unchanged, still flat
 ```
+
+## The Cursor Pagination profile
+
+`CursorPagination` implements the [Cursor Pagination profile](https://jsonapi.org/profiles/ethanresnick/cursor-pagination/), the jsonapi.org-registered profile for keyset pagination. `CursorPagination.page()` declares its `page[size]`, `page[after]` and `page[before]`; `page[size]` must be a base-10 positive integer (`0`, `1e1` and `-1` are a 400 naming `page[size]`, the profile's "invalid parameter value"). Name the profile in the endpoint's `profiles` so its responses advertise it, and its errors in `errors`:
+
+```ts
+Endpoint.list(Article, {
+  page: CursorPagination.page(),
+  meta: CursorPagination.CollectionMeta, // meta.page: total, estimatedTotal.bestGuess, rangeTruncated
+  profiles: [CursorPagination.PROFILE_URI],
+  errors: CursorPagination.Errors,
+});
+```
+
+In the handler, `CursorPagination.resolve(query.page ?? {}, { maxSize, defaultSize, range })` applies the endpoint's limits: it fails with `MaxSizeExceeded` (the profile's `links.type`, `source.parameter: "page[size]"` and `meta.page.maxSize`) for a size over the cap and `RangePaginationNotSupported` for `page[after]` with `page[before]` unless `range` is on, and resolves the size to serve (the default, or `maxSize` under a range request). Fail with `InvalidCursor` for a cursor the server cannot read, and `UnsupportedSort` for a sort it cannot page.
+
+`CursorPagination.links(path, page, served)` builds the required `prev` and `next` (`page[before]` the first item's cursor, `page[after]` the last's) and `self`. `served.hasPrev` / `hasNext` are `Option<boolean>`: `Option.some(false)` makes the link `null`, and `Option.none()` (the server cannot tell cheaply) still links it, as the profile allows. Without `page[before]` the profile requires the server to know whether a next page exists, and without `page[after]` whether a previous one does. `CursorPagination.itemMeta(cursor)` is each item's `meta.page.cursor`.
+
+The conformance kit's `profile` tier checks every collection that declares the three parameters: `prev` and `next` present (and `prev: null` on the first page), `page[size]=1` honoured, the invalid-size 400s, and the max-size error.
