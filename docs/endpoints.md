@@ -205,6 +205,21 @@ Endpoint.list(Article, {
 
 `payload` takes a function of its derived default the same way.
 
+## Compound documents from a write
+
+A create or update answers with the resource as primary data, and §Inclusion of Related Resources and §Sparse Fieldsets apply to it as to a fetch: `POST /articles?include=author` returns the created article and its author in one round trip. `Endpoint.create` and `Endpoint.update` take `include` and `fields` as `Endpoint.get` does, and then declare the query, widen the default document's `included` and hand the handler `query.include` / `query.fields`. Both are off by default, so a write that doesn't declare them still answers `?include=` with a 400. `query` overrides or extends the composed query.
+
+```ts
+Endpoint.create(Article, { include: true, fields: true });
+// .handle("create", ({ payload, query }) =>
+//   save(payload).pipe(Effect.map((article) =>
+//     Handlers.data(article, { included, onResource: Handlers.project(query.fields) }))))
+
+Group.resource(Article, { endpoints: { create: { include: true } } });
+```
+
+Under `Group.resource` / `Endpoint.resource` they are per-endpoint options: the top-level `include` and `fields` configure the reads.
+
 ## Overriding the write status
 
 `Endpoint.create` answers `201 Created` and `Endpoint.update` `200 OK` — the spec's recommendation for a creation that returns the created resource, and the status `HttpApi` gives any success schema carrying a body. Some apis answer their whole write surface with 200, or accept a write for later application and answer `202`.
