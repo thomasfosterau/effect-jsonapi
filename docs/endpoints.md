@@ -266,6 +266,19 @@ const articles = Group.resource(Article, {
 });
 ```
 
+## Several success responses
+
+The spec lets a write choose its answer per request: a create with a client-generated id answers 201 with the document, or 204 when the server changed nothing else; an update answers 200 with the document or 204. Pass `success` a list of responses to declare more than one. Each entry is served exactly as given, so build it with `MediaType.asJsonApi(schema, status)`, or use `HttpApiSchema.NoContent` for the 204. `HttpApi` encodes the handler's value with the first entry it matches, so the handler picks the response by what it returns: `undefined` for the 204, a document for the 200.
+
+```ts
+Endpoint.update(Article, {
+  success: [MediaType.asJsonApi(Article.document(), 200), HttpApiSchema.NoContent],
+});
+// .handle("update", ({ payload }) => changedOnlyWhatWasSent ? Effect.void : Effect.succeed({ data }))
+```
+
+`create`, `update`, `delete`, the relationship writes and `operations` all take the list.
+
 ## Overriding the read query
 
 `Endpoint.list` composes its query schema from the `include` / `fields` / `sort` / `page` / `filter` options: a flat, bracket-keyed string record on the wire that decodes to the spec's **nested** shape (`page: { offset, limit }`, `filter: { … }`). That is the spec-compliant contract, and the default.
@@ -392,6 +405,19 @@ The spec defines two URL families per relationship; both are first-class:
 | `Endpoint.updateRelationship` | `PATCH /<type>/:id/relationships/<name>` | replacement linkage | 200 — the updated linkage |
 | `Endpoint.addRelationship` | `POST /<type>/:id/relationships/<name>` | identifiers to add | 200 — the resulting linkage (to-many only) |
 | `Endpoint.removeRelationship` | `DELETE /<type>/:id/relationships/<name>` | identifiers to remove | 204 (to-many only) |
+
+The three relationship writes take `success`, `status`, `payloadMediaType` and `idempotency` like `Endpoint.create`. §Updating Relationships lets a server answer 200 with the updated linkage or with a top-level `meta` alone, 202, or 204, and each can be declared. A `POST` that appends one member to a large to-many relationship doesn't have to read the whole linkage back:
+
+```ts
+Endpoint.addRelationship(Article, "comments", { success: HttpApiSchema.NoContent }); // 204
+Endpoint.addRelationship(Article, "comments", {
+  success: Document.MetaDocument(Schema.Struct({ count: Schema.Int })), // 200, { meta }
+});
+Endpoint.removeRelationship(Article, "comments", {
+  success: Document.MetaDocument(),
+  status: 202, // accepted, processed later
+});
+```
 
 Payload and success schemas follow the relationship's kind:
 
@@ -646,6 +672,10 @@ Because the extension uses the JSON:API media type with an `ext` parameter, prov
 ```ts
 Layer.provide(Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] }));
 ```
+
+### A 204 for operations that return no data
+
+The extension lets a server answer `204 No Content` when no operation needs to return data. Pass `success: HttpApiSchema.NoContent` for an api whose operations never do, or a list of the results document, served under the atomic media type, and `HttpApiSchema.NoContent` for one that decides per request, its handler returning `undefined` for the 204. `operations` also takes `status` and `payloadMediaType`.
 
 ### Client-generated ids in an `add`
 
