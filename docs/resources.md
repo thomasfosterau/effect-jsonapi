@@ -474,14 +474,16 @@ const Edge = Resource.make("edges", {
 // Edge.to.data is { type: "people"; id } | { type: "organisations"; id }
 ```
 
-Endpoints: `Endpoint.polymorphic(AnyNode, { include: true })` is the single-resource `GET /nodes/:id` (returning any member), and `Endpoint.collection(AnyNode.members, …)` the `GET /nodes` collection; `Group.make(AnyNode, …)` hosts them.
+Endpoints: `Endpoint.polymorphic(AnyNode, { include: true })` is the single-resource `GET /nodes/:id` (returning any member), `Endpoint.polymorphicCreate(AnyNode)` the `POST /nodes` that creates whichever member `data.type` names (a type outside the family is a 409), and `Endpoint.collection(AnyNode.members, …)` the `GET /nodes` collection; `Group.make(AnyNode, …)` hosts them.
+
+An instance keeps one canonical URL, the one its `type` names. A `polymorphic` handler whose instance is of another member answers with `Handlers.redirect("/people/1")`, a `308 Permanent Redirect` with that `Location`, rather than the document; a client from `Client.make` follows it and decodes the member's document as the family endpoint's. List the base among the members (`Resource.family(Node, [Node, Person, Organisation])`) when it has instances of its own, which the family's address then serves directly.
 
 Two forms:
 
 - **Base-anchored** `Resource.family(Base, [A, B])` — **recommended**. The shared `Id` / `relationships` / attributes come from `Base`, so the shared id brand anchors "any member id" and dotted `?include=` paths _through_ the family are meaningful. Pair with members defined as `extend(Base, …, { inheritId: true })`.
 - **Named** `Resource.family("media", [Article, Photo])` — no base; the shared id is a union of the members' ids and the shared relationships/attributes are the by-key intersection of the members'. Fully correct for data / `included` / linkage; include-_through_ and the shared id brand degrade to the intersection.
 
-A family value is data/target-only — it is never _created_, so it deliberately has no `ref` / `createPayload` (only its concrete members do). `Resource.isFamily` distinguishes a family from a single resource or a plain union.
+A family value has no `ref` / `createPayload` of its own: what is created through it is always one of its members, with that member's payload. `Resource.isFamily` distinguishes a family from a single resource or a plain union.
 
 Sparse fieldsets key on the member types, never the family name: an endpoint declaring `fields` whose response can carry a family (`Edge`'s `to`, above) declares `fields[people]` and `fields[organisations]`, and its default document makes those members partial. `fields[nodes]`, the family name, is not declared, since no resource object the response carries has that type: like any undeclared type it is a 400 naming the parameter, and `query.fields` has no `nodes` key. A family nested in another stands for its own members in turn, and a real resource whose type is the family's name (`Node` here, when another relationship targets it directly) is still declared as itself.
 

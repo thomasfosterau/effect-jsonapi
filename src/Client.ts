@@ -508,6 +508,12 @@ export interface MakeOptions extends NegotiationOptions {
  * The `Accept` header goes on *every* request the client makes, so derive a
  * separate client for any non-JSON:API groups an api may also carry.
  *
+ * It follows redirects, up to ten hops: a read at a `Resource.family`'s
+ * address that the server answers with a 308 to the member's own
+ * (`Handlers.redirect`) resolves to the member's document, decoded as the
+ * family endpoint's. `fetch` follows them itself; any other transport needs
+ * this.
+ *
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
@@ -555,7 +561,9 @@ export const make = <ApiId extends string, Groups extends HttpApiGroup.Constrain
           }
         : transformResponse,
     transformClient: (client) => {
-      const negotiated = negotiate(client);
+      // A family's address answers 308 to the member's (`Handlers.redirect`);
+      // following it here makes the hop transparent on any transport.
+      const negotiated = HttpClient.followRedirects(negotiate(client));
       return options?.transformClient === undefined
         ? negotiated
         : options.transformClient(negotiated);
