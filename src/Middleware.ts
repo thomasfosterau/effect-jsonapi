@@ -28,7 +28,9 @@
  *     (§Creating Resources; §Updating Resources), as is a client-generated
  *     `data.id` on a `createPayload`, answered with 403 Forbidden naming
  *     `/data/id` (§Client-Generated IDs), and on an atomic `add`, naming
- *     `/atomic:operations/N/data/id`. It also rejects, with a 400
+ *     `/atomic:operations/N/data/id`. An undeclared `attributes` /
+ *     `relationships` member is a 400 at that member, except an @-member
+ *     (`@context`), which is ignored (§Member Names: @-Members). It also rejects, with a 400
  *     naming it, a query parameter whose family base name is made only of
  *     a-z, names an extension's parameter (`ext:param`) or is not a legal
  *     member name (`foo!`, `page.limit`), and that neither the specification
@@ -96,7 +98,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaIssue from "effect/SchemaIssue";
-import { Headers, HttpServerRespondable } from "effect/http";
+import { Headers, HttpEffect, HttpRouter, HttpServerRespondable } from "effect/http";
 import { HttpServerRequest, ParsedSearchParams } from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import type { HttpApiEndpoint } from "effect/http-api";
@@ -114,11 +116,23 @@ import { pointer } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
 import { declaredNames, declaresName } from "./internal/declaredQuery.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
-import { MEDIA_TYPE, parametersAreAcceptable, parseMediaType } from "./internal/media.js";
+import {
+  MEDIA_TYPE,
+  parametersAreAcceptable,
+  parseMediaType,
+  varyAccept,
+} from "./internal/media.js";
 import { CLIENT_ID_UNSUPPORTED, refusedClientIdPointer } from "./internal/refusedClientId.js";
-import { conflictingType, isTypePath, ServedTypes } from "./internal/servedTypes.js";
+import {
+  conflictingId,
+  conflictingType,
+  isTypePath,
+  PathIdentified,
+  ServedTypes,
+} from "./internal/servedTypes.js";
 import { requestedFieldsets } from "./internal/linkage.js";
-import { unlinkedOnWire, withCreatedLocation } from "./internal/responseBody.js";
+import { sparseOnWire, unlinkedOnWire, withCreatedLocation } from "./internal/responseBody.js";
+import type { Fieldsets } from "./internal/wireFieldsets.js";
 import { wireLeaves } from "./internal/wireNames.js";
 import {
   admitsNoValue,
@@ -126,11 +140,17 @@ import {
   type Family,
   isFamily,
   isFamilyMember,
-  isMemberName,
 } from "./internal/vocabulary.js";
+import { isMemberName } from "./internal/memberName.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
 import { someMember } from "./internal/members.js";
-import { type AcceptWithoutJsonApi, defaults, JsonApiConfig } from "./JsonApiConfig.js";
+import {
+  type AcceptWithoutJsonApi,
+  defaults,
+  JsonApiConfig,
+  type SparseFieldsets,
+} from "./JsonApiConfig.js";
+import { render } from "./internal/json.js";
 
 // ---------------------------------------------------------------------------
 // Tracing
@@ -190,7 +210,7 @@ export const Span = {
  * @since 0.1.0
  * @category models
  */
-export interface NegotiationOptions {
+export interface NegotiationOptions extends VaryOptions {
   /**
    * The JSON:API extension URIs this api supports (e.g.
    * `Atomic.EXTENSION_URI`). Media types carrying `ext` parameters whose URIs
@@ -218,6 +238,29 @@ export interface ContentNegotiationOptions extends NegotiationOptions {
    * `JsonApiConfig.acceptWithoutJsonApi` in the middleware layers.
    */
   readonly acceptWithoutJsonApi?: AcceptWithoutJsonApi;
+}
+
+/**
+ * The `Vary` option {@link NegotiationOptions} and {@link SchemaErrorsOptions}
+ * share: each middleware adds `Accept` to the responses it answers or passes
+ * on, so pass the same value to both ({@link layerWith} does).
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export interface VaryOptions {
+  /**
+   * Whether every response the middleware handles, success and error alike,
+   * carries `Accept` in its `Vary` header, merged with any `Vary` already set
+   * (JSON:API 1.1 §6.3: a server supporting `ext` or `profile` SHOULD, which
+   * every api built on this package does). `false` leaves `Vary` to the api.
+   * Falls back to `JsonApiConfig.varyAccept`.
+   *
+   * Defaults to `true`.
+   *
+   * @since 0.23.0
+   */
+  readonly varyAccept?: boolean;
 }
 
 /**
@@ -698,7 +741,7 @@ export interface QueryParameterOptions {
  * @since 0.17.0
  * @category models
  */
-export interface SchemaErrorsOptions extends QueryParameterOptions {
+export interface SchemaErrorsOptions extends QueryParameterOptions, VaryOptions {
   /**
    * `false` skips the full-linkage check on the **encoded** response, which is
    * on by default. The document builders (`Handlers.data`,
@@ -723,6 +766,28 @@ export interface SchemaErrorsOptions extends QueryParameterOptions {
    * the check also covers a document built without the builders.
    */
   readonly checkLinkage?: boolean;
+  /**
+   * What the middleware does with a request's sparse fieldsets
+   * (`?fields[TYPE]=…`) on the **encoded** 2xx document. JSON:API 1.1
+   * §Sparse Fieldsets: an endpoint MUST NOT include fields the request
+   * excludes in resource objects of that type.
+   *
+   * - `"project"` (the default) removes them, in the primary data and in
+   *   `included` alike, so a handler that returns whole resources still
+   *   answers to spec. A `relationships` member left empty is omitted.
+   * - `"verify"` leaves the document alone and answers one that carries an
+   *   excluded field as it answers a full-linkage violation: a defect, which
+   *   the client receives as the opaque JSON:API 500.
+   * - `"handler"` leaves sparse fieldsets to the handler
+   *   (`Handlers.project(query.fields)`), unchecked.
+   *
+   * A document that already honours the fieldsets passes through every
+   * mode unchanged, so a handler that projects itself costs one parse.
+   * Falls back to `JsonApiConfig.sparseFieldsets`.
+   *
+   * @since 0.23.0
+   */
+  readonly sparseFieldsets?: SparseFieldsets;
 }
 
 /**
@@ -1093,6 +1158,16 @@ export class SchemaErrors extends HttpApiMiddleware.Service<SchemaErrors>()(
 // Layers
 // ---------------------------------------------------------------------------
 
+const withVaryAccept: HttpEffect.PreResponseHandler = (_, response) =>
+  Effect.succeed(
+    HttpServerResponse.setHeader(response, "vary", varyAccept(response.headers["vary"])),
+  );
+
+// Both middlewares register it, since either may answer first; the merge is
+// idempotent, so running it twice adds `Accept` once.
+const registerVaryAccept = (varyAccept: boolean) =>
+  varyAccept ? HttpEffect.appendPreResponseHandler(withVaryAccept) : Effect.void;
+
 /**
  * Creates the live {@link ContentNegotiation} implementation, optionally
  * supporting JSON:API extensions (e.g. atomic operations) or serving an
@@ -1112,9 +1187,13 @@ export const contentNegotiationLayer = (
       const resolved: ContentNegotiationOptions = {
         extensions: options?.extensions ?? config.extensions,
         acceptWithoutJsonApi: options?.acceptWithoutJsonApi ?? config.acceptWithoutJsonApi,
+        varyAccept: options?.varyAccept ?? config.varyAccept,
       };
       return Effect.fnUntraced(function* (httpEffect) {
         const request = yield* HttpServerRequest;
+        // Registered before anything can fail, so a 406 / 415, a handler's
+        // error and a success all carry it.
+        yield* registerVaryAccept(resolved.varyAccept !== false);
         const error = yield* Effect.sync(() => negotiate(request.headers, resolved)).pipe(
           Effect.tap((error) =>
             Effect.annotateCurrentSpan(
@@ -1255,6 +1334,33 @@ const payloadConflict = Effect.fnUntraced(function* (
   );
 });
 
+// An update of the resource's own payload whose body names another `id`
+// than its `:id` path parameter (§Updating Resources → 409 Conflict: "A
+// server MUST return 409 Conflict when processing a PATCH request in which
+// the resource object's type or id do not match the server's endpoint").
+// Read before the payload decodes, so the handler never sees it.
+const mismatchedId = Effect.fnUntraced(function* (endpoint: HttpApiEndpoint.Top) {
+  const parameter = Context.getOption(endpoint.annotations, PathIdentified);
+  if (Option.isNone(parameter))
+    return Option.none<{ readonly id: string; readonly path: string }>();
+  const pathId = Option.fromUndefinedOr((yield* HttpRouter.params)[parameter.value]);
+  if (Option.isNone(pathId)) return Option.none();
+  const request = yield* HttpServerRequest;
+  // `text` is cached on the request, so the payload decode reads it again.
+  const body = yield* Effect.option(request.text);
+  return Option.map(
+    Option.flatMap(body, (text) => conflictingId(text, pathId.value)),
+    (id) => ({ id, path: pathId.value }),
+  );
+});
+
+const idConflictResponse = ({ id, path }: { readonly id: string; readonly path: string }) =>
+  payloadRefusal(
+    Conflict,
+    `Resource object id ${render(id)} does not match the endpoint's id ${render(path)}`,
+    "/data/id",
+  );
+
 const transformSchemaError = (
   endpoint: HttpApiEndpoint.Top,
   error: HttpApiError.HttpApiSchemaError,
@@ -1316,6 +1422,33 @@ const checkWireLinkage = (
       ),
   });
 
+// The encoded success with the request's sparse fieldsets applied, or as it
+// stands under "handler" and when it already honours them; under "verify",
+// the defect a document carrying an excluded field dies with.
+const applySparseFieldsets = (
+  response: HttpServerResponse.HttpServerResponse,
+  fields: Fieldsets,
+  mode: SparseFieldsets,
+) =>
+  mode === "handler"
+    ? Effect.succeed(response)
+    : Option.match(sparseOnWire(response, fields), {
+        onNone: () => Effect.succeed(response),
+        onSome: (projected) =>
+          mode === "project"
+            ? Effect.succeed(projected.response)
+            : Effect.die(
+                new ResponseEncodeError({
+                  message:
+                    `JSON:API sparse fieldset violation: the response includes ` +
+                    `${projected.excluded.map(({ type, id, field }) => `"${field}" of ${type}:${id}`).join(", ")}, ` +
+                    `which the request's fields[TYPE] excludes ` +
+                    `(https://jsonapi.org/format/1.1/#fetching-sparse-fieldsets)`,
+                  cause: undefined,
+                }),
+              ),
+      });
+
 /**
  * Creates the live {@link SchemaErrors} implementation, optionally accepting
  * extra query parameters the check would reject — all-lowercase names, an
@@ -1352,8 +1485,10 @@ const checkWireLinkage = (
  * `fields`, `sort`, `page`, `filter`) or a bracketed name of one
  * (`page[size]`, `include[]`).
  *
- * Then every 2xx document the endpoint encoded is checked for full linkage,
- * unless `checkLinkage` is `false` ({@link SchemaErrorsOptions.checkLinkage}).
+ * Then every 2xx document the endpoint encoded is projected to the request's
+ * sparse fieldsets ({@link SchemaErrorsOptions.sparseFieldsets}) and checked
+ * for full linkage, unless `checkLinkage` is `false`
+ * ({@link SchemaErrorsOptions.checkLinkage}).
  *
  * {@link SchemaErrorsLive} is `schemaErrorsLayer()`; {@link layerWith} takes
  * the same options. A host that negotiates content itself composes this with
@@ -1393,20 +1528,34 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
   return Layer.effect(
     SchemaErrors,
     Effect.map(Effect.service(JsonApiConfig), (config) =>
-      schemaErrorsMiddleware(
-        Option.getOrElse(explicit, () => allowedBaseNames(config)),
-        options?.checkLinkage ?? config.checkLinkage,
-      ),
+      schemaErrorsMiddleware({
+        allowedQueryParameters: Option.getOrElse(explicit, () => allowedBaseNames(config)),
+        checkLinkage: options?.checkLinkage ?? config.checkLinkage,
+        varyAccept: options?.varyAccept ?? config.varyAccept,
+        sparseFieldsets: options?.sparseFieldsets ?? config.sparseFieldsets,
+      }),
     ),
   );
 };
 
-const schemaErrorsMiddleware = (
-  allowedQueryParameters: ReadonlyArray<string>,
-  checkLinkage: boolean,
-): typeof SchemaErrors.Service =>
+// The policies `schemaErrorsLayer` resolved from its options and
+// `JsonApiConfig`.
+interface SchemaErrorsPolicy {
+  readonly allowedQueryParameters: ReadonlyArray<string>;
+  readonly checkLinkage: boolean;
+  readonly varyAccept: boolean;
+  readonly sparseFieldsets: SparseFieldsets;
+}
+
+const schemaErrorsMiddleware = ({
+  allowedQueryParameters,
+  checkLinkage,
+  varyAccept,
+  sparseFieldsets,
+}: SchemaErrorsPolicy): typeof SchemaErrors.Service =>
   // Untraced: the middleware's span surface is `Span.schemaError` alone.
   Effect.fnUntraced(function* (httpEffect, { endpoint }) {
+    yield* registerVaryAccept(varyAccept);
     const declared = declaredFor(endpoint);
     const params = yield* ParsedSearchParams;
     if (Option.isSome(declared)) {
@@ -1417,14 +1566,18 @@ const schemaErrorsMiddleware = (
       );
       if (Option.isSome(rejected)) return yield* badRequestResponse("Query", rejected.value);
     }
-    // The linkage check reads the encoded success only: a defect it dies
-    // with passes `catch`, which sees failures alone.
+    const mismatched = yield* mismatchedId(endpoint);
+    if (Option.isSome(mismatched)) return yield* idConflictResponse(mismatched.value);
+    const fields = requestedFieldsets(searchPairs(params));
+    // The fieldset and linkage checks read the encoded success only: a
+    // defect they die with passes `catch`, which sees failures alone.
+    const sparse = Effect.flatMap(httpEffect, (response) =>
+      applySparseFieldsets(response, fields, sparseFieldsets),
+    );
     return yield* Effect.catchFilter(
       checkLinkage
-        ? Effect.flatMap(httpEffect, (response) =>
-            checkWireLinkage(response, requestedFieldsets(searchPairs(params))),
-          )
-        : httpEffect,
+        ? Effect.flatMap(sparse, (response) => checkWireLinkage(response, fields))
+        : sparse,
       Filter.make((error) =>
         HttpApiError.HttpApiSchemaError.is(error) ? Result.succeed(error) : Result.fail(error),
       ),

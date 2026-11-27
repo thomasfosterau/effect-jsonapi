@@ -1232,6 +1232,52 @@ describe("the members JSON:API allows around a closed member are still accepted"
   });
 });
 
+describe("an @-member is ignored, wherever it appears", () => {
+  // JSON:API 1.1 §7.10.2: @-members "MAY appear anywhere in a document" and
+  // are ignored. Each closed member accepts one and hands the handler the
+  // value it would have got without it; the flat payloads are the
+  // application's own shape, so they are not covered.
+  const structural = cases.filter(([, , path]) => !path.startsWith("/memos"));
+
+  it.each(structural)("%s: 2xx, and the handler never sees it", async (_, method, path, body) => {
+    received.length = 0;
+    const response = await send(method, path, body("@context"));
+    expect(response.status).toBeLessThan(300);
+    expect(received).toHaveLength(1);
+    const [{ attributes = {}, relationships = {} }] = received as [Received];
+    expect([...R.keys(attributes), ...R.keys(relationships)]).not.toContain("@context");
+  });
+
+  it("inside a relationship object and a resource identifier", async () => {
+    received.length = 0;
+    const response = await send(
+      "POST",
+      "/flags",
+      '{"data":{"type":"flags","attributes":{},"relationships":{"owner":{"@type":"x","data":{"type":"owners","id":"1","@id":"y"}}}}}',
+    );
+    expect(response.status).toBe(201);
+    expect(received).toEqual([
+      {
+        type: "flags",
+        attributes: {},
+        relationships: { owner: { data: { type: "owners", id: "1" } } },
+      },
+    ]);
+  });
+
+  it("beside an undeclared ordinary member, which is still a 400", async () => {
+    const response = await send(
+      "POST",
+      "/notes",
+      '{"data":{"type":"notes","attributes":{"body":"b","@context":"c","isAdmin":true}}}',
+    );
+    expect(response.status).toBe(400);
+    expect(errorsOf(response.text).map(({ source }) => source?.pointer)).toEqual([
+      "/data/attributes/isAdmin",
+    ]);
+  });
+});
+
 describe("encoding a closed member, as a client does, rejects an undeclared member", () => {
   // `Client` and `HttpBody` encode a payload through `Schema.toCodecJson`.
   const formatted = (result: Result.Result<unknown, Schema.SchemaError>) =>

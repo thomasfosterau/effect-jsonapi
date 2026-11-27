@@ -90,10 +90,15 @@ import * as FlatQuery from "./FlatQuery.js";
 import * as Idempotency from "./Idempotency.js";
 import { isSurface } from "./Include.js";
 import type { AnySurface, SurfaceFor } from "./Include.js";
-import { asJsonApi, asJsonApiAtomic, asMediaType } from "./internal/httpMedia.js";
+import {
+  asJsonApi,
+  asJsonApiAtomic,
+  asJsonApiProfiled,
+  asMediaType,
+} from "./internal/httpMedia.js";
 import { closedStruct, defaultMaxUndeclaredMemberErrors } from "./internal/schemaExt.js";
 import { MEDIA_TYPE } from "./internal/media.js";
-import { ServedTypes } from "./internal/servedTypes.js";
+import { PathIdentified, ServedTypes } from "./internal/servedTypes.js";
 import { ContentNegotiation, CreatedLocation, SchemaErrors } from "./Middleware.js";
 import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
@@ -179,7 +184,32 @@ export interface CommonOptions<Name extends string, Path extends `/${string}`, E
   readonly path?: Path;
   /** `ApiError` classes this endpoint can fail with. */
   readonly errors?: Errors;
+  /**
+   * The URIs of the profiles this endpoint applies to its documents, named
+   * in the `profile` parameter of its success media type (JSON:API 1.1 §6.1:
+   * a server MUST name the profiles it applied in `Content-Type`), and so in
+   * the OpenAPI document and the typed client. Declare only the profiles the
+   * handler really implements, such as `Filter.PROFILE_URI` for an endpoint
+   * whose handler implements the filter grammar's semantics. An endpoint
+   * declared with `idempotency` names `Idempotency.PROFILE_URI` as well,
+   * since the package implements that profile itself. Defaults to none.
+   *
+   * @since 0.23.0
+   */
+  readonly profiles?: ReadonlyArray<string>;
 }
+
+// The profiles an endpoint's success media type names: its declared ones,
+// and the Idempotency-Key profile when it honours the header.
+const profilesOf = (options?: {
+  readonly profiles?: ReadonlyArray<string>;
+  readonly idempotency?: Idempotency.Option;
+}): ReadonlyArray<string> => [
+  ...(options?.profiles ?? []),
+  ...(options?.idempotency === undefined || options.idempotency === false
+    ? []
+    : [Idempotency.PROFILE_URI]),
+];
 
 const queryConfig = (options?: {
   readonly include?: boolean | { readonly paths?: ReadonlyArray<string>; readonly depth?: number };
@@ -584,8 +614,9 @@ export const get = <
             readonly filter: never;
           },
         )) as QuerySchema,
-      success: asJsonApi(
+      success: asJsonApiProfiled(
         (options?.success ?? defaultDocument(resource, "document", options)) as Success,
+        profilesOf(options),
       ),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors),
@@ -817,8 +848,9 @@ export const list = <
             readonly filter: FilterFields;
           },
         )) as QuerySchema,
-      success: asJsonApi(
+      success: asJsonApiProfiled(
         (options?.success ?? defaultDocument(resource, "collection", options)) as Success,
+        profilesOf(options),
       ),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors),
@@ -1014,13 +1046,14 @@ export const create = <
           (options?.payload ?? resource.createPayload) as Payload,
           options?.payloadMediaType ?? MEDIA_TYPE,
         ),
-        success: asJsonApi(
+        success: asJsonApiProfiled(
           (options?.success ??
             resource.document(
               (options?.meta !== undefined ? { meta: options.meta } : {}) as {
                 readonly meta?: DocMeta;
               },
             )) as Success,
+          profilesOf(options),
           options?.status ?? 201,
         ),
         // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
@@ -1067,9 +1100,11 @@ export const create = <
  *
  * A resource object whose `data.type` names a type other than the resource's
  * is answered with 409 Conflict naming `/data/type` (§Updating Resources → 409
- * Conflict), as {@link create} describes. A `data.id` that differs from `:id`
- * is the handler's to refuse with `ApiError.Conflict`, as
- * `ResourceHandlers.make` does.
+ * Conflict), as {@link create} describes, and so, before the handler runs,
+ * is a `data.id` that differs from `:id`, naming `/data/id` (the two compared
+ * as the wire strings the id codec encodes to). With a `payload` override
+ * (`updateInput`, say) the id is the application's, and refusing a mismatch
+ * is the handler's, with `ApiError.Conflict`.
  *
  * @example
  * ```ts
@@ -1174,13 +1209,14 @@ export const update = <
           (options?.payload ?? resource.updatePayload) as Payload,
           options?.payloadMediaType ?? MEDIA_TYPE,
         ),
-        success: asJsonApi(
+        success: asJsonApiProfiled(
           (options?.success ??
             resource.document(
               (options?.meta !== undefined ? { meta: options.meta } : {}) as {
                 readonly meta?: DocMeta;
               },
             )) as Success,
+          profilesOf(options),
           options?.status,
         ),
         // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
@@ -1189,8 +1225,13 @@ export const update = <
     )
       .middleware(ContentNegotiation)
       .middleware(SchemaErrors)
-      // `SchemaErrors` answers a `data.type` of another type with 409.
-      .annotate(ServedTypes, [resource.type]),
+      // `SchemaErrors` answers a `data.type` of another type with 409, and,
+      // for the resource's own payload, a `data.id` other than `:id`; a
+      // `payload` override's id is the application's.
+      .annotate(ServedTypes, [resource.type])
+      .pipe((endpoint) =>
+        options?.payload === undefined ? endpoint.annotate(PathIdentified, "id") : endpoint,
+      ),
     options?.idempotency,
   );
 
@@ -1202,12 +1243,16 @@ export const update = <
 // spec's 204 no-content default; an override is served as a JSON:API body,
 // defaulting to 200 (the status HttpApi gives a success schema that carries
 // one).
-const deleteSuccess = (success?: Schema.Top, status?: number): Schema.Top =>
+const deleteSuccess = (
+  success?: Schema.Top,
+  status?: number,
+  profiles?: ReadonlyArray<string>,
+): Schema.Top =>
   success === undefined
     ? status === undefined
       ? HttpApiSchema.NoContent
       : HttpApiSchema.NoContent.pipe(HttpApiSchema.status(status))
-    : asJsonApi(success, status);
+    : asJsonApiProfiled(success, profiles, status);
 
 /**
  * `DELETE /<type>/:id` — delete a resource.
@@ -1303,7 +1348,7 @@ const deleteEndpoint = <
         headers: Option.getOrUndefined(
           Idempotency.headersFor(options?.idempotency),
         ) as Idempotency.HeadersFor<Idem>,
-        success: deleteSuccess(options?.success, options?.status) as Success,
+        success: deleteSuccess(options?.success, options?.status, profilesOf(options)) as Success,
         // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
         error: wires(options?.errors),
       },
@@ -1620,6 +1665,13 @@ export const collection = <
     readonly filter?: FilterFields;
     /** Override the collection document's `meta` schema (e.g. result totals). */
     readonly meta?: DocMeta;
+    /**
+     * The URIs of the profiles this endpoint applies, named on its success
+     * media type (see {@link CommonOptions.profiles}).
+     *
+     * @since 0.23.0
+     */
+    readonly profiles?: ReadonlyArray<string>;
   },
 ) =>
   HttpApiEndpoint.get(options.name, options.path, {
@@ -1634,7 +1686,7 @@ export const collection = <
         readonly filter: FilterFields;
       },
     ),
-    success: asJsonApi(
+    success: asJsonApiProfiled(
       collectionDocument(resources, options) as MembersDocument<
         "collection",
         Resources[number],
@@ -1645,6 +1697,7 @@ export const collection = <
         IncludedResources<Resources[number], false>,
         DocMeta
       >,
+      profilesOf(options),
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options.errors),
@@ -1783,7 +1836,7 @@ export const polymorphic = <
           readonly filter: never;
         },
       ),
-      success: asJsonApi(
+      success: asJsonApiProfiled(
         polymorphicDocument(family, options) as MembersDocument<
           "document",
           Members[number],
@@ -1794,6 +1847,7 @@ export const polymorphic = <
           IncludedResources<Members[number], false>,
           DocMeta
         >,
+        profilesOf(options),
       ),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors),
@@ -1887,10 +1941,11 @@ export const polymorphicCreate = <
         ) as MemberCreatePayload<Members>,
         MEDIA_TYPE,
       ),
-      success: asJsonApi(
+      success: asJsonApiProfiled(
         family.document<FamilyDefaultIncluded<Members>, DocMeta>(
           definedMember("meta", options?.meta) as { readonly meta?: DocMeta },
         ),
+        profilesOf(options),
         options?.status ?? 201,
       ),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
@@ -2473,7 +2528,7 @@ export const related = <
           readonly filter: FilterFields;
         },
       ),
-      success: asJsonApi(success),
+      success: asJsonApiProfiled(success, profilesOf(options)),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors),
     },
@@ -2724,7 +2779,7 @@ export const getRelationship = <
           page: options?.page,
         } as RelationshipQueryOptions<Res, Name, Include, Fields, PageFields>,
       ),
-      success: asJsonApi(success),
+      success: asJsonApiProfiled(success, profilesOf(options)),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors),
     },
@@ -2824,7 +2879,7 @@ export const updateRelationship = <
     {
       params: Schema.Struct({ id: resource.Id }),
       payload: asJsonApi(payload),
-      success: asJsonApi(success),
+      success: asJsonApiProfiled(success, profilesOf(options)),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors),
     },
@@ -2922,7 +2977,7 @@ export const addRelationship = <
     {
       params: Schema.Struct({ id: resource.Id }),
       payload: asJsonApi(payload),
-      success: asJsonApi(success),
+      success: asJsonApiProfiled(success, profilesOf(options)),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors),
     },

@@ -4,8 +4,8 @@
  * Three middlewares look at the bytes an endpoint produced rather than at the
  * value its handler returned: `Idempotency.layer` records them for replay,
  * `Middleware.CreatedLocationLive` derives a 201's `Location` from the
- * document's `self` link, and `Middleware.SchemaErrorsLive` re-checks
- * full linkage on the document as encoded. All need the same answer to
+ * document's `self` link, and `Middleware.SchemaErrorsLive` applies sparse
+ * fieldsets to and re-checks full linkage on the document as encoded. All need the same answer to
  * "what text is this body", and all must treat a body they cannot read as
  * "leave it alone".
  */
@@ -14,8 +14,13 @@ import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
+import * as HttpBody from "effect/http/HttpBody";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import { render } from "./json.js";
+import { MEDIA_TYPE } from "./media.js";
 import { isJsonObject, unlinkedIncluded } from "./linkage.js";
+import { projectDocument } from "./wireFieldsets.js";
+import type { ExcludedField, Fieldsets } from "./wireFieldsets.js";
 
 /**
  * The response text of a body whose bytes are already settled — everything the
@@ -138,4 +143,46 @@ export const unlinkedOnWire = (
     onSome: (document) =>
       isJsonObject(document) ? unlinkedIncluded(document, fields).map(label) : [],
   });
+};
+
+// The content type a body carries, which a response built by the router keeps
+// there rather than in its headers.
+const bodyContentType = (body: HttpBody.HttpBody): Option.Option<string> =>
+  P.hasProperty(body, "contentType") && P.isString(body.contentType)
+    ? Option.some(body.contentType)
+    : Option.none();
+
+/**
+ * A 2xx response's encoded document projected to the request's sparse
+ * fieldsets (`fields`), with the fields the projection removed. `None` when
+ * there is nothing to remove: no fieldsets, another status, a body that
+ * cannot be read or is not a JSON object, or a document that already honours
+ * them.
+ */
+export const sparseOnWire = (
+  response: HttpServerResponse.HttpServerResponse,
+  fields: Fieldsets,
+): Option.Option<{
+  readonly response: HttpServerResponse.HttpServerResponse;
+  readonly excluded: ReadonlyArray<ExcludedField>;
+}> => {
+  if (response.status < 200 || response.status >= 300) return Option.none();
+  return bodyText(response).pipe(
+    Option.flatMap(parseJsonValue),
+    Option.filter(isJsonObject),
+    Option.flatMap((document) => projectDocument(document, fields)),
+    Option.map(({ document, excluded }) => ({
+      excluded,
+      response: HttpServerResponse.setBody(
+        response,
+        HttpBody.text(
+          render(document),
+          Option.fromUndefinedOr(response.headers["content-type"]).pipe(
+            Option.orElse(() => bodyContentType(response.body)),
+            Option.getOrElse(() => MEDIA_TYPE),
+          ),
+        ),
+      ),
+    })),
+  );
 };

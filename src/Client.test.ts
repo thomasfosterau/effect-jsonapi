@@ -405,6 +405,23 @@ describe("Client.errorDocument", () => {
     }),
   );
 
+  it.effect("reads an error whose source is empty or carries other members", () =>
+    Effect.gen(function* () {
+      const body = stringify({
+        errors: [
+          { status: "400", title: "Bad", source: {} },
+          { status: "400", title: "Bad", source: { pointer: "/data", hint: "x" } },
+        ],
+      });
+      const document = yield* errorDocument(clientError(body, 400));
+      assert(Option.isSome(document));
+      expect(document.value.errors.map((error) => error.source)).toEqual([
+        {},
+        { pointer: "/data", hint: "x" },
+      ]);
+    }),
+  );
+
   it.effect("degrades to none for a non-conforming response body", () =>
     Effect.gen(function* () {
       const document = yield* errorDocument(clientError("<html>502 Bad Gateway</html>", 502));

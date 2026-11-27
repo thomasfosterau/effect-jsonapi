@@ -43,7 +43,12 @@ import * as Arr from "effect/Array";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as ApiError from "./ApiError.js";
-import { MEDIA_TYPE, parametersAreAcceptable, parseMediaType } from "./internal/media.js";
+import {
+  MEDIA_TYPE,
+  parametersAreAcceptable,
+  parseMediaType,
+  varyAccept as mergeVaryAccept,
+} from "./internal/media.js";
 import { stringify } from "./internal/json.js";
 
 /**
@@ -565,8 +570,32 @@ export const errorResponse = (error: NegotiationError): Response =>
       ],
       jsonapi: { version: "1.1" },
     }),
-    { status: error.status, headers: { "content-type": MEDIA_TYPE } },
+    { status: error.status, headers: { "content-type": MEDIA_TYPE, vary: "Accept" } },
   );
+
+/**
+ * The `Vary` header value a response from a negotiated URL carries: `existing`
+ * (the value already set, if any) with `Accept` added unless it names it
+ * already or is `*`. A URL whose {@link Verdict} picks a page or a document
+ * from `Accept` is only cache-safe with it, and JSON:API 1.1 §6.3 asks for it
+ * on every response of a server that supports `ext` or `profile`. The
+ * `Middleware` layers add it to the responses they handle; this is the same
+ * merge for the host's own (`errorResponse` sets it).
+ *
+ * @example
+ * ```ts
+ * import { Negotiation } from "@thomasfosterau/effect-jsonapi"
+ * import { strictEqual } from "node:assert"
+ *
+ * strictEqual(Negotiation.varyAccept(undefined), "Accept")
+ * strictEqual(Negotiation.varyAccept("Origin"), "Origin, Accept")
+ * strictEqual(Negotiation.varyAccept("origin, accept"), "origin, accept")
+ * ```
+ *
+ * @since 0.23.0
+ * @category constructors
+ */
+export const varyAccept: (existing?: string) => string = mergeVaryAccept;
 
 /**
  * Prepares a dispatched request for the internal `HttpApi` router.

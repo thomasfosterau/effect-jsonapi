@@ -11,6 +11,9 @@
  *   when processing a PATCH request in which the resource object's type or id
  *   do not match the server's endpoint."
  *
+ * An update of the resource's own payload whose `data.id` differs from `:id`
+ * answers 409 too, naming `/data/id`, before the handler runs.
+ *
  * A malformed document — a `type` missing or not a string, a body that is not
  * JSON, a bad attribute beside the right `type` — stays a 400.
  */
@@ -216,5 +219,57 @@ describe("a malformed resource object stays a 400", () => {
   it("a flat command-input payload, which has no resource object", async () => {
     const response = await send("PATCH", "/people/9", { id: "9", name: 1 });
     expect(response.status).toBe(400);
+  });
+});
+
+describe("a resource object whose id is not the endpoint's", () => {
+  const idConflict = (id: string, path: string) => ({
+    errors: [
+      {
+        status: "409",
+        code: "conflict",
+        title: "Conflict",
+        detail: `Resource object id "${id}" does not match the endpoint's id "${path}"`,
+        source: { pointer: "/data/id" },
+      },
+    ],
+  });
+
+  it("PATCH /<type>/:id answers 409 naming /data/id, with no handler code", async () => {
+    const response = await send("PATCH", "/articles/1", {
+      data: { type: "articles", id: "2", attributes: { title: "Hello" } },
+    });
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual(idConflict("2", "1"));
+  });
+
+  it("compares against the decoded path segment", async () => {
+    const matching = await send("PATCH", "/articles/a%2Fb", {
+      data: { type: "articles", id: "a/b", attributes: { title: "Hello" } },
+    });
+    expect(matching.status).toBe(200);
+    const other = await send("PATCH", "/articles/a%2Fb", {
+      data: { type: "articles", id: "a%2Fb", attributes: { title: "Hello" } },
+    });
+    expect(other.status).toBe(409);
+  });
+
+  it("answers 409 before a malformed attribute beside it is reported", async () => {
+    const response = await send("PATCH", "/articles/1", {
+      data: { type: "articles", id: "2", attributes: { title: "" } },
+    });
+    expect(response.status).toBe(409);
+  });
+
+  it("leaves a missing or non-string id to the payload's 400", async () => {
+    const missing = await send("PATCH", "/articles/1", { data: { type: "articles" } });
+    expect(missing.status).toBe(400);
+    const numeric = await send("PATCH", "/articles/1", { data: { type: "articles", id: 1 } });
+    expect(numeric.status).toBe(400);
+  });
+
+  it("leaves a flat command-input payload's id to the handler", async () => {
+    const response = await send("PATCH", "/people/9", { id: "8", name: "Ann" });
+    expect(response.status).toBe(200);
   });
 });

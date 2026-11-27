@@ -57,6 +57,9 @@ const SCHEMA_TIER = [
   // (`effect/avoid-direct-json`); imports only `effect` modules.
   "internal/json.ts",
   "internal/media.ts",
+  // The §Member Names grammar `Resource.make` checks declared names against;
+  // a regular expression, importing nothing.
+  "internal/memberName.ts",
   "internal/operators.ts",
   // `Resource.createPayload` refuses a client-generated `data.id` with the
   // issue `Middleware.SchemaErrorsLive` answers 403; pure schema.
@@ -115,6 +118,7 @@ const HTTP_TIER = [
   "internal/conformance/core.ts",
   "internal/conformance/crawl.ts",
   "internal/conformance/evaluation.ts",
+  "internal/conformance/fetching.ts",
   "internal/conformance/links.ts",
   "internal/conformance/pagination.ts",
   "internal/conformance/profile.ts",
@@ -135,6 +139,7 @@ const HTTP_TIER = [
   "internal/servedTypes.ts",
   "internal/sparse.ts",
   "internal/vocabulary.ts",
+  "internal/wireFieldsets.ts",
   "internal/wireNames.ts",
 ];
 

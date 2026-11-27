@@ -83,11 +83,12 @@ import { parse, stringify } from "./internal/json.js";
  *
  * A JSON:API **profile**, not an `ext`: it adds no document members and
  * changes no base-spec semantics, it only fixes how a server interprets a
- * request header. Servers advertise it in the top-level `jsonapi` member (see
- * {@link jsonapi}) and may also name it in the response `Content-Type`'s
- * `profile` parameter. Per JSON:API §5, a profile a server does not know is
- * ignored, never rejected — so nothing about request handling keys off a
- * client naming it.
+ * request header. A server that applied it MUST name it in the response
+ * `Content-Type`'s `profile` parameter (JSON:API 1.1 §6.1), which every
+ * endpoint declared with `idempotency` does by itself; the top-level `jsonapi`
+ * member (see {@link jsonapi}) may name it as well, as extra information. Per
+ * JSON:API §5, a profile a server does not know is ignored, never rejected —
+ * so nothing about request handling keys off a client naming it.
  *
  * An incompatible change to the profile is `v2`.
  *
@@ -148,9 +149,10 @@ export const HEADER = "idempotency-key";
 export const REPLAY_HEADER = "idempotency-replayed";
 
 /**
- * A ready-made top-level `jsonapi` member value advertising support for the
- * idempotency profile — the spec-native way for a client to discover that a
- * server honours it.
+ * A ready-made top-level `jsonapi` member value naming the idempotency
+ * profile. It is extra information: the response `Content-Type`'s `profile`
+ * parameter is what says the profile was applied (JSON:API 1.1 §6.1, §7.7),
+ * and an endpoint declared with `idempotency` sends it.
  *
  * @example
  * ```ts

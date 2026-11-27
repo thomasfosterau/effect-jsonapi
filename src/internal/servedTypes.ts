@@ -54,3 +54,34 @@ export const conflictingType = (
     Option.map(decodeResourceObjectType(body), ({ data }) => data.type),
     (type) => !served.includes(type),
   );
+
+/**
+ * Marks an update endpoint whose payload is the resource's own
+ * `updatePayload`: `Middleware.SchemaErrorsLive` answers a `data.id` that
+ * differs from the `:id` path parameter with 409 Conflict before the handler
+ * runs (§Updating Resources → 409 Conflict). The value names the path
+ * parameter.
+ *
+ * @internal
+ */
+export class PathIdentified extends Context.Service<PathIdentified, string>()(
+  "effect-jsonapi/PathIdentified",
+) {}
+
+const decodeResourceObjectId = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ data: Schema.Struct({ id: Schema.String }) })),
+);
+
+/**
+ * The `data.id` a request body sent, when it is a string other than `pathId`.
+ * Both are compared in their wire form, the one the resource's id codec
+ * encodes to. A body that is not JSON, or whose id is missing or not a
+ * string, is none: the payload schema decides it.
+ *
+ * @internal
+ */
+export const conflictingId = (body: string, pathId: string): Option.Option<string> =>
+  Option.filter(
+    Option.map(decodeResourceObjectId(body), ({ data }) => data.id),
+    (id) => id !== pathId,
+  );

@@ -21,6 +21,7 @@ import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
+import * as SchemaGetter from "effect/SchemaGetter";
 import * as SchemaIssue from "effect/SchemaIssue";
 import { tryStringify } from "./json.js";
 import { declarationError } from "./errors.js";
@@ -101,7 +102,12 @@ const noMembers = (declared: MutableHashSet.MutableHashSet<PropertyKey>, cap: nu
     (input, ast, options) => {
       if (!P.isObject(input)) return "Expected object";
       const undeclared: Array<PropertyKey> = [
-        ...Arr.filter(R.keys(input), (key) => !MutableHashSet.has(declared, key)),
+        // An @-member (JSON:API 1.1 §7.10.2) may appear anywhere and is
+        // ignored: it is never undeclared, and the struct drops it on decode.
+        ...Arr.filter(
+          R.keys(input),
+          (key) => !MutableHashSet.has(declared, key) && !key.startsWith("@"),
+        ),
         ...Arr.filter(
           Object.getOwnPropertySymbols(input),
           (key) =>
@@ -146,6 +152,43 @@ const noMembers = (declared: MutableHashSet.MutableHashSet<PropertyKey>, cap: nu
 // `identifier`, a `message` names no OpenAPI component and is not copied into
 // the JSON Schema, and it changes no parse: only the text of that issue.
 const nullAsObject = { message: "Expected object" } as const;
+
+// A struct with fields drops every key it doesn't declare, @-members
+// included; one with no fields returns its input as is, so for it they are
+// dropped by a decoding step of their own.
+const isAtMember = (key: PropertyKey): boolean => P.isString(key) && key.startsWith("@");
+
+// The OpenAPI document renders this encoded side, so it carries the closed
+// object the closing check describes; the check itself runs on the outer node.
+// oxlint-disable-next-line effect/require-filter-metadata -- anonymous, as `noMembers` is
+const describedClosed = Schema.makeFilter<unknown>(() => true, {
+  toJsonSchema: () => ({ type: "object", additionalProperties: false }),
+});
+
+const EmptyObject = Schema.Struct({}).annotate(nullAsObject).check(describedClosed);
+
+// A non-object passes through for the closing check to reject, and an input
+// with no @-member (the usual case) is returned as is. Every other own
+// enumerable key, a symbol included, is kept for the closing check to judge.
+const withoutAtMembers = (input: typeof EmptyObject.Type): typeof EmptyObject.Type =>
+  P.isObject(input) && Arr.some(R.keys(input), isAtMember)
+    ? R.fromEntries(
+        Arr.map(
+          Arr.filter(
+            Reflect.ownKeys(input),
+            (key) => !isAtMember(key) && Object.prototype.propertyIsEnumerable.call(input, key),
+          ),
+          (key) => [key, Object.getOwnPropertyDescriptor(input, key)?.value] as const,
+        ),
+      )
+    : input;
+
+const dropAtMembers = EmptyObject.pipe(
+  Schema.decode({
+    decode: SchemaGetter.transform(withoutAtMembers),
+    encode: SchemaGetter.passthrough(),
+  }),
+);
 
 /**
  * `Schema.Struct(fields)`, closed: a member of its input that `fields` doesn't
@@ -195,7 +238,8 @@ export const closedStruct = <const Fields extends Schema.Struct.Fields>(
   fields: Fields,
   cap: number,
 ): Schema.Struct<Fields> => {
-  const struct = R.isEmptyReadonlyRecord(fields)
+  const empty = R.isEmptyReadonlyRecord(fields);
+  const struct = empty
     ? Schema.Struct<Fields>(fields).annotate(nullAsObject)
     : Schema.Struct(fields);
   const { ast } = struct;
@@ -210,7 +254,7 @@ export const closedStruct = <const Fields extends Schema.Struct.Fields>(
       ast.indexSignatures,
       ast.annotations,
       checks,
-      ast.encoding,
+      empty ? dropAtMembers.ast.encoding : ast.encoding,
       ast.context,
       checks,
     ),

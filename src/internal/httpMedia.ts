@@ -16,7 +16,7 @@
  */
 import type * as Schema from "effect/Schema";
 import { HttpApiSchema } from "effect/http-api";
-import { ATOMIC_MEDIA_TYPE } from "./media.js";
+import { ATOMIC_MEDIA_TYPE, mediaTypeWith } from "./media.js";
 
 export { asJsonApi, asMediaType } from "../MediaType.js";
 
@@ -38,5 +38,24 @@ const JSONAPI_ATOMIC = { contentType: ATOMIC_MEDIA_TYPE } as const;
  */
 export const asJsonApiAtomic = <S extends Schema.Top>(schema: S, status?: number) => {
   const body = schema.pipe(HttpApiSchema.asJson(JSONAPI_ATOMIC));
+  return status === undefined ? body : body.pipe(HttpApiSchema.status(status));
+};
+
+/**
+ * {@link asJsonApi} with the `profile` parameter naming `profiles` on the
+ * media type, when there are any (JSON:API 1.1 §6.1: a server MUST name the
+ * profiles it applied to a document). With none, the bare JSON:API media
+ * type, as {@link asJsonApi} registers it.
+ *
+ * @internal
+ */
+export const asJsonApiProfiled = <S extends Schema.Top>(
+  schema: S,
+  profiles?: ReadonlyArray<string>,
+  status?: number,
+) => {
+  const body = schema.pipe(
+    HttpApiSchema.asJson({ contentType: mediaTypeWith(undefined, profiles) }),
+  );
   return status === undefined ? body : body.pipe(HttpApiSchema.status(status));
 };

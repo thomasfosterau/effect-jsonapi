@@ -771,7 +771,8 @@ export const normalise = <N extends Node>(node: N, fields: LiteralCodecs): N =>
 /**
  * The JSON:API profile URI of the filter grammar, version 1. Servers that
  * implement the grammar advertise it on the media type of their responses:
- * `Content-Type: application/vnd.api+json; profile="…"`. Nothing about request
+ * `Content-Type: application/vnd.api+json; profile="…"`. Pass it in an
+ * endpoint's `profiles` option to have the endpoint do so. Nothing about request
  * handling keys off it — an endpoint declared with `filter: true` speaks the
  * grammar whether or not the client names the profile.
  *

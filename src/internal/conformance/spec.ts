@@ -26,7 +26,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { declaresName } from "../declaredQuery.js";
 import * as Linkage from "../linkage.js";
-import { MEDIA_TYPE } from "../media.js";
+import { MEDIA_TYPE, variesOnAccept } from "../media.js";
 import { counted, listed } from "./crawl.js";
 import {
   relatedDereferences,
@@ -39,6 +39,15 @@ import {
 } from "./links.js";
 import { linksEnumerateCollection } from "./pagination.js";
 import { atomicRules } from "./atomic.js";
+import {
+  atMembersIgnored,
+  noUnrequestedIncluded,
+  paginationLinks,
+  relatedNotFound,
+  relatedToOneNull,
+  relationshipDataIdentifiers,
+  relationshipNotFound,
+} from "./fetching.js";
 import { atomicClientIdRules, clientIdRules } from "./clientIds.js";
 import { relationshipRules } from "./relationships.js";
 import {
@@ -193,6 +202,46 @@ const responseMediaType: RuleImpl = {
         }
       });
       return settle(responseMediaType.rule, resolved.length, findings, coverageNote(unresolved));
+    }),
+};
+
+const varyAccept: RuleImpl = {
+  rule: rule(
+    "spec/content-negotiation/vary-accept",
+    "Content Negotiation",
+    "content-negotiation-servers",
+    "SHOULD",
+    "Servers that support the `ext` or `profile` media type parameters SHOULD specify the `Vary` header with `Accept` as one of its values. This applies to responses with and without any profiles or extensions applied.",
+  ),
+  run: (ctx) =>
+    Effect.gen(function* () {
+      const { resolved, unresolved } = readable(ctx);
+      const target = resolved[0];
+      if (target === undefined)
+        return skip(varyAccept.rule, noProbeReason("JSON:API read endpoint", unresolved));
+      const findings: Array<Finding> = [];
+      const check = (what: string, observation: Observation) => {
+        if (variesOnAccept(observation.headers["vary"])) return;
+        findings.push(
+          finding(varyAccept.rule, {
+            detail: `${what} carried no \`Vary: Accept\``,
+            expected: "a `Vary` header naming `Accept`",
+            observed: render(observation.headers["vary"] ?? null),
+            probe: observation.probe,
+          }),
+        );
+      };
+      yield* eachSuccessfulRead(ctx, resolved, (path, observation) =>
+        check(`the ${observation.status} from ${path}`, observation),
+      );
+      // A response without the negotiated representation: the 406 a
+      // parameterised `Accept` provokes.
+      const refused = yield* ctx.request({
+        url: target.path,
+        headers: { accept: `${MEDIA_TYPE};charset=utf-8` },
+      });
+      if (refused.status === 406) check(`the 406 from ${target.path}`, refused);
+      return settle(varyAccept.rule, resolved.length + 1, findings, coverageNote(unresolved));
     }),
 };
 
@@ -2543,6 +2592,73 @@ const judgeConflict = (target: Target, payload: Payload, observation: Observatio
   ]);
 };
 
+/**
+ * An update rule that sends the fixture's update to a resource the kit just
+ * created with its resource object's `type` or `id` replaced by one that
+ * doesn't match the endpoint, and expects 409.
+ */
+const updateConflict = (
+  member: "type" | "id",
+  requirement: string,
+  replace: (type: string, id: string) => string,
+): RuleImpl => {
+  const conflictRule = rule(
+    `spec/status/update-conflict-${member}`,
+    "Updating Resources",
+    "crud-updating-responses-409",
+    "MUST",
+    requirement,
+  );
+  return {
+    creates: true,
+    rule: conflictRule,
+    run: (ctx) =>
+      overTargets(ctx, conflictRule, targets(ctx, "update"), "update endpoint", (target) =>
+        withCreated(
+          ctx,
+          conflictRule,
+          target,
+          viaCreateEndpoint(ctx, target),
+          onAccepted(target, (created) =>
+            Result.match(Result.all({ id: ownId(created), patch: buildUpdate(target) }), {
+              onFailure: (reason) => Effect.succeed(undecided(reason)),
+              onSuccess: ({ id, patch }) => {
+                const type = created.payload.type;
+                const sent = replace(type, id);
+                return sendUpdate(ctx, target, type, id, patch, { [member]: sent }).pipe(
+                  Effect.map((observation): Verdict => {
+                    if (observation.status === 0)
+                      return undecided(`the PATCH got no answer (${describe(observation)})`);
+                    if (observation.status === 409) return decided(1, []);
+                    return decided(1, [
+                      finding(conflictRule, {
+                        detail: `a PATCH to ${observation.probe.url} of writes["${target.key}"].update with \`${member}\` ${render(sent)} in its resource object answered ${observation.status}${succeeded(observation) ? ", accepting it" : ""}`,
+                        expected: "409 Conflict",
+                        observed: describe(observation),
+                        probe: observation.probe,
+                      }),
+                    ]);
+                  }),
+                );
+              },
+            }),
+          ),
+        ),
+      ),
+  };
+};
+
+const UPDATE_CONFLICT =
+  "A server MUST return 409 Conflict when processing a PATCH request in which the resource object's `type` or `id` do not match the server's endpoint.";
+
+const updateConflictType = updateConflict("type", UPDATE_CONFLICT, () => UNSERVED_TYPE);
+
+const updateConflictId = updateConflict(
+  "id",
+  UPDATE_CONFLICT,
+  (_, id) => `${id}-conformance-other`,
+);
+
 // ---------------------------------------------------------------------------
 // Reading a write back
 // ---------------------------------------------------------------------------
@@ -2788,6 +2904,7 @@ const reachable: RuleImpl = {
 export const rules: ReadonlyArray<RuleImpl> = [
   reachable,
   responseMediaType,
+  varyAccept,
   contentTypeParameters,
   acceptParameters,
   acceptWeight,
@@ -2800,6 +2917,8 @@ export const rules: ReadonlyArray<RuleImpl> = [
   fullLinkage,
   noDuplicateResources,
   includedOnInclude,
+  noUnrequestedIncluded,
+  relationshipDataIdentifiers,
   resourceIdentification,
   jsonApiObject,
   errorDocumentStructure,
@@ -2824,6 +2943,7 @@ export const rules: ReadonlyArray<RuleImpl> = [
   includeBracketed,
   sortBracketed,
   linksEnumerateCollection,
+  paginationLinks,
   resourceSelfDereferences,
   relatedDereferences,
   relatedMatchesLinkage,
@@ -2832,12 +2952,18 @@ export const rules: ReadonlyArray<RuleImpl> = [
   topLevelSelfDereferences,
   topLevelSelfMatchesDocument,
   resourceNotFound,
+  relationshipNotFound,
+  relatedNotFound,
+  relatedToOneNull,
   createResponseDocument,
   createLocation,
   createLocationMatchesSelf,
   updateResponse,
   deleteResponse,
   createConflictType,
+  updateConflictType,
+  updateConflictId,
+  atMembersIgnored,
   createReadBack,
   updateReadBack,
   ...clientIdRules,

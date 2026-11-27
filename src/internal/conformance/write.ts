@@ -877,7 +877,9 @@ export const viaClientId = (ctx: Context, target: WriteTarget, id: string): Via 
 /**
  * Sends `patch` — the fixture's update — to `type:id`, a resource the kit
  * created, through the target's update endpoint, with a fresh
- * `Idempotency-Key` when that endpoint requires one.
+ * `Idempotency-Key` when that endpoint requires one. `as` replaces the
+ * resource object's `type` or `id` (not the URL's): the conflict probes send a
+ * resource object that does not match the endpoint.
  *
  * @internal
  */
@@ -887,6 +889,7 @@ export const sendUpdate = (
   type: string,
   id: string,
   patch: Patch,
+  as?: { readonly type?: string; readonly id?: string },
 ): Effect.Effect<Observation> =>
   idempotencyHeaders(target.endpoint).pipe(
     Effect.flatMap((key) =>
@@ -894,7 +897,7 @@ export const sendUpdate = (
         method: target.endpoint.method,
         url: pathFor(target.endpoint, id),
         headers: { ...writeHeaders, ...key },
-        body: { data: { ...patch, type, id } },
+        body: { data: { ...patch, type: as?.type ?? type, id: as?.id ?? id } },
       }),
     ),
   );

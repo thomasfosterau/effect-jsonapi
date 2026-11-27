@@ -1801,14 +1801,57 @@ export const collection = <
 // ---------------------------------------------------------------------------
 
 /**
+ * Options for {@link relationshipLink}, {@link relatedLink} and
+ * {@link paginatedRelationship}.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export interface LinkOptions {
+  /**
+   * A prefix the api is mounted under, such as `/api/v1` or
+   * `https://example.com/api`, written before the path as given (a trailing
+   * `/` is dropped). Defaults to none: a root-relative path.
+   *
+   * @since 0.23.0
+   */
+  readonly base?: string;
+}
+
+// Each segment is percent-encoded, so an id carrying `/`, `?`, `#`, `%` or a
+// space names the one path segment the router decodes back from `:id`.
+const linkPath = (segments: ReadonlyArray<string>, options?: LinkOptions): string =>
+  `${(options?.base ?? "").replace(/\/$/, "")}/${segments.map(encodeURIComponent).join("/")}`;
+
+/**
  * The canonical relationship-endpoint URL:
- * `/<type>/<id>/relationships/<name>`.
+ * `/<type>/<id>/relationships/<name>`, each segment percent-encoded, under
+ * `options.base` when given.
+ *
+ * @example
+ * ```ts
+ * import { Handlers } from "@thomasfosterau/effect-jsonapi"
+ * import { strictEqual } from "node:assert"
+ *
+ * strictEqual(
+ *   Handlers.relationshipLink("articles", "a/b?c", "author"),
+ *   "/articles/a%2Fb%3Fc/relationships/author"
+ * )
+ * strictEqual(
+ *   Handlers.relationshipLink("articles", "1", "author", { base: "/api/v1" }),
+ *   "/api/v1/articles/1/relationships/author"
+ * )
+ * ```
  *
  * @since 0.1.0
  * @category constructors
  */
-export const relationshipLink = (type: string, id: string, name: string): string =>
-  `/${type}/${id}/relationships/${name}`;
+export const relationshipLink = (
+  type: string,
+  id: string,
+  name: string,
+  options?: LinkOptions,
+): string => linkPath([type, id, "relationships", name], options);
 
 /**
  * A `308 Permanent Redirect` to `location`, with no body: what a handler
@@ -1852,13 +1895,18 @@ export const redirect = (location: string): HttpServerResponse.HttpServerRespons
   HttpServerResponse.empty({ status: 308, headers: { location } });
 
 /**
- * The canonical related-resource URL: `/<type>/<id>/<name>`.
+ * The canonical related-resource URL: `/<type>/<id>/<name>`, each segment
+ * percent-encoded, under `options.base` when given.
  *
  * @since 0.1.0
  * @category constructors
  */
-export const relatedLink = (type: string, id: string, name: string): string =>
-  `/${type}/${id}/${name}`;
+export const relatedLink = (
+  type: string,
+  id: string,
+  name: string,
+  options?: LinkOptions,
+): string => linkPath([type, id, name], options);
 
 /**
  * Builds the relationship object value for a `paginated` relationship: no
@@ -1878,10 +1926,12 @@ export const relatedLink = (type: string, id: string, name: string): string =>
  * - `false`: no `self` member, for an API that declares no relationship
  *   endpoint for this relationship.
  *
- * `related` is always written, and always as the default
- * `/<type>/<id>/<name>` — the `self` option never changes it, so a custom
- * `self` under another prefix (say `/v2/…`) still pairs with an unprefixed
- * `related`. It is the only way to reach a paginated relationship's members.
+ * `related` is always written: `/<type>/<id>/<name>` by default, or the
+ * `related` option verbatim. The `self` option never changes it, so a custom
+ * `self` under another prefix (say `/v2/…`) needs a matching `related`, or
+ * pass `base` to put both defaults under the prefix. It is the only way to
+ * reach a paginated relationship's members. The default links percent-encode
+ * each segment, as {@link relationshipLink} does.
  *
  * The option only shapes the relationship object. The pagination links of the
  * relationship endpoint's own response (`first`/`next`/`prev`/`last`) are built
@@ -1946,10 +1996,25 @@ export const paginatedRelationship = <const Self extends string | false = never>
      * @since 0.17.0
      */
     readonly self?: Self;
+    /**
+     * The relationship's `related` link, verbatim (not validated): for a
+     * related endpoint served at another path. Omit it for
+     * `/<type>/<id>/<name>`.
+     *
+     * @since 0.23.0
+     */
+    readonly related?: string;
+    /**
+     * A prefix both default links are written under, as in
+     * {@link LinkOptions}. A `self` or `related` string is used as given.
+     *
+     * @since 0.23.0
+     */
+    readonly base?: string;
   },
 ): PaginatedRelationshipValue<Self> => {
-  const self = options?.self ?? relationshipLink(type, id, name);
-  const related = relatedLink(type, id, name);
+  const self = options?.self ?? relationshipLink(type, id, name, options);
+  const related = options?.related ?? relatedLink(type, id, name, options);
   return {
     links: self === false ? { related } : { self, related },
   } as PaginatedRelationshipValue<Self>;

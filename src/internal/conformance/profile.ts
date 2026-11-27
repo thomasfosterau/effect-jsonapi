@@ -426,17 +426,20 @@ const advertisedOn = (
   observation: Observation,
   requests = 1,
 ): Verdict => {
-  const named = [...documentProfiles(observation), ...mediaTypeProfiles(observation)];
-  if (named.includes(IDEMPOTENCY_PROFILE_URI)) return decided(requests, []);
+  if (mediaTypeProfiles(observation).includes(IDEMPOTENCY_PROFILE_URI))
+    return decided(requests, []);
   if (observation.text === "")
     return undecided(
-      `${write} answered ${observation.status} with no document, and its media type does not name the profile, so no \`jsonapi\` member could`,
+      `${write} answered ${observation.status} with no document, so there is no document the profile was applied to`,
     );
   const jsonapi = topLevel(observation.body, "jsonapi");
+  const inDocumentOnly = documentProfiles(observation).includes(IDEMPOTENCY_PROFILE_URI);
   return decided(requests, [
     finding(rule, {
-      detail: `the ${observation.status} ${write}, which accepts \`Idempotency-Key\`, does not advertise the profile`,
-      expected: `\`jsonapi.profile\` or the media type's \`profile\` parameter naming ${IDEMPOTENCY_PROFILE_URI}`,
+      detail: inDocumentOnly
+        ? `the ${observation.status} ${write} names the profile in \`jsonapi.profile\` only, not on its media type`
+        : `the ${observation.status} ${write}, which accepts \`Idempotency-Key\`, does not advertise the profile`,
+      expected: `the media type's \`profile\` parameter naming ${IDEMPOTENCY_PROFILE_URI}`,
       observed: `jsonapi: ${Option.match(jsonapi, { onNone: () => "(none)", onSome: quote })} · Content-Type: ${Option.match(
         observation.contentType,
         { onNone: () => "(none)", onSome: quote },
@@ -523,8 +526,9 @@ const probeUpdate = (ctx: Context, rule: Rule, target: WriteTarget) =>
   );
 
 /**
- * The Idempotency-Key profile's §1: a server advertises the profile in `jsonapi.profile`
- * and MAY also name it on the media type, so either place passes. Only a write
+ * JSON:API 1.1 §6.1: a server names a profile it applied in the `profile`
+ * parameter of the response `Content-Type`; `jsonapi.profile` is extra
+ * information, so naming it there alone fails. Only a write
  * shows it — the kit cannot read an endpoint's answer to a write without
  * making one — so the rule runs, on the `writes` fixture under
  * `mutating: true`, one create per create endpoint declaring the header and
@@ -539,8 +543,8 @@ const advertisesIdempotencyProfile: RuleImpl = {
     "profile/idempotency/advertises-profile-uri",
     "§1 What the profile is, and is not",
     "profiles",
-    "SHOULD",
-    `A server implementing the Idempotency-Key profile SHOULD advertise it: the 2xx response to a create or an update on an endpoint that accepts the \`Idempotency-Key\` header names \`${IDEMPOTENCY_PROFILE_URI}\` in the top-level \`jsonapi.profile\` member (\`Idempotency.jsonapi\`) or in the \`profile\` parameter of its media type.`,
+    "MUST",
+    `Servers MUST specify the \`profile\` media type parameter in the \`Content-Type\` header when they have applied one or more profiles to a JSON:API document: the 2xx document answering a create or an update on an endpoint that accepts the \`Idempotency-Key\` header names \`${IDEMPOTENCY_PROFILE_URI}\` in the \`profile\` parameter of its media type. The top-level \`jsonapi.profile\` member (\`Idempotency.jsonapi\`) may name it too, but does not replace the parameter.`,
   ),
   run: (ctx) =>
     overTargetsAll(

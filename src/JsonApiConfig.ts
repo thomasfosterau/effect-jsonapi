@@ -41,6 +41,21 @@ import * as Layer from "effect/Layer";
 export type AcceptWithoutJsonApi = "notAcceptable" | "serve";
 
 /**
+ * What the middleware does with a request's sparse fieldsets on the encoded
+ * 2xx document (JSON:API 1.1 §Sparse Fieldsets: an endpoint MUST NOT include
+ * fields the request excludes).
+ *
+ * - `"project"` (the default): remove them, in the primary data and in
+ *   `included` alike.
+ * - `"verify"`: answer a document carrying one with the opaque JSON:API 500.
+ * - `"handler"`: leave fieldsets to the handler, unchecked.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export type SparseFieldsets = "project" | "verify" | "handler";
+
+/**
  * The api-wide policies. Each member is optional in {@link layer}'s options
  * and falls back to {@link defaults}.
  *
@@ -72,6 +87,19 @@ export interface Policy {
    * `true`.
    */
   readonly checkLinkage: boolean;
+  /**
+   * `false` leaves `Vary` to the api, rather than the middleware adding
+   * `Accept` to every response it handles; see
+   * `Middleware.VaryOptions.varyAccept`. Defaults to `true`.
+   */
+  readonly varyAccept: boolean;
+  /**
+   * What the middleware does with a request's sparse fieldsets on the
+   * encoded document; see {@link SparseFieldsets} and
+   * `Middleware.SchemaErrorsOptions.sparseFieldsets`. Defaults to
+   * `"project"`.
+   */
+  readonly sparseFieldsets: SparseFieldsets;
 }
 
 /**
@@ -86,8 +114,9 @@ export type Options = Partial<Policy>;
 /**
  * Today's behaviour, the policy an app gets when it provides no
  * {@link JsonApiConfig}: no extensions, a 406 for an `Accept` without the
- * JSON:API media type, `_` admitted as a query parameter, and the
- * full-linkage check on.
+ * JSON:API media type, `_` admitted as a query parameter, the full-linkage
+ * check on, `Vary: Accept` on every response, and sparse fieldsets applied to
+ * every encoded document.
  *
  * @since 0.23.0
  * @category constants
@@ -97,6 +126,8 @@ export const defaults: Policy = {
   acceptWithoutJsonApi: "notAcceptable",
   allowedQueryParameters: ["_"],
   checkLinkage: true,
+  varyAccept: true,
+  sparseFieldsets: "project",
 };
 
 /**

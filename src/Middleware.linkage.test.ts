@@ -277,14 +277,18 @@ describe("SchemaErrorsLive exempts what the request's sparse fieldsets exclude",
   };
 
   it.each([
-    "include=author&fields[articles]=title",
-    "include=author&fields[articles]=",
-    "include=author&fields%5Barticles%5D=title",
-  ])("serves a member the excluded relationship would have linked: %s", async (query) => {
-    const response = await serve(query);
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({ data: projected.data, included: [ann] });
-  });
+    ["include=author&fields[articles]=title", { title: "Hi" }],
+    // The empty fieldset also excludes `title`, which the middleware drops.
+    ["include=author&fields[articles]=", {}],
+    ["include=author&fields%5Barticles%5D=title", { title: "Hi" }],
+  ])(
+    "serves a member the excluded relationship would have linked: %s",
+    async (query, attributes) => {
+      const response = await serve(query);
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ data: { ...projected.data, attributes }, included: [ann] });
+    },
+  );
 
   it.each(["include=author", "include=author&fields[people]=name"])(
     "still answers the orphan with the JSON:API 500 when no fieldset excluded a relationship it reaches: %s",
