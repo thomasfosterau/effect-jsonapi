@@ -1,0 +1,5 @@
+---
+"@thomasfosterau/effect-jsonapi": minor
+---
+
+Add custom filter operators and filter dialects. `Filter.operator(name, { list, appliesTo, literal })` makes an operator an app declares on an attribute next to the built-ins (`Filter.able(["eq", like])`, or `filter: ["eq", like]`). It decodes to a new `Filter.Custom` node, built with `Filter.custom`, and `Query.FilterAst` types it per field (`Query.FilterCustomNodes`, `Resource.FilterCustomOperators`). `Resource.filterable` entries name custom operators in `operators` and carry their definitions in `custom`. `Filter.Ast` and its node types take a third parameter for the custom nodes, and the untyped `Filter.Node` includes `Custom`, so an exhaustive match over `Filter.Node` needs a `Custom` case. `Filter.Dialect` separates the query syntax from the declaration: `Filter.bracket` is today's grammar and the default, `Filter.dialect` makes another, and a dialect is passed as a query's `filter` option or to `Query.Filter(resource, { dialect })`.

@@ -123,6 +123,22 @@ title: attribute(Schema.String, { filter: ["eq", Filter.Op.contains, Filter.Op.s
 
 A text condition decodes to a `Filter.Text` node (`{ _tag: "Text", op, field, value }`). Its `value` is the unescaped wire string, never decoded through the attribute's schema, since a fragment of a valid value need not be one (`startsWith=dra` on a `"draft" | "published"` attribute). The value is one scalar, so a comma is written `\,`. Matching is case-sensitive and by code point, with no Unicode normalisation or collation. The empty fragment matches every value, and a NULL value gives UNKNOWN, as every comparison does. `Query.FilterAst` includes `Text` only for the fields that declare a text operator (`Query.FilterTextFields`), so an exhaustive match over a resource with none needs no new case. The untyped `Filter.Node` includes it.
 
+An app can add operators of its own. `Filter.operator(name, options)` makes one: `list: true` takes a comma list as `in` does, `appliesTo` limits it to attributes of some encoded kinds (`"string"`, `"number"`, `"boolean"`), and `literal` gives it a literal codec of its own instead of the field's. Declare it on an attribute by passing the operator itself, next to the built-ins:
+
+```ts skip-type-checking
+const like = Filter.operator("like", { appliesTo: ["string"] });
+const anyOf = Filter.operator("anyOf", { list: true });
+
+name: Schema.String.pipe(Filter.able(["eq", like])),
+kind: attribute(Schema.Literals(["cafe", "park"]), { filter: ["eq", anyOf] }),
+// ?filter[name][like]=%25x%25     →  Filter.custom(like, "name", "%x%")
+// ?filter[kind][anyOf]=park,cafe  →  Filter.custom(anyOf, "kind", ["cafe", "park"])
+```
+
+A custom condition decodes to a `Filter.Custom` node (`{ _tag: "Custom", op, field, value }`), its literals decoded and checked like any other, and `Query.FilterAst` types it per field and operator. Its meaning is the app's to define and document: the profile covers only the built-ins.
+
+The bracket grammar is one `Filter.Dialect`, `Filter.bracket`, and the default. Another dialect, such as an expression syntax in the bare `filter` key, is a pair of functions made with `Filter.dialect`. Its `decode` reads the `filter` family keys and checks each condition with the `DialectContext` it is given, so unknown fields, undeclared operators and bad literals are rejected with the same messages. Its `encode` spells a normal-form tree whose literals are already wire strings. Pass the dialect as the `filter` option (`Endpoint.list(Place, { filter: colon })`) or to `Query.Filter(resource, { dialect })`. Handlers, the client and the 400s work as before. An endpoint on another dialect does not speak the profile below, so it should not advertise it, and the conformance kit's filter rules do not apply to it.
+
 The grammar is a JSON:API **profile**, `Filter.PROFILE_URI` (`https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1`). Advertise it on the media type of responses from endpoints that speak it — `Content-Type: application/vnd.api+json; profile="…"` — clients that do not name it are served the same way, since unknown profiles are ignored, never rejected.
 
 The profile defines what a tree **means**, not only how it is spelled: three-valued (Kleene) logic, a truth table per operator including every NULL case, the comparison domain of each attribute type, and the line between a 400 and an empty result (`Filter` documents each operator). Handlers are what evaluate a tree, so those semantics are the contract they answer to; this package builds, validates and canonicalises trees and evaluates none.

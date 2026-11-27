@@ -193,6 +193,8 @@ export const evaluate = (node: Filter.Node, row: Row): Truth =>
     // F-IN-2: the negation of F-IN-1.
     NotIn: ({ field, values }) => NOT[membership(row, field, values)],
     Text: ({ op, field, value }) => textMatch(op, row, field, value),
+    // The profile gives a custom operator no meaning, and the kit sends none.
+    Custom: (): Truth => "UNKNOWN",
     // F-ISNULL-1 / F-ISNULL-2: total, never UNKNOWN.
     IsNull: ({ field, negated }) => truth(isNullIn(row, field) !== negated),
     // F-AND-1 / F-AND-2: the folds, with TRUE and FALSE as identities.
