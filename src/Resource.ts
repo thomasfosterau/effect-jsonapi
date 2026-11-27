@@ -2244,7 +2244,9 @@ type DeclaredOperators<D, Whole extends All, All extends string = Whole> = D ext
  * `Relationship.one(ref, { filter })` / `Relationship.optional(ref, { filter })`.
  * A plain schema attribute, a to-many relationship, or anything declared
  * without `filter`, is not filterable — the declaration fails closed, like
- * `include` / `fields` / `sort`.
+ * `include` / `fields` / `sort`. A to-one relationship declared with
+ * `traverse: true` adds its target's own filterable keys as dotted paths
+ * (`"author.name"`, {@link FilterPathKeys}).
  *
  * Resolved from the `Filter.able` marker alone, looked for on the attribute
  * schema itself and through `Schema.optionalKey` / `Schema.NullOr` around it.
@@ -2255,6 +2257,70 @@ type DeclaredOperators<D, Whole extends All, All extends string = Whole> = D ext
  * @category type-level
  */
 export type FilterableKeys<Res extends Any> = Res extends Any
+  ? OwnFilterableKeys<Res> | FilterPathKeys<Res>
+  : never;
+
+/**
+ * The to-one relationship keys of a resource declared with `traverse: true`:
+ * the relationships whose target's own filterable and sortable fields are
+ * reachable as dotted paths.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type TraversableKeys<Res extends Any> = Res extends Any
+  ? string extends RelationshipName<Res>
+    ? never
+    : {
+        [K in RelationshipName<Res>]: Res["relationships"][K] extends {
+          readonly kind: "one" | "optional";
+          readonly traverse: true;
+        }
+          ? K
+          : never;
+      }[RelationshipName<Res>]
+  : never;
+
+/**
+ * The dotted filter paths of a resource: for each {@link TraversableKeys}
+ * relationship, its target's own filterable keys prefixed with the
+ * relationship name (`"author.name"`, `"author.id"`). One hop: a target's own
+ * paths are not reached.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type FilterPathKeys<Res extends Any> = Res extends Any
+  ? {
+      [K in TraversableKeys<Res>]: `${K}.${OwnFilterableKeys<Target<Res, K>>}`;
+    }[TraversableKeys<Res>]
+  : never;
+
+/**
+ * The dotted sort paths of a resource: for each {@link TraversableKeys}
+ * relationship, its target's own sortable attributes prefixed with the
+ * relationship name (`"author.name"`).
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type SortPathKeys<Res extends Any> = Res extends Any
+  ? {
+      [K in TraversableKeys<Res>]: `${K}.${OwnSortableKeys<Target<Res, K>>}`;
+    }[TraversableKeys<Res>]
+  : never;
+
+/**
+ * What a `sort` allow-list may name: any attribute of the resource, and its
+ * dotted {@link SortPathKeys}.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type SortKeys<Res extends Any> = AttributeKeys<Res> | SortPathKeys<Res>;
+
+// The keys a resource declares filterable itself, without paths.
+type OwnFilterableKeys<Res extends Any> = Res extends Any
   ? | FilterableIdKey<Res>
     | {
         [K in AttributeKeys<Res>]: [FilterMarkerOf<AttributesOf<Res>[K]>] extends [never]
@@ -2273,7 +2339,15 @@ export type FilterableKeys<Res extends Any> = Res extends Any
  * @since 0.13.0
  * @category type-level
  */
-export type FilterOperators<Res extends Any, K extends FilterableKeys<Res>> =
+export type FilterOperators<
+  Res extends Any,
+  K extends FilterableKeys<Res>,
+> = K extends `${infer Name extends TraversableKeys<Res>}.${infer Sub}`
+  ? OwnFilterOperators<Target<Res, Name>, Sub>
+  : OwnFilterOperators<Res, K>;
+
+// The operators of a key a resource declares filterable itself.
+type OwnFilterOperators<Res extends Any, K> =
   K extends FilterableIdKey<Res>
     ? FilterMarkerOf<Res["Id"]>["operators"]
     : K extends AttributeKeys<Res>
@@ -2288,7 +2362,9 @@ export type FilterOperators<Res extends Any, K extends FilterableKeys<Res>> =
 /**
  * The attribute keys of a resource declared sortable — whose schema is
  * `Sort.able` (piped, or via the `sort: true` sugar of `Resource.attribute`) —
- * as a union of string literals. A plain schema attribute is not sortable.
+ * as a union of string literals. A plain schema attribute is not sortable. A
+ * to-one relationship declared with `traverse: true` adds its target's own
+ * sortable attributes as dotted paths (`"author.name"`, {@link SortPathKeys}).
  *
  * Distributes over unions of resource definitions.
  *
@@ -2296,6 +2372,11 @@ export type FilterOperators<Res extends Any, K extends FilterableKeys<Res>> =
  * @category type-level
  */
 export type SortableKeys<Res extends Any> = Res extends Any
+  ? OwnSortableKeys<Res> | SortPathKeys<Res>
+  : never;
+
+// The attributes a resource declares sortable itself, without paths.
+type OwnSortableKeys<Res extends Any> = Res extends Any
   ? {
       [K in AttributeKeys<Res>]: SortDeclarationOf<AttributesOf<Res>[K]> extends true ? K : never;
     }[AttributeKeys<Res>]
@@ -2342,21 +2423,34 @@ export interface FilterableField<Op extends Filter.Operator, Literal, RD = never
  * @category type-level
  */
 export type Filterable<Res extends Any> = {
-  readonly [K in FilterableKeys<Res>]: K extends FilterableIdKey<Res>
+  readonly [
+    K in FilterableKeys<Res>
+  ]: K extends `${infer Name extends TraversableKeys<Res>}.${infer Sub}`
+    ? Sub extends keyof OwnFilterable<Target<Res, Name>>
+      ? OwnFilterable<Target<Res, Name>>[Sub]
+      : never
+    : K extends keyof OwnFilterable<Res>
+      ? OwnFilterable<Res>[K]
+      : never;
+};
+
+// The entries a resource declares filterable itself, without paths.
+type OwnFilterable<Res extends Any> = {
+  readonly [K in OwnFilterableKeys<Res>]: K extends FilterableIdKey<Res>
     ? FilterableField<
-        FilterOperators<Res, K>,
+        OwnFilterOperators<Res, K>,
         FilterMarkerOf<Res["Id"]>["literal"],
         Res["Id"]["DecodingServices"],
         Res["Id"]["EncodingServices"]
       >
     : K extends AttributeKeys<Res>
       ? FilterableField<
-          FilterOperators<Res, K>,
+          OwnFilterOperators<Res, K>,
           FilterMarkerOf<AttributesOf<Res>[K]>["literal"],
           AttributesOf<Res>[K]["DecodingServices"],
           AttributesOf<Res>[K]["EncodingServices"]
         >
-      : FilterableField<FilterOperators<Res, K>, Target<Res, K>["Id"]["Type"]>;
+      : FilterableField<OwnFilterOperators<Res, K>, Target<Res, K>["Id"]["Type"]>;
 };
 
 // The JSON scalar kinds a filter literal can take on the wire.
@@ -2737,8 +2831,10 @@ const nameOnlyFamilyAttributes = new WeakSet<object>();
  * is still refused. The default derived id is not filterable. An
  * {@link extend} with `inheritId: true` inherits the declaration.
  *
- * Downstream consumers read this to validate and plan filters; the `filter`
- * URL codec over the declaration lands in a follow-up.
+ * A to-one relationship declared with `traverse: true` (`Relationship.one(ref,
+ * { traverse: true })`) adds its target's own entries under dotted keys,
+ * unchanged: `author.name` carries `Person`'s `name` operators and codec. The
+ * target is read here, on first use, so declaration order does not matter.
  *
  * For a base-anchored {@link family} the base's declaration is reported; a
  * name-only family declares nothing.
@@ -2779,6 +2875,13 @@ const nameOnlyFamilyAttributes = new WeakSet<object>();
 export const filterable = <Res extends Any>(resource: Res): Filterable<Res> => {
   const attributes = resource.fields.attributes;
   if (nameOnlyFamilyAttributes.has(attributes)) return {} as Filterable<Res>;
+  return { ...ownFilterable(resource), ...withPaths(resource, ownFilterable) } as Filterable<Res>;
+};
+
+// The entries a resource declares filterable itself, without paths.
+const ownFilterable = (resource: Any): R.ReadonlyRecord<string, RuntimeFilterable> => {
+  const attributes = resource.fields.attributes;
+  if (nameOnlyFamilyAttributes.has(attributes)) return {};
   let result = filterableCache.get(attributes);
   if (result === undefined) {
     result = filterableFields(
@@ -2789,8 +2892,26 @@ export const filterable = <Res extends Any>(resource: Res): Filterable<Res> => {
     );
     filterableCache.set(attributes, result);
   }
-  return { ...result } as Filterable<Res>;
+  return result;
 };
+
+// The dotted-path entries of a resource: for each to-one relationship declared
+// `traverse: true`, its target's own entries (`own(target)`) keyed
+// `<relationship>.<key>`. Targets are resolved here, on first read, never in
+// `make`: definitions can be mutually recursive and out of order.
+const withPaths = <A>(
+  resource: Any,
+  own: (target: Any) => R.ReadonlyRecord<string, A>,
+): R.ReadonlyRecord<string, A> =>
+  R.fromEntries(
+    R.toEntries(resource.relationships).flatMap(([name, descriptor]) =>
+      Relationship.isToOne(descriptor) && descriptor.traverse
+        ? R.toEntries(own(descriptor.ref())).map(
+            ([key, entry]) => [`${name}.${key}`, entry] as const,
+          )
+        : [],
+    ),
+  );
 
 /**
  * The sortable attributes of a resource definition, at runtime: the keys whose
@@ -2806,6 +2927,10 @@ export const filterable = <Res extends Any>(resource: Res): Filterable<Res> => {
  * `sort` allow-list of `Query.schema` / `Endpoint.list`:
  * `Endpoint.list(R, { sort: Resource.sortable(R) })`. (`sort: true` keeps
  * meaning "every attribute".)
+ *
+ * A to-one relationship declared with `traverse: true` adds its target's own
+ * sortable attributes as dotted paths (`"author.name"`), after the resource's
+ * own.
  *
  * For a base-anchored {@link family} the base's declaration is reported; a
  * name-only family declares nothing.
@@ -2838,6 +2963,13 @@ export const filterable = <Res extends Any>(resource: Res): Filterable<Res> => {
  */
 export function sortable<Res extends Any>(resource: Res): ReadonlyArray<SortableKeys<Res>>;
 export function sortable(resource: Any): ReadonlyArray<string> {
+  if (nameOnlyFamilyAttributes.has(resource.fields.attributes)) return [];
+  const ownKeys = (target: Any) => R.fromEntries(ownSortable(target).map((key) => [key, key]));
+  return [...ownSortable(resource), ...R.keys(withPaths(resource, ownKeys))];
+}
+
+// The attributes a resource declares sortable itself, without paths.
+const ownSortable = (resource: Any): ReadonlyArray<string> => {
   const attributes = resource.fields.attributes;
   if (nameOnlyFamilyAttributes.has(attributes)) return [];
   let keys = sortableCache.get(attributes);
@@ -2845,8 +2977,8 @@ export function sortable(resource: Any): ReadonlyArray<string> {
     keys = sortableKeys(resource.type, attributes.fields);
     sortableCache.set(attributes, keys);
   }
-  return [...keys];
-}
+  return keys;
+};
 
 // Refuses, at definition time and naming the attribute, an input-only
 // descriptor (`resource: false`) that declares nothing — excluded from the

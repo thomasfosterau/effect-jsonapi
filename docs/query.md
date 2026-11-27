@@ -75,6 +75,8 @@ The operator vocabulary is a schema, `Filter.Operator` — a `Schema.Literals` o
 
 To-one relationships (`Relationship.one` / `Relationship.optional`) take a `filter` option and become filter fields valued by the related resource's id — `filter[supplier]=9` — with the target's `Id` schema as the literal codec, so the decoded literal is the branded id. Only `eq ne in nin isnull` apply to a relationship (`Relationship.FilterOperator`, a narrowing of `Filter.Operator`); `filter: true` means those five, and declaring an ordering operator is a definition-time error. To-many relationships are not fields.
 
+A to-one relationship declared `traverse: true` also reaches its target's own declarations as dotted paths. With `author: Relationship.one(() => Person, { traverse: true })` and `name` filterable and sortable on `Person`, `filter[author.name]=Ada` and `sort=-author.name` are legal, with `Person`'s operators and literal codec. The paths join `Resource.filterable` / `Resource.sortable` (and so `Resource.FilterableKeys` / `SortableKeys`), so `filter: true` and `sort: Resource.sortable(Article)` pick them up, and the 400 for an unknown field lists them. It is one hop: a path through the target's own `traverse` relationships is not reached, and a relationship without `traverse` contributes none. Handlers receive the dotted name as the condition's `field` or the sort term's `field`, and translate it to a join.
+
 The resource id becomes a filter field when the schema passed as `Resource.make`'s `id` option is `Filter.able`, piped last. JSON:API reserves `id` as a field name, so an attribute named `id` is still refused; the id schema is where the declaration goes:
 
 ```ts

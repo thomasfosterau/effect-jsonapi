@@ -144,6 +144,7 @@ export interface One<
   F extends FilterDeclaration = FilterDeclaration,
   K extends StorageKey = StorageKey,
   M extends Schema.Top = Schema.Top,
+  T extends boolean = boolean,
 > {
   readonly kind: "one";
   readonly ref: () => Res;
@@ -154,6 +155,14 @@ export interface One<
    */
   readonly "~target": Res;
   readonly filter: F;
+  /**
+   * Whether the target's own filterable and sortable fields are reachable
+   * through this relationship as dotted paths (`filter[author.name]`,
+   * `sort=author.name`). `false` unless declared with `traverse: true`.
+   *
+   * @since 0.24.0
+   */
+  readonly traverse: T;
   /**
    * The name of the field on the declaring resource's stored row that holds
    * the related resource's id (a foreign key such as `authorId`):
@@ -189,6 +198,7 @@ export interface Optional<
   F extends FilterDeclaration = FilterDeclaration,
   K extends StorageKey = StorageKey,
   M extends Schema.Top = Schema.Top,
+  T extends boolean = boolean,
 > {
   readonly kind: "optional";
   readonly ref: () => Res;
@@ -199,6 +209,14 @@ export interface Optional<
    */
   readonly "~target": Res;
   readonly filter: F;
+  /**
+   * Whether the target's own filterable and sortable fields are reachable
+   * through this relationship as dotted paths (`filter[author.name]`,
+   * `sort=author.name`). `false` unless declared with `traverse: true`.
+   *
+   * @since 0.24.0
+   */
+  readonly traverse: T;
   /**
    * The name of the field on the declaring resource's stored row that holds
    * the related resource's id (a foreign key such as `authorId`):
@@ -335,7 +353,8 @@ export interface one<
   F extends FilterDeclaration = false,
   K extends StorageKey = never,
   M extends Schema.Top = typeof AnyMeta,
-> extends One<Res, F, K, M> {}
+  T extends boolean = false,
+> extends One<Res, F, K, M, T> {}
 
 /**
  * The type of `Relationship.optional(ref)` — {@link Optional} with the
@@ -350,7 +369,8 @@ export interface optional<
   F extends FilterDeclaration = false,
   K extends StorageKey = never,
   M extends Schema.Top = typeof AnyMeta,
-> extends Optional<Res, F, K, M> {}
+  T extends boolean = false,
+> extends Optional<Res, F, K, M, T> {}
 
 /**
  * The type of `Relationship.many(ref)` — {@link Many}, named to read like the
@@ -438,9 +458,16 @@ export interface ToOneOptions<
   F extends FilterDeclaration = FilterDeclaration,
   K extends StorageKey = StorageKey,
   M extends Schema.Top = Schema.Top,
+  T extends boolean = boolean,
 > extends MetaOptions<M> {
   /** Make the relationship a filterable field of its resource (see {@link one}). */
   readonly filter?: F;
+  /**
+   * Expose the target's own filterable and sortable fields through this
+   * relationship as dotted paths (`filter[author.name]`, `sort=author.name`;
+   * see {@link one}).
+   */
+  readonly traverse?: T;
   /**
    * The relationship's storage {@link StorageKey}: the field of the declaring
    * resource's stored row that holds the related id. A non-empty string,
@@ -499,6 +526,15 @@ const storageKey = <K extends StorageKey>(
  * declaration is read by `Resource.filterable`; the literal codec is the
  * target's `Id` schema, resolved lazily.
  *
+ * Pass `traverse: true` to reach the target's own filterable and sortable
+ * fields through the relationship as dotted paths: `filter[author.name]=Ada`
+ * and `sort=author.name` when the target declares `name` filterable and
+ * sortable. The path keys join the declaring resource's
+ * `Resource.filterable` / `Resource.sortable` with the target's declaration
+ * (operators and literal codec) unchanged. One hop only: the target's own
+ * paths are not reached through it. A handler or data adapter translates a
+ * dotted field into a join.
+ *
  * Pass `key` to declare the relationship's storage key: the field of the
  * declaring resource's stored row that holds the related id (a foreign key,
  * `authorId`). It is a storage fact, not a wire one — on the wire the
@@ -547,17 +583,19 @@ export const one = <
   const F extends FilterDeclaration = false,
   const K extends StorageKey = never,
   M extends Schema.Top = typeof AnyMeta,
+  const T extends boolean = false,
 >(
   ref: () => Res,
-  options?: ToOneOptions<F, K, M>,
-): One<Res, NoInfer<F>, NoInfer<K>, NoInfer<M>> =>
+  options?: ToOneOptions<F, K, M, T>,
+): One<Res, NoInfer<F>, NoInfer<K>, NoInfer<M>, NoInfer<T>> =>
   ({
     kind: "one",
     ref,
     filter: options?.filter ?? false,
+    traverse: options?.traverse ?? false,
     key: storageKey("Relationship.one", Option.fromUndefinedOr(options?.key)),
     meta: options?.meta ?? AnyMeta,
-  }) as One<Res, NoInfer<F>, NoInfer<K>, NoInfer<M>>;
+  }) as One<Res, NoInfer<F>, NoInfer<K>, NoInfer<M>, NoInfer<T>>;
 
 /**
  * Declares an optional (nullable) to-one relationship: `data` is a resource
@@ -591,17 +629,19 @@ export const optional = <
   const F extends FilterDeclaration = false,
   const K extends StorageKey = never,
   M extends Schema.Top = typeof AnyMeta,
+  const T extends boolean = false,
 >(
   ref: () => Res,
-  options?: ToOneOptions<F, K, M>,
-): Optional<Res, NoInfer<F>, NoInfer<K>, NoInfer<M>> =>
+  options?: ToOneOptions<F, K, M, T>,
+): Optional<Res, NoInfer<F>, NoInfer<K>, NoInfer<M>, NoInfer<T>> =>
   ({
     kind: "optional",
     ref,
     filter: options?.filter ?? false,
+    traverse: options?.traverse ?? false,
     key: storageKey("Relationship.optional", Option.fromUndefinedOr(options?.key)),
     meta: options?.meta ?? AnyMeta,
-  }) as Optional<Res, NoInfer<F>, NoInfer<K>, NoInfer<M>>;
+  }) as Optional<Res, NoInfer<F>, NoInfer<K>, NoInfer<M>, NoInfer<T>>;
 
 /**
  * Declares a to-many relationship with inline linkage: `data` is an array of
