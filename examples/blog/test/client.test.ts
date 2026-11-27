@@ -8,7 +8,7 @@
  * façade synthesises without a server at all, all reduced to one message by one
  * accessor.
  */
-import { it } from "@effect/vitest";
+import { layer } from "@effect/vitest";
 import { assert, describe, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -38,7 +38,7 @@ const Provided = Layer.provide(ServerHttpClient, Registry.platformLayer);
 
 const run = <A, E>(
   effect: Effect.Effect<A, E, Layer.Success<typeof Provided> | Scope.Scope>,
-): Effect.Effect<A, E> => effect.pipe(Effect.scoped, Effect.provide(Provided));
+): Effect.Effect<A, E, Layer.Success<typeof Provided>> => Effect.scoped(effect);
 
 /** A load balancer in front of the server, answering with its own opaque body. */
 const gateway = (body: string, status: number, contentType: string): HttpClient.HttpClient =>
@@ -51,154 +51,160 @@ const gateway = (body: string, status: number, contentType: string): HttpClient.
     ),
   );
 
-describe("blog client: negotiation", () => {
-  it.effect("round-trips a document against the blog server", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
+// Every test gets a fresh in-memory application.
+layer(Provided, { buildPerTest: true })((it) => {
+  describe("blog client: negotiation", () => {
+    it.effect("round-trips a document against the blog server", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* blogClient;
+            return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
+          }),
+        );
+
+        expect(document.data).toMatchObject({
+          type: "articles",
+          attributes: { title: "JSON:API paints my bikeshed!" },
+        });
+      }),
+    );
+
+    it.effect("advertises the extension the server supports, on both headers", () =>
+      Effect.gen(function* () {
+        const sent: Array<Record<string, string>> = [];
+        const recorder = HttpClient.make((request) => {
+          sent.push({ ...request.headers });
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(request, new Response(null, { status: 204 })),
+          );
+        });
+
+        yield* Effect.gen(function* () {
+          const client = yield* Client.make(Api, {
+            ...negotiation,
+            baseUrl: "http://blog.example.com",
+          });
+          yield* client.articles.delete({ params: { id: Article.Id.make("1") } });
+        }).pipe(Effect.provideService(HttpClient.HttpClient, recorder)) as Effect.Effect<void>;
+
+        const expected = `${MEDIA_TYPE};ext="https://jsonapi.org/ext/atomic"`;
+        // A bodyless DELETE carries the label too — the detail independent
+        // implementations get inconsistently right.
+        expect(sent[0]?.["accept"]).toBe(expected);
+        expect(sent[0]?.["content-type"]).toBe(expected);
+      }),
+    );
+
+    it.effect("a plain HttpApiClient sends neither header", () =>
+      Effect.gen(function* () {
+        const sent: Array<Record<string, string>> = [];
+        const recorder = HttpClient.make((request) => {
+          sent.push({ ...request.headers });
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(request, new Response(null, { status: 204 })),
+          );
+        });
+
+        yield* Effect.gen(function* () {
+          const client = yield* HttpApiClient.make(Api, { baseUrl: "http://blog.example.com" });
+          yield* client.articles.delete({ params: { id: Article.Id.make("1") } });
+        }).pipe(Effect.provideService(HttpClient.HttpClient, recorder)) as Effect.Effect<void>;
+
+        expect(sent[0]?.["accept"]).toBeUndefined();
+        expect(sent[0]?.["content-type"]).toBeUndefined();
+      }),
+    );
+  });
+
+  describe("blog client: error documents", () => {
+    it.effect("a declared error arrives as a typed error, and renders the same document", () =>
+      Effect.gen(function* () {
+        const failure = yield* Effect.gen(function* () {
           const client = yield* blogClient;
+          return yield* client.articles.get({ params: { id: Article.Id.make("999") }, query: {} });
+        }).pipe(Effect.scoped, Effect.flip) as Effect.Effect<
+          unknown,
+          never,
+          Layer.Success<typeof Provided>
+        >;
+
+        expect(failure).toBeInstanceOf(ArticleNotFound);
+        // The typed error and a decoded wire document meet at the same accessor.
+        expect(Client.errorMessage(ApiError.toDocument(failure as ArticleNotFound))).toBe(
+          "Article 999 not found",
+        );
+      }),
+    );
+
+    it.effect("an undeclared error document from in front of the server is decoded", () =>
+      Effect.gen(function* () {
+        // A 503 the load balancer renders as a JSON:API error document: the api
+        // never declared it, so it surfaces as an HttpClientError.
+        const document = ApiError.toDocument(
+          new ApiError.Conflict({ detail: "Upstream is draining" }),
+        );
+        const cause = yield* Effect.gen(function* () {
+          const client = yield* Client.make(Api, {
+            ...negotiation,
+            baseUrl: "http://blog.example.com",
+          });
           return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
-        }),
-      );
+        }).pipe(
+          Effect.provideService(
+            HttpClient.HttpClient,
+            gateway(jsonText(document), 503, MEDIA_TYPE),
+          ),
+          Effect.flip,
+        ) as Effect.Effect<unknown>;
 
-      expect(document.data).toMatchObject({
-        type: "articles",
-        attributes: { title: "JSON:API paints my bikeshed!" },
-      });
-    }),
-  );
+        expect(yield* describeFailure(cause)).toBe("Upstream is draining");
+      }),
+    );
 
-  it.effect("advertises the extension the server supports, on both headers", () =>
-    Effect.gen(function* () {
-      const sent: Array<Record<string, string>> = [];
-      const recorder = HttpClient.make((request) => {
-        sent.push({ ...request.headers });
-        return Effect.succeed(
-          HttpClientResponse.fromWeb(request, new Response(null, { status: 204 })),
-        );
-      });
+    it.effect("a proxy's HTML degrades to the fallback message rather than throwing", () =>
+      Effect.gen(function* () {
+        const cause = yield* Effect.gen(function* () {
+          const client = yield* Client.make(Api, {
+            ...negotiation,
+            baseUrl: "http://blog.example.com",
+          });
+          return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
+        }).pipe(
+          Effect.provideService(
+            HttpClient.HttpClient,
+            gateway("<html><body><h1>502 Bad Gateway</h1></body></html>", 502, "text/html"),
+          ),
+          Effect.flip,
+        ) as Effect.Effect<unknown>;
 
-      yield* Effect.gen(function* () {
-        const client = yield* Client.make(Api, {
-          ...negotiation,
-          baseUrl: "http://blog.example.com",
-        });
-        yield* client.articles.delete({ params: { id: Article.Id.make("1") } });
-      }).pipe(Effect.provideService(HttpClient.HttpClient, recorder)) as Effect.Effect<void>;
+        expect(yield* describeFailure(cause)).toBe("The blog could not be reached");
+      }),
+    );
 
-      const expected = `${MEDIA_TYPE};ext="https://jsonapi.org/ext/atomic"`;
-      // A bodyless DELETE carries the label too — the detail independent
-      // implementations get inconsistently right.
-      expect(sent[0]?.["accept"]).toBe(expected);
-      expect(sent[0]?.["content-type"]).toBe(expected);
-    }),
-  );
+    it.effect("the offline façade's own error decodes through the same seam", () =>
+      Effect.gen(function* () {
+        const document = servedOffline();
+        assert(Option.isSome(document));
+        expect(Client.errorMessage(document.value)).toBe("This article is not available offline");
 
-  it.effect("a plain HttpApiClient sends neither header", () =>
-    Effect.gen(function* () {
-      const sent: Array<Record<string, string>> = [];
-      const recorder = HttpClient.make((request) => {
-        sent.push({ ...request.headers });
-        return Effect.succeed(
-          HttpClientResponse.fromWeb(request, new Response(null, { status: 204 })),
-        );
-      });
+        // Indistinguishable from the same document arriving over the network.
+        const cause = yield* Effect.gen(function* () {
+          const client = yield* Client.make(Api, {
+            ...negotiation,
+            baseUrl: "http://blog.example.com",
+          });
+          return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
+        }).pipe(
+          Effect.provideService(
+            HttpClient.HttpClient,
+            gateway(jsonText(ApiError.toDocument(new Offline())), 503, MEDIA_TYPE),
+          ),
+          Effect.flip,
+        ) as Effect.Effect<unknown>;
 
-      yield* Effect.gen(function* () {
-        const client = yield* HttpApiClient.make(Api, { baseUrl: "http://blog.example.com" });
-        yield* client.articles.delete({ params: { id: Article.Id.make("1") } });
-      }).pipe(Effect.provideService(HttpClient.HttpClient, recorder)) as Effect.Effect<void>;
-
-      expect(sent[0]?.["accept"]).toBeUndefined();
-      expect(sent[0]?.["content-type"]).toBeUndefined();
-    }),
-  );
-});
-
-describe("blog client: error documents", () => {
-  it.effect("a declared error arrives as a typed error, and renders the same document", () =>
-    Effect.gen(function* () {
-      const failure = yield* Effect.gen(function* () {
-        const client = yield* blogClient;
-        return yield* client.articles.get({ params: { id: Article.Id.make("999") }, query: {} });
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(ServerHttpClient),
-        Effect.flip,
-      ) as Effect.Effect<unknown>;
-
-      expect(failure).toBeInstanceOf(ArticleNotFound);
-      // The typed error and a decoded wire document meet at the same accessor.
-      expect(Client.errorMessage(ApiError.toDocument(failure as ArticleNotFound))).toBe(
-        "Article 999 not found",
-      );
-    }),
-  );
-
-  it.effect("an undeclared error document from in front of the server is decoded", () =>
-    Effect.gen(function* () {
-      // A 503 the load balancer renders as a JSON:API error document: the api
-      // never declared it, so it surfaces as an HttpClientError.
-      const document = ApiError.toDocument(
-        new ApiError.Conflict({ detail: "Upstream is draining" }),
-      );
-      const cause = yield* Effect.gen(function* () {
-        const client = yield* Client.make(Api, {
-          ...negotiation,
-          baseUrl: "http://blog.example.com",
-        });
-        return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
-      }).pipe(
-        Effect.provideService(HttpClient.HttpClient, gateway(jsonText(document), 503, MEDIA_TYPE)),
-        Effect.flip,
-      ) as Effect.Effect<unknown>;
-
-      expect(yield* describeFailure(cause)).toBe("Upstream is draining");
-    }),
-  );
-
-  it.effect("a proxy's HTML degrades to the fallback message rather than throwing", () =>
-    Effect.gen(function* () {
-      const cause = yield* Effect.gen(function* () {
-        const client = yield* Client.make(Api, {
-          ...negotiation,
-          baseUrl: "http://blog.example.com",
-        });
-        return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
-      }).pipe(
-        Effect.provideService(
-          HttpClient.HttpClient,
-          gateway("<html><body><h1>502 Bad Gateway</h1></body></html>", 502, "text/html"),
-        ),
-        Effect.flip,
-      ) as Effect.Effect<unknown>;
-
-      expect(yield* describeFailure(cause)).toBe("The blog could not be reached");
-    }),
-  );
-
-  it.effect("the offline façade's own error decodes through the same seam", () =>
-    Effect.gen(function* () {
-      const document = servedOffline();
-      assert(Option.isSome(document));
-      expect(Client.errorMessage(document.value)).toBe("This article is not available offline");
-
-      // Indistinguishable from the same document arriving over the network.
-      const cause = yield* Effect.gen(function* () {
-        const client = yield* Client.make(Api, {
-          ...negotiation,
-          baseUrl: "http://blog.example.com",
-        });
-        return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
-      }).pipe(
-        Effect.provideService(
-          HttpClient.HttpClient,
-          gateway(jsonText(ApiError.toDocument(new Offline())), 503, MEDIA_TYPE),
-        ),
-        Effect.flip,
-      ) as Effect.Effect<unknown>;
-
-      expect(yield* Client.errorDocument(cause)).toStrictEqual(document);
-    }),
-  );
+        expect(yield* Client.errorDocument(cause)).toStrictEqual(document);
+      }),
+    );
+  });
 });

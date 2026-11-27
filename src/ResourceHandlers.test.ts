@@ -17,7 +17,6 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
-import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
@@ -46,7 +45,11 @@ const USER: User = { id: "u2", role: "user" };
 class Viewer extends Context.Service<Viewer, Option.Option<User>>()("test/Viewer") {}
 class Transaction extends Context.Service<Transaction, { readonly depth: number }>()("test/Tx") {}
 
-const as = (user: Option.Option<User>) => Layer.succeed(Viewer, user);
+/** Runs an effect as `user`. */
+const as =
+  (user: Option.Option<User>) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Viewer>> =>
+    Effect.provideService(effect, Viewer, user);
 const viewer = Effect.map(Effect.service(Viewer), Option.getOrUndefined);
 const capabilities = (_resource: Assemble.ResourceLike, user?: User) => ({
   canEdit: user?.role === "admin",
@@ -281,7 +284,7 @@ describe("update", () => {
         const error = yield* failure(
           handlers
             .update({ params: { id: ids(1) }, payload: { id: ids(2), name: "X" } })
-            .pipe(Effect.provide(as(Option.some(ADMIN)))),
+            .pipe(as(Option.some(ADMIN))),
         );
         expect(error).toBeInstanceOf(ApiError.Conflict);
         expect(calls.update).toBe(0);
@@ -297,7 +300,7 @@ describe("update", () => {
         const { handlers, cacheStore, opened } = handlersFor(ops);
         const document = yield* handlers
           .update({ params: { id: ids(1) }, payload: { id: ids(1), name: "Renamed" } })
-          .pipe(Effect.provide(as(Option.some(ADMIN))));
+          .pipe(as(Option.some(ADMIN)));
         expect(opened()).toBe(1);
         expect(calls).toMatchObject({ update: 1, get: 1 });
         expect(document.data.attributes.name).toBe("Renamed");
@@ -314,16 +317,12 @@ describe("create / delete", () => {
     Effect.gen(function* () {
       const { ops, calls, store } = seeded();
       const { handlers, cacheStore, opened } = handlersFor(ops);
-      const layer = as(Option.some(ADMIN));
-      const created = yield* handlers
-        .create({ payload: { name: "Delta" } })
-        .pipe(Effect.provide(layer));
+      const asViewer = as(Option.some(ADMIN));
+      const created = yield* handlers.create({ payload: { name: "Delta" } }).pipe(asViewer);
       expect(created.data.attributes.name).toBe("Delta");
       expect(MutableHashMap.has(cacheStore, created.data.id)).toBe(true);
       expect(opened()).toBe(1);
-      const removed = yield* handlers
-        .delete({ params: { id: created.data.id } })
-        .pipe(Effect.provide(layer));
+      const removed = yield* handlers.delete({ params: { id: created.data.id } }).pipe(asViewer);
       expect(removed).toBeUndefined();
       expect(MutableHashMap.has(cacheStore, created.data.id)).toBe(false);
       expect(MutableHashMap.has(store, created.data.id)).toBe(false);
@@ -459,7 +458,7 @@ describe("a write whose re-read fails", () => {
             : handlers.update(renameFirst);
         yield* success(
           Effect.gen(function* () {
-            const fiber = yield* Effect.forkChild(write.pipe(Effect.provide(admin)));
+            const fiber = yield* Effect.forkChild(write.pipe(admin));
             yield* Deferred.await(rereading);
             yield* Fiber.interrupt(fiber);
           }),
@@ -477,7 +476,7 @@ describe("a write whose re-read fails", () => {
       yield* success(
         Effect.gen(function* () {
           const fiber = yield* Effect.forkChild(
-            handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin)),
+            handlers.delete({ params: { id: ids(2) } }).pipe(admin),
           );
           yield* Deferred.await(evicting);
           yield* Fiber.interrupt(fiber);
@@ -500,12 +499,10 @@ describe("a write whose re-read fails", () => {
         );
       const { ops, calls } = hidingOps();
       const { handlers, cacheStore } = build(ops, { transact: failingCommit });
-      expect(
-        yield* failure(handlers.update(renameFirst).pipe(Effect.provide(admin))),
-      ).toBeInstanceOf(CommitFailed);
+      expect(yield* failure(handlers.update(renameFirst).pipe(admin))).toBeInstanceOf(CommitFailed);
       expect(MutableHashMap.has(cacheStore, ids(1))).toBe(false);
       expect(
-        yield* failure(handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin))),
+        yield* failure(handlers.delete({ params: { id: ids(2) } }).pipe(admin)),
       ).toBeInstanceOf(CommitFailed);
       expect(MutableHashMap.has(cacheStore, ids(2))).toBe(false);
       expect(calls).toMatchObject({ update: 1, delete: 1, get: 0 });
@@ -518,7 +515,7 @@ describe("a write whose re-read fails", () => {
       Effect.gen(function* () {
         const { ops, store } = hidingOps();
         const { handlers, cacheStore } = build(ops);
-        const error = yield* failure(handlers.update(renameFirst).pipe(Effect.provide(admin)));
+        const error = yield* failure(handlers.update(renameFirst).pipe(admin));
         expect(error._tag).toBe("NotFound");
         expect(Option.getOrUndefined(MutableHashMap.get(store, ids(1)))?.attributes.name).toBe(
           "Private",
@@ -532,9 +529,7 @@ describe("a write whose re-read fails", () => {
     Effect.gen(function* () {
       const failing = hidingOps(() => new StoreDown());
       const failed = build(failing.ops);
-      const exit = yield* Effect.exit(
-        failed.handlers.update(renameFirst).pipe(Effect.provide(admin)),
-      );
+      const exit = yield* Effect.exit(failed.handlers.update(renameFirst).pipe(admin));
       expect(Exit.isFailure(exit) && Cause.findErrorOption(exit.cause)).toEqual(
         Option.some(new StoreDown()),
       );
@@ -555,9 +550,7 @@ describe("a write whose re-read fails", () => {
         ),
       );
       const broke = build(breaking.ops, { hiddenWrite: { type: "people", when: () => true } });
-      const exit = yield* Effect.exit(
-        broke.handlers.update(renameFirst).pipe(Effect.provide(admin)),
-      );
+      const exit = yield* Effect.exit(broke.handlers.update(renameFirst).pipe(admin));
       expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(2);
       expect(MutableHashMap.has(broke.cacheStore, ids(1))).toBe(false);
     }),
@@ -571,13 +564,11 @@ describe("a write whose re-read fails", () => {
         Effect.andThen(Effect.provideService(effect, Transaction, { depth: 1 }), Effect.interrupt);
       const { ops, calls } = hidingOps();
       const { handlers, cacheStore } = build(ops, { transact: interrupting });
-      const update = yield* Effect.exit(handlers.update(renameFirst).pipe(Effect.provide(admin)));
+      const update = yield* Effect.exit(handlers.update(renameFirst).pipe(admin));
       expect(Exit.isFailure(update) && Cause.hasInterruptsOnly(update.cause)).toBe(true);
       expect(MutableHashMap.has(cacheStore, ids(1))).toBe(false);
 
-      const remove = yield* Effect.exit(
-        handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin)),
-      );
+      const remove = yield* Effect.exit(handlers.delete({ params: { id: ids(2) } }).pipe(admin));
       expect(Exit.isFailure(remove)).toBe(true);
       expect(MutableHashMap.has(cacheStore, ids(2))).toBe(false);
       expect(calls).toMatchObject({ update: 1, delete: 1, get: 0 });
@@ -594,11 +585,11 @@ describe("a write whose re-read fails", () => {
         delete: (id: string) => Effect.fail(new ServerErrors.NotFound({ resource: "people", id })),
       };
       const { handlers, cacheStore } = build(refusing);
+      expect(yield* failure(handlers.update(renameFirst).pipe(admin))).toBeInstanceOf(
+        ServerErrors.NotFound,
+      );
       expect(
-        yield* failure(handlers.update(renameFirst).pipe(Effect.provide(admin))),
-      ).toBeInstanceOf(ServerErrors.NotFound);
-      expect(
-        yield* failure(handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin))),
+        yield* failure(handlers.delete({ params: { id: ids(2) } }).pipe(admin)),
       ).toBeInstanceOf(ServerErrors.NotFound);
       expect(Option.getOrUndefined(MutableHashMap.get(cacheStore, ids(1)))?.attributes.name).toBe(
         "Public",
@@ -621,7 +612,7 @@ describe("a write whose re-read fails", () => {
         Effect.gen(function* () {
           const { ops } = hidingOps();
           const { handlers, cacheStore } = build(ops, { hiddenWrite });
-          const document = yield* success(handlers.update(renameFirst).pipe(Effect.provide(admin)));
+          const document = yield* success(handlers.update(renameFirst).pipe(admin));
           expect(document).toEqual({
             data: { type: "people", id: ids(1), meta: { version: 7 } },
             jsonapi: { version: "1.1" },
@@ -638,7 +629,7 @@ describe("a write whose re-read fails", () => {
           const created = yield* success(
             build(ops, { hiddenWrite })
               .handlers.create({ payload: { name: "Delta" } })
-              .pipe(Effect.provide(admin)),
+              .pipe(admin),
           );
           expect(created).toEqual({
             data: { type: "people", id: ids(4), meta: { version: 1 } },
@@ -652,7 +643,7 @@ describe("a write whose re-read fails", () => {
           const bare = yield* success(
             build(versionless, { hiddenWrite })
               .handlers.create({ payload: { name: "Echo" } })
-              .pipe(Effect.provide(admin)),
+              .pipe(admin),
           );
           expect(bare.data).toEqual({ type: "people", id: ids(5) });
         }),
@@ -676,13 +667,9 @@ describe("a write whose re-read fails", () => {
           });
           // `failure` fails the test on a success, so no committed document went out.
           expect(
-            yield* failure(
-              handlers.create({ payload: { name: "Delta" } }).pipe(Effect.provide(admin)),
-            ),
+            yield* failure(handlers.create({ payload: { name: "Delta" } }).pipe(admin)),
           ).toEqual(refused(ids(4)));
-          expect(yield* failure(handlers.update(renameFirst).pipe(Effect.provide(admin)))).toEqual(
-            refused(ids(1)),
-          );
+          expect(yield* failure(handlers.update(renameFirst).pipe(admin))).toEqual(refused(ids(1)));
           expect(
             Option.getOrUndefined(MutableHashMap.get(cacheStore, ids(1)))?.attributes.name,
           ).toBe("Public");
@@ -700,7 +687,7 @@ describe("a write whose re-read fails", () => {
           ),
         );
         const { handlers, cacheStore } = build(ops, { hiddenWrite });
-        const exit = yield* Effect.exit(handlers.update(renameFirst).pipe(Effect.provide(admin)));
+        const exit = yield* Effect.exit(handlers.update(renameFirst).pipe(admin));
         expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(2);
         expect(MutableHashMap.has(cacheStore, ids(1))).toBe(false);
       }),
@@ -714,7 +701,7 @@ describe("a write whose re-read fails", () => {
           const { handlers, cacheStore } = build(ops, {
             hiddenWrite: { type: "people", when: () => true },
           });
-          const exit = yield* Effect.exit(handlers.update(renameFirst).pipe(Effect.provide(admin)));
+          const exit = yield* Effect.exit(handlers.update(renameFirst).pipe(admin));
           expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(0);
           expect(MutableHashMap.has(cacheStore, ids(1))).toBe(false);
         }),
@@ -742,7 +729,7 @@ describe("a write whose re-read fails", () => {
           const created = yield* success(
             build(versioned, { hiddenWrite })
               .handlers.create({ payload: { name: "Delta" } })
-              .pipe(Effect.provide(admin)),
+              .pipe(admin),
           );
           expect(created.data).toEqual(
             meta === undefined
@@ -756,9 +743,7 @@ describe("a write whose re-read fails", () => {
       Effect.gen(function* () {
         const { ops } = hidingOps(() => new StoreDown());
         const { handlers, cacheStore } = build(ops, { hiddenWrite });
-        expect(
-          yield* failure(handlers.update(renameFirst).pipe(Effect.provide(admin))),
-        ).toBeInstanceOf(StoreDown);
+        expect(yield* failure(handlers.update(renameFirst).pipe(admin))).toBeInstanceOf(StoreDown);
         expect(MutableHashMap.has(cacheStore, ids(1))).toBe(false);
       }),
     );
@@ -774,7 +759,7 @@ describe("a write whose re-read fails", () => {
               Effect.tap(ops.update(input), () => Effect.sync(() => void hidden.splice(0))),
           };
           const { handlers, cacheStore } = build(visible, { hiddenWrite });
-          const document = yield* success(handlers.update(renameFirst).pipe(Effect.provide(admin)));
+          const document = yield* success(handlers.update(renameFirst).pipe(admin));
           expect(document.data).toMatchObject({ id: ids(1), attributes: { name: "Private" } });
           expect(
             Option.getOrUndefined(MutableHashMap.get(cacheStore, ids(1)))?.attributes.name,
@@ -791,13 +776,13 @@ describe("get", () => {
       Effect.gen(function* () {
         const { ops, calls } = seeded();
         const { handlers, cacheStore } = handlersFor(ops);
-        const layer = as(Option.some(USER));
-        const first = yield* handlers.get({ params: { id: ids(2) } }).pipe(Effect.provide(layer));
+        const asViewer = as(Option.some(USER));
+        const first = yield* handlers.get({ params: { id: ids(2) } }).pipe(asViewer);
         expect(first.data.attributes.name).toBe("Beta");
         expect(first.data.meta).toEqual({ canEdit: false, canDelete: false });
         expect(calls.get).toBe(1);
         expect(MutableHashMap.has(cacheStore, ids(2))).toBe(true);
-        const second = yield* handlers.get({ params: { id: ids(2) } }).pipe(Effect.provide(layer));
+        const second = yield* handlers.get({ params: { id: ids(2) } }).pipe(asViewer);
         expect(second.data.id).toBe(ids(2));
         expect(calls.get).toBe(1);
       }),
@@ -810,15 +795,11 @@ describe("get", () => {
         const { ops, calls } = seeded();
         const { handlers, cacheStore, state } = handlersFor(ops);
         MutableHashMap.set(cacheStore, ids(1), person(ids(1), "Stale"));
-        const admin = yield* handlers
-          .get({ params: { id: ids(1) } })
-          .pipe(Effect.provide(as(Option.some(ADMIN))));
+        const admin = yield* handlers.get({ params: { id: ids(1) } }).pipe(as(Option.some(ADMIN)));
         expect(admin.data.attributes.name).toBe("Alpha");
         expect(calls.get).toBe(1);
         state.getFails = true;
-        const anon = yield* handlers
-          .get({ params: { id: ids(1) } })
-          .pipe(Effect.provide(as(Option.none())));
+        const anon = yield* handlers.get({ params: { id: ids(1) } }).pipe(as(Option.none()));
         expect(anon.data.attributes.name).toBe("Alpha");
         expect(calls.get).toBe(2);
       }),
@@ -829,7 +810,7 @@ describe("get", () => {
       const { ops } = seeded();
       const { handlers } = handlersFor(ops);
       const error = yield* failure(
-        handlers.get({ params: { id: ids(9) } }).pipe(Effect.provide(as(Option.some(USER)))),
+        handlers.get({ params: { id: ids(9) } }).pipe(as(Option.some(USER))),
       );
       expect(error._tag).toBe("NotFound");
     }),
@@ -842,13 +823,13 @@ describe("get", () => {
       targetCalls.length = 0;
       const document = yield* handlers
         .get({ params: { id: ids(1) }, query: { include: ["birthPlace"] } })
-        .pipe(Effect.provide(as(Option.some(USER))));
+        .pipe(as(Option.some(USER)));
       expect(document.included?.map((r) => `${r.type}:${r.id}`)).toEqual([`places:${PLACE}`]);
       expect(targetCalls).toEqual([[PLACE]]);
       const error = yield* failure(
         handlers
           .get({ params: { id: ids(1) }, query: { include: ["nope"] } })
-          .pipe(Effect.provide(as(Option.some(USER)))),
+          .pipe(as(Option.some(USER))),
       );
       expect(error).toBeInstanceOf(ApiError.UnsupportedIncludePath);
     }),
@@ -862,7 +843,7 @@ describe("list", () => {
       const { handlers } = handlersFor(ops);
       const document = yield* handlers
         .list({ query: { limit: 1, offset: 1 } })
-        .pipe(Effect.provide(as(Option.some(ADMIN))));
+        .pipe(as(Option.some(ADMIN)));
       expect(document.meta).toEqual({ totalCount: 3 });
       expect(document.data.map((r) => r.attributes.name)).toEqual(["Beta"]);
       expect(document.links).toEqual({
@@ -873,7 +854,7 @@ describe("list", () => {
         last: "https://example.test/people?page[offset]=2&page[limit]=1",
       });
       expect(document.data[0]?.meta).toEqual({ canEdit: true, canDelete: true });
-      const anon = yield* handlers.list({ query: {} }).pipe(Effect.provide(as(Option.none())));
+      const anon = yield* handlers.list({ query: {} }).pipe(as(Option.none()));
       expect(anon.data).toHaveLength(3);
       expect(anon.data[0]?.meta).toEqual({ canEdit: false, canDelete: false });
       // One page holds everything: the spec's "no such page" is a `null` link.
@@ -888,12 +869,12 @@ describe("list", () => {
       targetCalls.length = 0;
       const document = yield* handlers
         .list({ query: { include: ["birthPlace"] } })
-        .pipe(Effect.provide(as(Option.some(USER))));
+        .pipe(as(Option.some(USER)));
       // Three people share one birthplace: one loader call, one id, one member.
       expect(targetCalls).toEqual([[PLACE]]);
       expect(document.included?.map((r) => r.id)).toEqual([PLACE]);
       expect(document.included?.[0]?.meta).toEqual({ canEdit: false, canDelete: false });
-      const plain = yield* handlers.list({ query: {} }).pipe(Effect.provide(as(Option.some(USER))));
+      const plain = yield* handlers.list({ query: {} }).pipe(as(Option.some(USER)));
       expect(plain).not.toHaveProperty("included");
     }),
   );
@@ -904,7 +885,7 @@ describe("list", () => {
       const { handlers } = handlersFor(ops, { capabilitiesOnIncluded: false });
       const document = yield* handlers
         .list({ query: { include: ["birthPlace"] } })
-        .pipe(Effect.provide(as(Option.some(ADMIN))));
+        .pipe(as(Option.some(ADMIN)));
       expect(document.data[0]?.meta).toEqual({ canEdit: true, canDelete: true });
       expect(document.included?.map((r) => r.id)).toEqual([PLACE]);
       expect(document.included?.[0]).not.toHaveProperty("meta");
@@ -922,9 +903,7 @@ describe("list", () => {
       Effect.gen(function* () {
         const { ops } = seeded();
         const { handlers } = handlersFor(ops);
-        const document = yield* handlers
-          .list({ query })
-          .pipe(Effect.provide(as(Option.some(USER))));
+        const document = yield* handlers.list({ query }).pipe(as(Option.some(USER)));
         return yield* Effect.forEach(
           LINK_NAMES,
           (name) => {

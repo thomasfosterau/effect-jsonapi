@@ -3,7 +3,7 @@
  * encoding → routing → middleware → handler → response decoding) through the
  * in-memory `HttpApiTest` client.
  */
-import { it } from "@effect/vitest";
+import { layer } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf } from "vite-plus/test";
 import * as Arr from "effect/Array";
@@ -47,587 +47,384 @@ const Provided = Layer.mergeAll(
 
 const run = <A, E>(
   effect: Effect.Effect<A, E, Layer.Success<typeof Provided> | Scope.Scope>,
-): Effect.Effect<A, E> => effect.pipe(Effect.scoped, Effect.provide(Provided));
+): Effect.Effect<A, E, Layer.Success<typeof Provided>> => Effect.scoped(effect);
 
 const runExit = <A, E>(
   effect: Effect.Effect<A, E, Layer.Success<typeof Provided> | Scope.Scope>,
-): Effect.Effect<Exit.Exit<A, E>> =>
-  Effect.exit(effect.pipe(Effect.scoped, Effect.provide(Provided)));
+): Effect.Effect<Exit.Exit<A, E>, never, Layer.Success<typeof Provided>> =>
+  Effect.exit(Effect.scoped(effect));
 
-describe("blog example: fetching", () => {
-  it.effect("fetches a single article document with a self link", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.get({
-            params: { id: Article.Id.make("1") },
-            query: {},
-          });
-        }),
-      );
-
-      expect(document.data).toMatchObject({
-        type: "articles",
-        id: "1",
-        attributes: { title: "JSON:API paints my bikeshed!" },
-      });
-      expect(document.links?.self).toBe("/articles/1");
-      // dates decode through the wire format
-      expect(document.data?.attributes.createdAt).toBeInstanceOf(Date);
-      // no `?include=`, no compound document: the member is absent, not `[]`
-      expect(document).not.toHaveProperty("included");
-    }),
-  );
-
-  it.effect("serves compound documents for ?include=author,tags", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.get({
-            params: { id: Article.Id.make("1") },
-            query: { include: ["author", "tags"] },
-          });
-        }),
-      );
-
-      const types = Arr.sort(
-        document.included?.map((resource) => resource.type) ?? [],
-        Order.String,
-      );
-      expect(types).toEqual(["people", "tags"]);
-    }),
-  );
-
-  it.effect(
-    "projects ?fields[TYPE]= on primary data and `included`, and advertises JSON:API 1.1",
-    () =>
+// Every test gets a fresh in-memory application.
+layer(Provided, { buildPerTest: true })((it) => {
+  describe("blog example: fetching", () => {
+    it.effect("fetches a single article document with a self link", () =>
       Effect.gen(function* () {
         const document = yield* run(
           Effect.gen(function* () {
             const client = yield* buildClient;
             return yield* client.articles.get({
               params: { id: Article.Id.make("1") },
-              query: { include: ["author"], fields: { articles: ["title"], people: ["lastName"] } },
+              query: {},
             });
           }),
         );
 
-        // `onResource: Handlers.project(query.fields)` applies each fieldset to
-        // every resource of that type, wherever it sits in the document.
-        expect(document.data.attributes).toEqual({ title: sampleArticle.attributes.title });
-        expect(document.included?.map((resource) => resource.attributes)).toEqual([
-          { lastName: sampleAuthor.attributes.lastName },
-        ]);
-        // A relationship is a field too: `author` was not requested, so it
-        // is dropped, and the included author it linked is exempt from full
-        // linkage (§Compound Documents).
-        expect(document.data.relationships).toBeUndefined();
-        expect(document.jsonapi).toEqual({ version: "1.1" });
-      }),
-  );
-
-  it.effect("keeps the relationships a fieldset names", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.get({
-            params: { id: Article.Id.make("1") },
-            query: { include: ["author"], fields: { articles: ["title", "author"] } },
-          });
-        }),
-      );
-      expect(document.data.attributes).toEqual({ title: sampleArticle.attributes.title });
-      expect(R.keys<string, unknown>(document.data.relationships ?? {})).toEqual(["author"]);
-      expect(document.data.relationships?.author?.data).toEqual(Person.ref(sampleAuthor.id));
-    }),
-  );
-
-  it.effect("paginated relationships appear as links, never as inline data or includes", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.get({
-            params: { id: Article.Id.make("1") },
-            query: {},
-          });
-        }),
-      );
-
-      // The comments relationship carries only links pointing at its endpoints.
-      const comments = document.data?.relationships?.comments;
-      expect(comments).toEqual({
-        links: {
-          self: "/articles/1/relationships/comments",
-          related: "/articles/1/comments",
-        },
-      });
-      // ... and `comments` is not a legal include path.
-      type IncludePaths = Resource.IncludePath<typeof Article>;
-      expectTypeOf<IncludePaths>().toEqualTypeOf<"author" | "tags">();
-    }),
-  );
-
-  it.effect("narrows `included` to the requested include paths on the client", () =>
-    Effect.gen(function* () {
-      const include = ["author"] as const;
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles
-            .get({
-              params: { id: Article.Id.make("1") },
-              query: { include },
-            })
-            .pipe(Client.narrowIncluded(Article, include));
-        }),
-      );
-
-      // Runtime: the server only included the requested author
-      expect(document.included?.map((resource) => resource.type)).toEqual(["people"]);
-      // Types: `included` is narrowed to Person — its attributes are accessible
-      // without discriminating on `type`
-      const author = document.included?.[0];
-      expect(author?.attributes.firstName).toBe("Dan");
-      assert(author !== undefined);
-      expectTypeOf(author.attributes.firstName).toEqualTypeOf<string>();
-      expectTypeOf(author.type).toEqualTypeOf<"people">();
-    }),
-  );
-
-  it.effect("404s with a typed error for unknown articles", () =>
-    Effect.gen(function* () {
-      const exit = yield* runExit(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.get({
-            params: { id: Article.Id.make("nope") },
-            query: {},
-          });
-        }),
-      );
-
-      assert(Exit.isFailure(exit));
-      const error = Cause.findErrorOption(exit.cause);
-      assert(Option.isSome(error) && error.value instanceof ArticleNotFound);
-      expect(error.value.id).toBe("nope");
-    }),
-  );
-});
-
-describe("blog example: listing", () => {
-  it.effect("lists articles with sorting, pagination and typed meta", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.list({
-            query: {
-              sort: [{ field: "createdAt", direction: "desc" }],
-              page: { offset: 0, limit: 10 },
-            },
-          });
-        }),
-      );
-
-      expect(document.data.length).toBeGreaterThan(0);
-      expect(document.meta?.total).toBeGreaterThan(0);
-      expect(document.links?.first).toBe("/articles?sort=-createdAt&page[offset]=0&page[limit]=10");
-    }),
-  );
-
-  it.effect("filters by author", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.list({
-            query: { filter: { author: "does-not-exist" } },
-          });
-        }),
-      );
-
-      expect(document.data).toEqual([]);
-    }),
-  );
-});
-
-describe("blog example: writing", () => {
-  it.effect("creates an article from a JSON:API payload (201) and then deletes it (204)", () =>
-    run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-
-        const created = yield* client.articles.create({
-          payload: {
-            data: {
-              type: "articles",
-              lid: "temp-1",
-              attributes: {
-                title: "A fresh take",
-                body: "...",
-                createdAt: at("2024-06-01T00:00:00.000Z"),
-              },
-              relationships: {
-                // `author` is a required (`one`) relationship — the payload
-                // doesn't compile (or decode) without it.
-                author: { data: Person.ref(sampleAuthor.id) },
-              },
-            },
-          },
+        expect(document.data).toMatchObject({
+          type: "articles",
+          id: "1",
+          attributes: { title: "JSON:API paints my bikeshed!" },
         });
+        expect(document.links?.self).toBe("/articles/1");
+        // dates decode through the wire format
+        expect(document.data?.attributes.createdAt).toBeInstanceOf(Date);
+        // no `?include=`, no compound document: the member is absent, not `[]`
+        expect(document).not.toHaveProperty("included");
+      }),
+    );
 
-        expect(created.data).not.toBeNull();
-        expect(created.data?.attributes.title).toBe("A fresh take");
-        expect(created.data?.relationships?.author.data.id).toBe(sampleAuthor.id);
-        // The paginated comments relationship is created empty, links only.
-        expect(created.data?.relationships?.comments.links.related).toBe(
-          `/articles/${created.data.id}/comments`,
+    it.effect("serves compound documents for ?include=author,tags", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.get({
+              params: { id: Article.Id.make("1") },
+              query: { include: ["author", "tags"] },
+            });
+          }),
         );
 
-        // and delete it again
-        yield* client.articles.delete({ params: { id: created.data.id } });
+        const types = Arr.sort(
+          document.included?.map((resource) => resource.type) ?? [],
+          Order.String,
+        );
+        expect(types).toEqual(["people", "tags"]);
       }),
-    ),
-  );
+    );
 
-  it.effect("409s when the title is already taken", () =>
-    Effect.gen(function* () {
-      const exit = yield* runExit(
+    it.effect(
+      "projects ?fields[TYPE]= on primary data and `included`, and advertises JSON:API 1.1",
+      () =>
+        Effect.gen(function* () {
+          const document = yield* run(
+            Effect.gen(function* () {
+              const client = yield* buildClient;
+              return yield* client.articles.get({
+                params: { id: Article.Id.make("1") },
+                query: {
+                  include: ["author"],
+                  fields: { articles: ["title"], people: ["lastName"] },
+                },
+              });
+            }),
+          );
+
+          // `onResource: Handlers.project(query.fields)` applies each fieldset to
+          // every resource of that type, wherever it sits in the document.
+          expect(document.data.attributes).toEqual({ title: sampleArticle.attributes.title });
+          expect(document.included?.map((resource) => resource.attributes)).toEqual([
+            { lastName: sampleAuthor.attributes.lastName },
+          ]);
+          // A relationship is a field too: `author` was not requested, so it
+          // is dropped, and the included author it linked is exempt from full
+          // linkage (§Compound Documents).
+          expect(document.data.relationships).toBeUndefined();
+          expect(document.jsonapi).toEqual({ version: "1.1" });
+        }),
+    );
+
+    it.effect("keeps the relationships a fieldset names", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.get({
+              params: { id: Article.Id.make("1") },
+              query: { include: ["author"], fields: { articles: ["title", "author"] } },
+            });
+          }),
+        );
+        expect(document.data.attributes).toEqual({ title: sampleArticle.attributes.title });
+        expect(R.keys<string, unknown>(document.data.relationships ?? {})).toEqual(["author"]);
+        expect(document.data.relationships?.author?.data).toEqual(Person.ref(sampleAuthor.id));
+      }),
+    );
+
+    it.effect("paginated relationships appear as links, never as inline data or includes", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.get({
+              params: { id: Article.Id.make("1") },
+              query: {},
+            });
+          }),
+        );
+
+        // The comments relationship carries only links pointing at its endpoints.
+        const comments = document.data?.relationships?.comments;
+        expect(comments).toEqual({
+          links: {
+            self: "/articles/1/relationships/comments",
+            related: "/articles/1/comments",
+          },
+        });
+        // ... and `comments` is not a legal include path.
+        type IncludePaths = Resource.IncludePath<typeof Article>;
+        expectTypeOf<IncludePaths>().toEqualTypeOf<"author" | "tags">();
+      }),
+    );
+
+    it.effect("narrows `included` to the requested include paths on the client", () =>
+      Effect.gen(function* () {
+        const include = ["author"] as const;
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles
+              .get({
+                params: { id: Article.Id.make("1") },
+                query: { include },
+              })
+              .pipe(Client.narrowIncluded(Article, include));
+          }),
+        );
+
+        // Runtime: the server only included the requested author
+        expect(document.included?.map((resource) => resource.type)).toEqual(["people"]);
+        // Types: `included` is narrowed to Person — its attributes are accessible
+        // without discriminating on `type`
+        const author = document.included?.[0];
+        expect(author?.attributes.firstName).toBe("Dan");
+        assert(author !== undefined);
+        expectTypeOf(author.attributes.firstName).toEqualTypeOf<string>();
+        expectTypeOf(author.type).toEqualTypeOf<"people">();
+      }),
+    );
+
+    it.effect("404s with a typed error for unknown articles", () =>
+      Effect.gen(function* () {
+        const exit = yield* runExit(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.get({
+              params: { id: Article.Id.make("nope") },
+              query: {},
+            });
+          }),
+        );
+
+        assert(Exit.isFailure(exit));
+        const error = Cause.findErrorOption(exit.cause);
+        assert(Option.isSome(error) && error.value instanceof ArticleNotFound);
+        expect(error.value.id).toBe("nope");
+      }),
+    );
+  });
+
+  describe("blog example: listing", () => {
+    it.effect("lists articles with sorting, pagination and typed meta", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.list({
+              query: {
+                sort: [{ field: "createdAt", direction: "desc" }],
+                page: { offset: 0, limit: 10 },
+              },
+            });
+          }),
+        );
+
+        expect(document.data.length).toBeGreaterThan(0);
+        expect(document.meta?.total).toBeGreaterThan(0);
+        expect(document.links?.first).toBe(
+          "/articles?sort=-createdAt&page[offset]=0&page[limit]=10",
+        );
+      }),
+    );
+
+    it.effect("filters by author", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.list({
+              query: { filter: { author: "does-not-exist" } },
+            });
+          }),
+        );
+
+        expect(document.data).toEqual([]);
+      }),
+    );
+  });
+
+  describe("blog example: writing", () => {
+    it.effect("creates an article from a JSON:API payload (201) and then deletes it (204)", () =>
+      run(
         Effect.gen(function* () {
           const client = yield* buildClient;
-          return yield* client.articles.create({
+
+          const created = yield* client.articles.create({
             payload: {
               data: {
                 type: "articles",
+                lid: "temp-1",
                 attributes: {
-                  title: sampleArticle.attributes.title,
-                  body: "duplicate",
-                  createdAt: now(),
+                  title: "A fresh take",
+                  body: "...",
+                  createdAt: at("2024-06-01T00:00:00.000Z"),
                 },
                 relationships: {
+                  // `author` is a required (`one`) relationship — the payload
+                  // doesn't compile (or decode) without it.
                   author: { data: Person.ref(sampleAuthor.id) },
                 },
               },
             },
           });
-        }),
-      );
 
-      assert(Exit.isFailure(exit));
-      assert(
-        Option.exists(Cause.findErrorOption(exit.cause), (error) => error instanceof TitleTaken),
-      );
-    }),
-  );
-
-  it.effect("updates an article with partial attributes", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.update({
-            params: { id: Article.Id.make("1") },
-            payload: {
-              data: {
-                type: "articles",
-                id: Article.Id.make("1"),
-                attributes: { body: "Updated body" },
-              },
-            },
-          });
-        }),
-      );
-
-      expect(document.data?.attributes.body).toBe("Updated body");
-      expect(document.data?.attributes.title).toBe(sampleArticle.attributes.title);
-      // a write response advertises JSON:API 1.1 too, not only the reads
-      expect(document.jsonapi?.version).toBe("1.1");
-    }),
-  );
-});
-
-describe("blog example: related resource endpoints", () => {
-  it.effect("GET /articles/:id/author serves the author as a full resource document", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.author({
-            params: { id: Article.Id.make("1") },
-            query: {},
-          });
-        }),
-      );
-
-      expect(document.data).toMatchObject({
-        type: "people",
-        id: sampleAuthor.id,
-        attributes: { firstName: "Dan", lastName: "Gebhardt" },
-      });
-      expect(document.links?.self).toBe("/articles/1/author");
-    }),
-  );
-
-  it.effect("GET /articles/:id/comments serves the paginated comment collection", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.comments({
-            params: { id: Article.Id.make("1") },
-            query: { page: { offset: 0, limit: 1 } },
-          });
-        }),
-      );
-
-      // Full comment resources, paginated
-      expect(document.data).toHaveLength(1);
-      expect(document.data[0]?.attributes.body).toBe("First!");
-      expect(document.meta?.total).toBe(2);
-      expect(document.links?.next).toBe("/articles/1/comments?page[offset]=1&page[limit]=1");
-    }),
-  );
-
-  it.effect("GET /articles/:id/comments supports compound documents (?include=author)", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.comments({
-            params: { id: Article.Id.make("1") },
-            query: { include: ["author"] },
-          });
-        }),
-      );
-
-      expect(document.data).toHaveLength(2);
-      // Both comments share the same author — deduplicated to one include.
-      expect(document.included?.map((resource) => resource.type)).toEqual(["people"]);
-    }),
-  );
-
-  it.effect("404s for related endpoints of unknown articles", () =>
-    Effect.gen(function* () {
-      const exit = yield* runExit(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.comments({
-            params: { id: Article.Id.make("nope") },
-            query: {},
-          });
-        }),
-      );
-
-      assert(Exit.isFailure(exit));
-      assert(
-        Option.exists(
-          Cause.findErrorOption(exit.cause),
-          (error) => error instanceof ArticleNotFound,
-        ),
-      );
-    }),
-  );
-});
-
-describe("blog example: relationship endpoints", () => {
-  it.effect("GET /articles/:id/relationships/comments serves paginated linkage", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.commentsRelationship({
-            params: { id: Article.Id.make("1") },
-            query: {},
-          });
-        }),
-      );
-
-      // Identifiers only — no attributes
-      expect(document.data).toEqual(
-        sampleComments.map((comment) => ({ type: "comments", id: comment.id })),
-      );
-      expect(document.links?.self).toBe("/articles/1/relationships/comments");
-      expect(document.links?.related).toBe("/articles/1/comments");
-      expect(document.meta?.total).toBe(2);
-    }),
-  );
-
-  it.effect(
-    "GET /articles/:id/relationships/comments?include=comments.author serves the page's comments and their authors",
-    () =>
-      Effect.gen(function* () {
-        // The spec's own example (§Inclusion of Related Resources), on the
-        // paginated `comments`.
-        const [bare, firstPage, secondPage] = yield* run(
-          Effect.gen(function* () {
-            const client = yield* buildClient;
-            const params = { id: Article.Id.make("1") };
-            return [
-              yield* client.articles.commentsRelationship({ params, query: {} }),
-              yield* client.articles.commentsRelationship({
-                params,
-                query: { include: ["comments.author"], page: { limit: 1 } },
-              }),
-              yield* client.articles.commentsRelationship({
-                params,
-                query: { include: ["comments"], page: { offset: 1, limit: 1 } },
-              }),
-            ] as const;
-          }),
-        );
-
-        // Without `?include=`, linkage only: no `included` member.
-        expect(bare).not.toHaveProperty("included");
-        // With it, the comments on the page — not the whole relationship — and,
-        // for `comments.author`, their author.
-        const [first, second] = sampleComments;
-        assert(first !== undefined && second !== undefined);
-        expect(firstPage.data).toEqual([Comment.ref(first.id)]);
-        expect(firstPage.included).toEqual([first, sampleAuthor]);
-        expect(secondPage.data).toEqual([Comment.ref(second.id)]);
-        expect(secondPage.included).toEqual([second]);
-        expect(firstPage.meta?.total).toBe(2);
-      }),
-  );
-
-  it.effect(
-    "GET /articles/:id/relationships/tags?include=tags serves a compound relationship document",
-    () =>
-      Effect.gen(function* () {
-        const [bare, compound] = yield* run(
-          Effect.gen(function* () {
-            const client = yield* buildClient;
-            const params = { id: Article.Id.make("1") };
-            return [
-              yield* client.articles.tagsRelationship({ params, query: {} }),
-              yield* client.articles.tagsRelationship({ params, query: { include: ["tags"] } }),
-            ] as const;
-          }),
-        );
-
-        // Without `?include=`, linkage only: no `included` member.
-        expect(bare.data).toEqual([{ type: "tags", id: sampleTag.id }]);
-        expect(bare).not.toHaveProperty("included");
-        // With it, the identifiers stay the primary data and the tags they name are
-        // `included` — the same `(type, id)` in both is no duplicate.
-        expect(compound.data).toEqual([{ type: "tags", id: sampleTag.id }]);
-        // The endpoint declares `fields`, so an `included` tag's
-        // attributes decode as optional.
-        expectTypeOf<NonNullable<typeof compound.included>[number]["attributes"]>().toEqualTypeOf<{
-          readonly name?: string;
-          readonly slug?: string;
-        }>();
-        expect(compound.included).toEqual([sampleTag]);
-        expect(compound.links?.self).toBe("/articles/1/relationships/tags");
-      }),
-  );
-
-  it.effect(
-    "GET /articles/:id/relationships/tags?include=tags&fields[tags]=name narrows the included tags",
-    () =>
-      Effect.gen(function* () {
-        const sparse = yield* run(
-          Effect.gen(function* () {
-            const client = yield* buildClient;
-            return yield* client.articles.tagsRelationship({
-              params: { id: Article.Id.make("1") },
-              query: { include: ["tags"], fields: { tags: ["name"] } },
-            });
-          }),
-        );
-
-        // The fieldset narrows the `included` tags; the identifiers, which
-        // have no fields, are untouched. A client decodes the attributes as
-        // optional, since a fieldset may leave any of them out.
-        expect(sparse.data).toEqual([{ type: "tags", id: sampleTag.id }]);
-        expect(sparse.included).toEqual([
-          { ...sampleTag, attributes: { name: sampleTag.attributes.name } },
-        ]);
-        expectTypeOf<
-          Pick<NonNullable<typeof sparse.included>[number]["attributes"], "slug">
-        >().toEqualTypeOf<{ readonly slug?: string }>();
-      }),
-  );
-
-  it.effect("PATCH /articles/:id/relationships/author replaces the author", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          const replaced = yield* client.articles.updateAuthorRelationship({
-            params: { id: Article.Id.make("1") },
-            payload: { data: Person.ref(sampleAuthor.id) },
-          });
-          // The article reflects the change
-          const article = yield* client.articles.get({
-            params: { id: Article.Id.make("1") },
-            query: {},
-          });
-          expect(article.data?.relationships?.author?.data.id).toBe(sampleAuthor.id);
-          return replaced;
-        }),
-      );
-
-      expect(document.data).toEqual({ type: "people", id: sampleAuthor.id });
-    }),
-  );
-
-  it.effect(
-    "POST /articles/:id/relationships/comments attaches comments; DELETE detaches them",
-    () =>
-      run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          const articleId = Article.Id.make("1");
-
-          // Detach one comment
-          yield* client.articles.removeCommentsRelationship({
-            params: { id: articleId },
-            payload: { data: [Comment.ref(sampleComments[0].id)] },
-          });
-
-          const afterRemove = yield* client.articles.commentsRelationship({
-            params: { id: articleId },
-            query: {},
-          });
-          expect(afterRemove.data.map((identifier) => identifier.id)).toEqual([
-            sampleComments[1].id,
-          ]);
-
-          // Re-attach it
-          const afterAdd = yield* client.articles.addCommentsRelationship({
-            params: { id: articleId },
-            payload: { data: [Comment.ref(sampleComments[0].id)] },
-          });
-          expect(
-            Arr.sort(
-              afterAdd.data.map((identifier) => identifier.id),
-              Order.String,
-            ),
-          ).toEqual(
-            Arr.sort(
-              sampleComments.map((comment) => comment.id),
-              Order.String,
-            ),
+          expect(created.data).not.toBeNull();
+          expect(created.data?.attributes.title).toBe("A fresh take");
+          expect(created.data?.relationships?.author.data.id).toBe(sampleAuthor.id);
+          // The paginated comments relationship is created empty, links only.
+          expect(created.data?.relationships?.comments.links.related).toBe(
+            `/articles/${created.data.id}/comments`,
           );
+
+          // and delete it again
+          yield* client.articles.delete({ params: { id: created.data.id } });
         }),
       ),
-  );
+    );
 
-  it.effect(
-    "404s when PATCHing the author to a person that does not exist, leaving it unchanged",
-    () =>
+    it.effect("409s when the title is already taken", () =>
       Effect.gen(function* () {
         const exit = yield* runExit(
           Effect.gen(function* () {
             const client = yield* buildClient;
-            return yield* client.articles.updateAuthorRelationship({
+            return yield* client.articles.create({
+              payload: {
+                data: {
+                  type: "articles",
+                  attributes: {
+                    title: sampleArticle.attributes.title,
+                    body: "duplicate",
+                    createdAt: now(),
+                  },
+                  relationships: {
+                    author: { data: Person.ref(sampleAuthor.id) },
+                  },
+                },
+              },
+            });
+          }),
+        );
+
+        assert(Exit.isFailure(exit));
+        assert(
+          Option.exists(Cause.findErrorOption(exit.cause), (error) => error instanceof TitleTaken),
+        );
+      }),
+    );
+
+    it.effect("updates an article with partial attributes", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.update({
               params: { id: Article.Id.make("1") },
-              payload: { data: Person.ref("nobody") },
+              payload: {
+                data: {
+                  type: "articles",
+                  id: Article.Id.make("1"),
+                  attributes: { body: "Updated body" },
+                },
+              },
+            });
+          }),
+        );
+
+        expect(document.data?.attributes.body).toBe("Updated body");
+        expect(document.data?.attributes.title).toBe(sampleArticle.attributes.title);
+        // a write response advertises JSON:API 1.1 too, not only the reads
+        expect(document.jsonapi?.version).toBe("1.1");
+      }),
+    );
+  });
+
+  describe("blog example: related resource endpoints", () => {
+    it.effect("GET /articles/:id/author serves the author as a full resource document", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.author({
+              params: { id: Article.Id.make("1") },
+              query: {},
+            });
+          }),
+        );
+
+        expect(document.data).toMatchObject({
+          type: "people",
+          id: sampleAuthor.id,
+          attributes: { firstName: "Dan", lastName: "Gebhardt" },
+        });
+        expect(document.links?.self).toBe("/articles/1/author");
+      }),
+    );
+
+    it.effect("GET /articles/:id/comments serves the paginated comment collection", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.comments({
+              params: { id: Article.Id.make("1") },
+              query: { page: { offset: 0, limit: 1 } },
+            });
+          }),
+        );
+
+        // Full comment resources, paginated
+        expect(document.data).toHaveLength(1);
+        expect(document.data[0]?.attributes.body).toBe("First!");
+        expect(document.meta?.total).toBe(2);
+        expect(document.links?.next).toBe("/articles/1/comments?page[offset]=1&page[limit]=1");
+      }),
+    );
+
+    it.effect("GET /articles/:id/comments supports compound documents (?include=author)", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.comments({
+              params: { id: Article.Id.make("1") },
+              query: { include: ["author"] },
+            });
+          }),
+        );
+
+        expect(document.data).toHaveLength(2);
+        // Both comments share the same author — deduplicated to one include.
+        expect(document.included?.map((resource) => resource.type)).toEqual(["people"]);
+      }),
+    );
+
+    it.effect("404s for related endpoints of unknown articles", () =>
+      Effect.gen(function* () {
+        const exit = yield* runExit(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.comments({
+              params: { id: Article.Id.make("nope") },
+              query: {},
             });
           }),
         );
@@ -636,303 +433,524 @@ describe("blog example: relationship endpoints", () => {
         assert(
           Option.exists(
             Cause.findErrorOption(exit.cause),
-            (error) => error instanceof PersonNotFound,
+            (error) => error instanceof ArticleNotFound,
           ),
         );
-        const article = yield* run(
+      }),
+    );
+  });
+
+  describe("blog example: relationship endpoints", () => {
+    it.effect("GET /articles/:id/relationships/comments serves paginated linkage", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
           Effect.gen(function* () {
             const client = yield* buildClient;
-            return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
+            return yield* client.articles.commentsRelationship({
+              params: { id: Article.Id.make("1") },
+              query: {},
+            });
           }),
         );
-        expect(article.data?.relationships?.author?.data.id).toBe(sampleAuthor.id);
+
+        // Identifiers only — no attributes
+        expect(document.data).toEqual(
+          sampleComments.map((comment) => ({ type: "comments", id: comment.id })),
+        );
+        expect(document.links?.self).toBe("/articles/1/relationships/comments");
+        expect(document.links?.related).toBe("/articles/1/comments");
+        expect(document.meta?.total).toBe(2);
       }),
-  );
+    );
 
-  it.effect("404s when POSTing a comment that does not exist, linking none of the batch", () =>
-    Effect.gen(function* () {
-      const exit = yield* runExit(
+    it.effect(
+      "GET /articles/:id/relationships/comments?include=comments.author serves the page's comments and their authors",
+      () =>
         Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.addCommentsRelationship({
-            params: { id: Article.Id.make("1") },
-            payload: {
-              data: [
-                ...sampleComments.map((comment) => Comment.ref(comment.id)),
-                Comment.ref("nothing"),
-              ],
-            },
-          });
-        }),
-      );
+          // The spec's own example (§Inclusion of Related Resources), on the
+          // paginated `comments`.
+          const [bare, firstPage, secondPage] = yield* run(
+            Effect.gen(function* () {
+              const client = yield* buildClient;
+              const params = { id: Article.Id.make("1") };
+              return [
+                yield* client.articles.commentsRelationship({ params, query: {} }),
+                yield* client.articles.commentsRelationship({
+                  params,
+                  query: { include: ["comments.author"], page: { limit: 1 } },
+                }),
+                yield* client.articles.commentsRelationship({
+                  params,
+                  query: { include: ["comments"], page: { offset: 1, limit: 1 } },
+                }),
+              ] as const;
+            }),
+          );
 
-      assert(Exit.isFailure(exit));
-      assert(
-        Option.exists(
-          Cause.findErrorOption(exit.cause),
-          (error) => error instanceof CommentNotFound,
+          // Without `?include=`, linkage only: no `included` member.
+          expect(bare).not.toHaveProperty("included");
+          // With it, the comments on the page — not the whole relationship — and,
+          // for `comments.author`, their author.
+          const [first, second] = sampleComments;
+          assert(first !== undefined && second !== undefined);
+          expect(firstPage.data).toEqual([Comment.ref(first.id)]);
+          expect(firstPage.included).toEqual([first, sampleAuthor]);
+          expect(secondPage.data).toEqual([Comment.ref(second.id)]);
+          expect(secondPage.included).toEqual([second]);
+          expect(firstPage.meta?.total).toBe(2);
+        }),
+    );
+
+    it.effect(
+      "GET /articles/:id/relationships/tags?include=tags serves a compound relationship document",
+      () =>
+        Effect.gen(function* () {
+          const [bare, compound] = yield* run(
+            Effect.gen(function* () {
+              const client = yield* buildClient;
+              const params = { id: Article.Id.make("1") };
+              return [
+                yield* client.articles.tagsRelationship({ params, query: {} }),
+                yield* client.articles.tagsRelationship({ params, query: { include: ["tags"] } }),
+              ] as const;
+            }),
+          );
+
+          // Without `?include=`, linkage only: no `included` member.
+          expect(bare.data).toEqual([{ type: "tags", id: sampleTag.id }]);
+          expect(bare).not.toHaveProperty("included");
+          // With it, the identifiers stay the primary data and the tags they name are
+          // `included` — the same `(type, id)` in both is no duplicate.
+          expect(compound.data).toEqual([{ type: "tags", id: sampleTag.id }]);
+          // The endpoint declares `fields`, so an `included` tag's
+          // attributes decode as optional.
+          expectTypeOf<
+            NonNullable<typeof compound.included>[number]["attributes"]
+          >().toEqualTypeOf<{
+            readonly name?: string;
+            readonly slug?: string;
+          }>();
+          expect(compound.included).toEqual([sampleTag]);
+          expect(compound.links?.self).toBe("/articles/1/relationships/tags");
+        }),
+    );
+
+    it.effect(
+      "GET /articles/:id/relationships/tags?include=tags&fields[tags]=name narrows the included tags",
+      () =>
+        Effect.gen(function* () {
+          const sparse = yield* run(
+            Effect.gen(function* () {
+              const client = yield* buildClient;
+              return yield* client.articles.tagsRelationship({
+                params: { id: Article.Id.make("1") },
+                query: { include: ["tags"], fields: { tags: ["name"] } },
+              });
+            }),
+          );
+
+          // The fieldset narrows the `included` tags; the identifiers, which
+          // have no fields, are untouched. A client decodes the attributes as
+          // optional, since a fieldset may leave any of them out.
+          expect(sparse.data).toEqual([{ type: "tags", id: sampleTag.id }]);
+          expect(sparse.included).toEqual([
+            { ...sampleTag, attributes: { name: sampleTag.attributes.name } },
+          ]);
+          expectTypeOf<
+            Pick<NonNullable<typeof sparse.included>[number]["attributes"], "slug">
+          >().toEqualTypeOf<{ readonly slug?: string }>();
+        }),
+    );
+
+    it.effect("PATCH /articles/:id/relationships/author replaces the author", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            const replaced = yield* client.articles.updateAuthorRelationship({
+              params: { id: Article.Id.make("1") },
+              payload: { data: Person.ref(sampleAuthor.id) },
+            });
+            // The article reflects the change
+            const article = yield* client.articles.get({
+              params: { id: Article.Id.make("1") },
+              query: {},
+            });
+            expect(article.data?.relationships?.author?.data.id).toBe(sampleAuthor.id);
+            return replaced;
+          }),
+        );
+
+        expect(document.data).toEqual({ type: "people", id: sampleAuthor.id });
+      }),
+    );
+
+    it.effect(
+      "POST /articles/:id/relationships/comments attaches comments; DELETE detaches them",
+      () =>
+        run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            const articleId = Article.Id.make("1");
+
+            // Detach one comment
+            yield* client.articles.removeCommentsRelationship({
+              params: { id: articleId },
+              payload: { data: [Comment.ref(sampleComments[0].id)] },
+            });
+
+            const afterRemove = yield* client.articles.commentsRelationship({
+              params: { id: articleId },
+              query: {},
+            });
+            expect(afterRemove.data.map((identifier) => identifier.id)).toEqual([
+              sampleComments[1].id,
+            ]);
+
+            // Re-attach it
+            const afterAdd = yield* client.articles.addCommentsRelationship({
+              params: { id: articleId },
+              payload: { data: [Comment.ref(sampleComments[0].id)] },
+            });
+            expect(
+              Arr.sort(
+                afterAdd.data.map((identifier) => identifier.id),
+                Order.String,
+              ),
+            ).toEqual(
+              Arr.sort(
+                sampleComments.map((comment) => comment.id),
+                Order.String,
+              ),
+            );
+          }),
         ),
-      );
-      const linkage = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.commentsRelationship({
-            params: { id: Article.Id.make("1") },
-            query: {},
-          });
-        }),
-      );
-      expect(linkage.data.map((identifier) => identifier.id)).not.toContain("nothing");
-    }),
-  );
-
-  it("documents relationship endpoints in OpenAPI", () => {
-    const spec = OpenApi.fromApi(Api);
-    // Related resource endpoints
-    expect(spec.paths["/articles/{id}/author"]?.get).toBeDefined();
-    expect(spec.paths["/articles/{id}/comments"]?.get).toBeDefined();
-    // Relationship (linkage) endpoints
-    expect(spec.paths["/articles/{id}/relationships/comments"]?.get).toBeDefined();
-    expect(spec.paths["/articles/{id}/relationships/comments"]?.post).toBeDefined();
-    expect(spec.paths["/articles/{id}/relationships/comments"]?.delete).toBeDefined();
-    expect(spec.paths["/articles/{id}/relationships/author"]?.patch).toBeDefined();
-    // The related comment collection documents its pagination parameters
-    const commentParams = spec.paths["/articles/{id}/comments"]?.get?.parameters?.map(
-      (parameter: { readonly name: string }) => parameter.name,
     );
-    expect(commentParams).toContain("page[offset]");
-    expect(commentParams).toContain("page[limit]");
-    expect(commentParams).toContain("include");
-  });
-});
 
-describe("blog example: heterogeneous search", () => {
-  it.effect("returns a mixed collection of articles and people, discriminated by type", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
+    it.effect(
+      "404s when PATCHing the author to a person that does not exist, leaving it unchanged",
+      () =>
         Effect.gen(function* () {
-          const client = yield* buildClient;
-          // "an" matches both "...paints my bikeshed!" (article body "...Ever.") — no.
-          // Use a term hitting both stores: "d" → "bikeshed"/"Dan"/"Gebhardt"
-          return yield* client.search.search({
-            query: { filter: { q: "d" } },
-          });
+          const exit = yield* runExit(
+            Effect.gen(function* () {
+              const client = yield* buildClient;
+              return yield* client.articles.updateAuthorRelationship({
+                params: { id: Article.Id.make("1") },
+                payload: { data: Person.ref("nobody") },
+              });
+            }),
+          );
+
+          assert(Exit.isFailure(exit));
+          assert(
+            Option.exists(
+              Cause.findErrorOption(exit.cause),
+              (error) => error instanceof PersonNotFound,
+            ),
+          );
+          const article = yield* run(
+            Effect.gen(function* () {
+              const client = yield* buildClient;
+              return yield* client.articles.get({
+                params: { id: Article.Id.make("1") },
+                query: {},
+              });
+            }),
+          );
+          expect(article.data?.relationships?.author?.data.id).toBe(sampleAuthor.id);
         }),
-      );
+    );
 
-      const types = Arr.sort(Arr.dedupe(document.data.map((result) => result.type)), Order.String);
-      expect(types).toEqual(["articles", "people"]);
+    it.effect("404s when POSTing a comment that does not exist, linking none of the batch", () =>
+      Effect.gen(function* () {
+        const exit = yield* runExit(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.addCommentsRelationship({
+              params: { id: Article.Id.make("1") },
+              payload: {
+                data: [
+                  ...sampleComments.map((comment) => Comment.ref(comment.id)),
+                  Comment.ref("nothing"),
+                ],
+              },
+            });
+          }),
+        );
 
-      // the union is discriminated by the `type` tag; the endpoint declares
-      // `fields`, so a client reads each attribute as optional
-      Arr.forEach(document.data, (result) => {
-        if (result.type === "articles") {
-          expectTypeOf<Pick<typeof result.attributes, "title">>().toEqualTypeOf<{
-            readonly title?: string;
-          }>();
-        } else {
-          expectTypeOf<Pick<typeof result.attributes, "firstName">>().toEqualTypeOf<{
-            readonly firstName?: string;
-          }>();
-        }
-        // each member still carries its own type's attribute at runtime
-        expect(
-          P.isString(
-            result.type === "articles" ? result.attributes.title : result.attributes.firstName,
+        assert(Exit.isFailure(exit));
+        assert(
+          Option.exists(
+            Cause.findErrorOption(exit.cause),
+            (error) => error instanceof CommentNotFound,
           ),
-        ).toBe(true);
-      });
-    }),
-  );
-
-  it.effect("filters across both resource types", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.search.search({
-            query: { filter: { q: "bikeshed" } },
-          });
-        }),
-      );
-
-      // only the article matches "bikeshed"
-      expect(document.data.map((result) => result.type)).toEqual(["articles"]);
-      expect(document.meta?.total).toBe(1);
-    }),
-  );
-
-  it.effect("keeps the request's `include`, `fields` and `filter` on `next`", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.search.search({
-            query: {
-              include: ["author"],
-              fields: { articles: ["title"] },
-              filter: { q: "e" },
-              page: { offset: 0, limit: 1 },
-            },
-          });
-        }),
-      );
-
-      const next = document.links?.next;
-      assert(P.isString(next));
-      expect(next).toBe(
-        "/search?include=author&fields[articles]=title&filter[q]=e&page[offset]=1&page[limit]=1",
-      );
-      // `next` is the same query on the next page, decoded through the schema
-      // the endpoint decodes.
-      const search = R.fromEntries(new URL(next, "https://example.test").searchParams);
-      expect(yield* Schema.decodeEffect(SearchQuery)(search)).toEqual({
-        include: ["author"],
-        fields: { articles: ["title"] },
-        filter: { q: "e" },
-        page: { offset: 1, limit: 1 },
-      });
-    }),
-  );
-
-  it.effect("paginates heterogeneous results with links", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.search.search({
-            query: { filter: { q: "" }, page: { offset: 0, limit: 1 } },
-          });
-        }),
-      );
-
-      expect(document.data).toHaveLength(1);
-      expect(document.meta?.total).toBeGreaterThan(1);
-      expect(document.links?.next).toBe("/search?filter[q]=&page[offset]=1&page[limit]=1");
-    }),
-  );
-
-  it.effect("supports include across the searched resources' graphs", () =>
-    Effect.gen(function* () {
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.search.search({
-            query: { filter: { q: "bikeshed" }, include: ["author"] },
-          });
-        }),
-      );
-
-      // the matched article's author is included
-      expect(document.included?.map((resource) => resource.type)).toEqual(["people"]);
-    }),
-  );
-
-  it.effect("keeps an empty `included` when every included author is already a hit", () =>
-    Effect.gen(function* () {
-      // "d" hits the article and its author, Dan: the author is primary data, so
-      // the dedupe leaves nothing to include — but the request carried
-      // `include`, and §Fetching Includes requires the key, even empty.
-      const document = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.search.search({
-            query: { filter: { q: "d" }, include: ["author"] },
-          });
-        }),
-      );
-
-      // the article and its author are both hits
-      expect(document.data.map((result) => `${result.type}:${result.id}`)).toEqual(
-        expect.arrayContaining(["articles:1", `people:${sampleAuthor.id}`]),
-      );
-      expect(document.included).toEqual([]);
-      // …and without `include` the member is absent
-      const plain = yield* run(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.search.search({ query: { filter: { q: "d" } } });
-        }),
-      );
-      expect(plain).not.toHaveProperty("included");
-    }),
-  );
-
-  it("documents the search endpoint in OpenAPI", () => {
-    const spec = OpenApi.fromApi(Api);
-    expect(spec.paths["/search"]?.get).toBeDefined();
-    const params = spec.paths["/search"]?.get?.parameters?.map(
-      (parameter: { readonly name: string }) => parameter.name,
+        );
+        const linkage = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.commentsRelationship({
+              params: { id: Article.Id.make("1") },
+              query: {},
+            });
+          }),
+        );
+        expect(linkage.data.map((identifier) => identifier.id)).not.toContain("nothing");
+      }),
     );
-    expect(params).toContain("filter[q]");
-    expect(params).toContain("fields[articles]");
-    expect(params).toContain("fields[people]");
-    expect(params).toContain("page[offset]");
-  });
-});
 
-describe("blog example: spec compliance on the wire", () => {
-  it("error documents are spec-compliant JSON:API", () => {
-    const wire = Schema.encodeUnknownSync(ArticleNotFound.wire)(new ArticleNotFound({ id: "42" }));
-    expect(wire).toEqual({
-      errors: [
-        {
-          status: "404",
-          code: "not_found",
-          title: "Resource not found",
-          detail: "Article 42 not found",
-          meta: { id: "42" },
-        },
-      ],
+    it("documents relationship endpoints in OpenAPI", () => {
+      const spec = OpenApi.fromApi(Api);
+      // Related resource endpoints
+      expect(spec.paths["/articles/{id}/author"]?.get).toBeDefined();
+      expect(spec.paths["/articles/{id}/comments"]?.get).toBeDefined();
+      // Relationship (linkage) endpoints
+      expect(spec.paths["/articles/{id}/relationships/comments"]?.get).toBeDefined();
+      expect(spec.paths["/articles/{id}/relationships/comments"]?.post).toBeDefined();
+      expect(spec.paths["/articles/{id}/relationships/comments"]?.delete).toBeDefined();
+      expect(spec.paths["/articles/{id}/relationships/author"]?.patch).toBeDefined();
+      // The related comment collection documents its pagination parameters
+      const commentParams = spec.paths["/articles/{id}/comments"]?.get?.parameters?.map(
+        (parameter: { readonly name: string }) => parameter.name,
+      );
+      expect(commentParams).toContain("page[offset]");
+      expect(commentParams).toContain("page[limit]");
+      expect(commentParams).toContain("include");
     });
   });
 
-  it("content negotiation predicates implement JSON:API §5", () => {
-    // JSON:API content type with parameters other than ext / profile → 415
-    expect(Middleware.contentTypeIsAcceptable("application/vnd.api+json; charset=utf-8")).toBe(
-      false,
-    );
-    expect(Middleware.contentTypeIsAcceptable("application/vnd.api+json")).toBe(true);
-    // profile parameters are never rejected; ext parameters require support
-    expect(Middleware.contentTypeIsAcceptable('application/vnd.api+json;profile="x"')).toBe(true);
-    expect(Middleware.contentTypeIsAcceptable(Atomic.MEDIA_TYPE)).toBe(false);
-    expect(
-      Middleware.contentTypeIsAcceptable(Atomic.MEDIA_TYPE, {
-        extensions: [Atomic.EXTENSION_URI],
+  describe("blog example: heterogeneous search", () => {
+    it.effect("returns a mixed collection of articles and people, discriminated by type", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            // "an" matches both "...paints my bikeshed!" (article body "...Ever.") — no.
+            // Use a term hitting both stores: "d" → "bikeshed"/"Dan"/"Gebhardt"
+            return yield* client.search.search({
+              query: { filter: { q: "d" } },
+            });
+          }),
+        );
+
+        const types = Arr.sort(
+          Arr.dedupe(document.data.map((result) => result.type)),
+          Order.String,
+        );
+        expect(types).toEqual(["articles", "people"]);
+
+        // the union is discriminated by the `type` tag; the endpoint declares
+        // `fields`, so a client reads each attribute as optional
+        Arr.forEach(document.data, (result) => {
+          if (result.type === "articles") {
+            expectTypeOf<Pick<typeof result.attributes, "title">>().toEqualTypeOf<{
+              readonly title?: string;
+            }>();
+          } else {
+            expectTypeOf<Pick<typeof result.attributes, "firstName">>().toEqualTypeOf<{
+              readonly firstName?: string;
+            }>();
+          }
+          // each member still carries its own type's attribute at runtime
+          expect(
+            P.isString(
+              result.type === "articles" ? result.attributes.title : result.attributes.firstName,
+            ),
+          ).toBe(true);
+        });
       }),
-    ).toBe(true);
-    // Accept in which every JSON:API instance has non-ext/profile parameters → 406
-    expect(Middleware.acceptIsAcceptable("application/vnd.api+json; charset=utf-8")).toBe(false);
-    // `q` is the entry's weight (RFC 9110 §12.4.2), not a media type parameter
-    expect(Middleware.acceptIsAcceptable("application/vnd.api+json;q=0.9")).toBe(true);
-    expect(Middleware.acceptIsAcceptable("application/vnd.api+json")).toBe(true);
-    expect(Middleware.acceptIsAcceptable("*/*")).toBe(true);
-  });
-
-  it("OpenAPI generation reflects the JSON:API media type and statuses", () => {
-    const spec = OpenApi.fromApi(Api);
-    const json = jsonText(spec);
-    expect(json).toContain("application/vnd.api+json");
-    // create → 201, remove → 204, fetch errors → 404
-    expect(spec.paths["/articles"]?.post?.responses).toHaveProperty("201");
-    expect(spec.paths["/articles/{id}"]?.delete?.responses).toHaveProperty("204");
-    expect(spec.paths["/articles/{id}"]?.get?.responses).toHaveProperty("404");
-    // typed query parameters are documented
-    const listParams = spec.paths["/articles"]?.get?.parameters?.map(
-      (parameter: { readonly name: string }) => parameter.name,
     );
-    expect(listParams).toContain("sort");
-    expect(listParams).toContain("page[offset]");
-    expect(listParams).toContain("filter[author]");
+
+    it.effect("filters across both resource types", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.search.search({
+              query: { filter: { q: "bikeshed" } },
+            });
+          }),
+        );
+
+        // only the article matches "bikeshed"
+        expect(document.data.map((result) => result.type)).toEqual(["articles"]);
+        expect(document.meta?.total).toBe(1);
+      }),
+    );
+
+    it.effect("keeps the request's `include`, `fields` and `filter` on `next`", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.search.search({
+              query: {
+                include: ["author"],
+                fields: { articles: ["title"] },
+                filter: { q: "e" },
+                page: { offset: 0, limit: 1 },
+              },
+            });
+          }),
+        );
+
+        const next = document.links?.next;
+        assert(P.isString(next));
+        expect(next).toBe(
+          "/search?include=author&fields[articles]=title&filter[q]=e&page[offset]=1&page[limit]=1",
+        );
+        // `next` is the same query on the next page, decoded through the schema
+        // the endpoint decodes.
+        const search = R.fromEntries(new URL(next, "https://example.test").searchParams);
+        expect(yield* Schema.decodeEffect(SearchQuery)(search)).toEqual({
+          include: ["author"],
+          fields: { articles: ["title"] },
+          filter: { q: "e" },
+          page: { offset: 1, limit: 1 },
+        });
+      }),
+    );
+
+    it.effect("paginates heterogeneous results with links", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.search.search({
+              query: { filter: { q: "" }, page: { offset: 0, limit: 1 } },
+            });
+          }),
+        );
+
+        expect(document.data).toHaveLength(1);
+        expect(document.meta?.total).toBeGreaterThan(1);
+        expect(document.links?.next).toBe("/search?filter[q]=&page[offset]=1&page[limit]=1");
+      }),
+    );
+
+    it.effect("supports include across the searched resources' graphs", () =>
+      Effect.gen(function* () {
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.search.search({
+              query: { filter: { q: "bikeshed" }, include: ["author"] },
+            });
+          }),
+        );
+
+        // the matched article's author is included
+        expect(document.included?.map((resource) => resource.type)).toEqual(["people"]);
+      }),
+    );
+
+    it.effect("keeps an empty `included` when every included author is already a hit", () =>
+      Effect.gen(function* () {
+        // "d" hits the article and its author, Dan: the author is primary data, so
+        // the dedupe leaves nothing to include — but the request carried
+        // `include`, and §Fetching Includes requires the key, even empty.
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.search.search({
+              query: { filter: { q: "d" }, include: ["author"] },
+            });
+          }),
+        );
+
+        // the article and its author are both hits
+        expect(document.data.map((result) => `${result.type}:${result.id}`)).toEqual(
+          expect.arrayContaining(["articles:1", `people:${sampleAuthor.id}`]),
+        );
+        expect(document.included).toEqual([]);
+        // …and without `include` the member is absent
+        const plain = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.search.search({ query: { filter: { q: "d" } } });
+          }),
+        );
+        expect(plain).not.toHaveProperty("included");
+      }),
+    );
+
+    it("documents the search endpoint in OpenAPI", () => {
+      const spec = OpenApi.fromApi(Api);
+      expect(spec.paths["/search"]?.get).toBeDefined();
+      const params = spec.paths["/search"]?.get?.parameters?.map(
+        (parameter: { readonly name: string }) => parameter.name,
+      );
+      expect(params).toContain("filter[q]");
+      expect(params).toContain("fields[articles]");
+      expect(params).toContain("fields[people]");
+      expect(params).toContain("page[offset]");
+    });
   });
 
-  it("sample resources decode against their own schemas (round-trip)", () => {
-    const encoded = Schema.encodeUnknownSync(Article)(sampleArticle);
-    expect(encoded.attributes.createdAt).toBe("2024-01-01T00:00:00.000Z");
-    const decoded = Schema.decodeSync(Article)(encoded);
-    expect(decoded).toEqual(sampleArticle);
+  describe("blog example: spec compliance on the wire", () => {
+    it("error documents are spec-compliant JSON:API", () => {
+      const wire = Schema.encodeUnknownSync(ArticleNotFound.wire)(
+        new ArticleNotFound({ id: "42" }),
+      );
+      expect(wire).toEqual({
+        errors: [
+          {
+            status: "404",
+            code: "not_found",
+            title: "Resource not found",
+            detail: "Article 42 not found",
+            meta: { id: "42" },
+          },
+        ],
+      });
+    });
 
-    const person = Schema.encodeUnknownSync(Person)(sampleAuthor);
-    expect(person.attributes.twitter).toBe("dgeb");
+    it("content negotiation predicates implement JSON:API §5", () => {
+      // JSON:API content type with parameters other than ext / profile → 415
+      expect(Middleware.contentTypeIsAcceptable("application/vnd.api+json; charset=utf-8")).toBe(
+        false,
+      );
+      expect(Middleware.contentTypeIsAcceptable("application/vnd.api+json")).toBe(true);
+      // profile parameters are never rejected; ext parameters require support
+      expect(Middleware.contentTypeIsAcceptable('application/vnd.api+json;profile="x"')).toBe(true);
+      expect(Middleware.contentTypeIsAcceptable(Atomic.MEDIA_TYPE)).toBe(false);
+      expect(
+        Middleware.contentTypeIsAcceptable(Atomic.MEDIA_TYPE, {
+          extensions: [Atomic.EXTENSION_URI],
+        }),
+      ).toBe(true);
+      // Accept in which every JSON:API instance has non-ext/profile parameters → 406
+      expect(Middleware.acceptIsAcceptable("application/vnd.api+json; charset=utf-8")).toBe(false);
+      // `q` is the entry's weight (RFC 9110 §12.4.2), not a media type parameter
+      expect(Middleware.acceptIsAcceptable("application/vnd.api+json;q=0.9")).toBe(true);
+      expect(Middleware.acceptIsAcceptable("application/vnd.api+json")).toBe(true);
+      expect(Middleware.acceptIsAcceptable("*/*")).toBe(true);
+    });
+
+    it("OpenAPI generation reflects the JSON:API media type and statuses", () => {
+      const spec = OpenApi.fromApi(Api);
+      const json = jsonText(spec);
+      expect(json).toContain("application/vnd.api+json");
+      // create → 201, remove → 204, fetch errors → 404
+      expect(spec.paths["/articles"]?.post?.responses).toHaveProperty("201");
+      expect(spec.paths["/articles/{id}"]?.delete?.responses).toHaveProperty("204");
+      expect(spec.paths["/articles/{id}"]?.get?.responses).toHaveProperty("404");
+      // typed query parameters are documented
+      const listParams = spec.paths["/articles"]?.get?.parameters?.map(
+        (parameter: { readonly name: string }) => parameter.name,
+      );
+      expect(listParams).toContain("sort");
+      expect(listParams).toContain("page[offset]");
+      expect(listParams).toContain("filter[author]");
+    });
+
+    it("sample resources decode against their own schemas (round-trip)", () => {
+      const encoded = Schema.encodeUnknownSync(Article)(sampleArticle);
+      expect(encoded.attributes.createdAt).toBe("2024-01-01T00:00:00.000Z");
+      const decoded = Schema.decodeSync(Article)(encoded);
+      expect(decoded).toEqual(sampleArticle);
+
+      const person = Schema.encodeUnknownSync(Person)(sampleAuthor);
+      expect(person.attributes.twitter).toBe("dgeb");
+    });
   });
 });
