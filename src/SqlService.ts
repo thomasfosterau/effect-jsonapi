@@ -50,6 +50,20 @@ export interface ToManyStorage {
 }
 
 /**
+ * The `WHERE` condition for one custom filter operator (`Filter.operator`):
+ * the field's column and the node's decoded value (one literal, or a list
+ * for a `list` operator), as a fragment of the client's own `sql` tag.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export type CustomCondition = (
+  sql: SqlClient.SqlClient,
+  column: Statement.Identifier,
+  value: Filter.Custom["value"],
+) => Statement.Fragment;
+
+/**
  * Options of {@link make}.
  *
  * @since 0.24.0
@@ -74,6 +88,12 @@ export interface Options<Res extends ResourceService.Definition, E> {
   readonly relationships?: {
     readonly [K in keyof Res["relationships"]]?: ToOneStorage | ToManyStorage;
   };
+  /**
+   * The SQL for each custom filter operator the resource's list endpoint
+   * declares, by operator name. A `Custom` node with no entry here is a
+   * defect.
+   */
+  readonly operators?: R.ReadonlyRecord<string, CustomCondition>;
 }
 
 // A row as a driver answers it.
@@ -106,6 +126,7 @@ interface Plan {
   }>;
   readonly toMany: ReadonlyArray<{ readonly name: string; readonly type: string } & ToManyStorage>;
   readonly paginated: ReadonlyArray<string>;
+  readonly operators: R.ReadonlyRecord<string, CustomCondition>;
 }
 
 const isToMany = (storage: ToOneStorage | ToManyStorage): storage is ToManyStorage =>
@@ -170,6 +191,7 @@ const planOf = <Res extends ResourceService.Definition, E>(
       Arr.filter(relationships, ([, descriptor]) => !Relationship.isLinkable(descriptor)),
       ([name]) => name,
     ),
+    operators: options.operators ?? {},
   };
 };
 
@@ -206,7 +228,8 @@ const unsupported = (message: string) => Effect.die(declarationError(`SqlService
  * `WHERE id IN (…)` per level, and each read loads its to-many linkage in one
  * more query. A database failure is a defect (answered 500). A cursor page
  * and a `Relationship.paginated` relationship's members are not yet
- * supported and are defects too.
+ * supported and are defects too, as is a custom filter operator
+ * (`Filter.operator`) without SQL in `options.operators`.
  *
  * @example
  * ```ts
@@ -700,6 +723,12 @@ const condition = (
           Arr.isReadonlyArrayNonEmpty(members) ? sql.or(members) : sql.literal("1=0"),
         ),
       Not: (negation) => Effect.map(node(negation.member), (member) => sql`NOT (${member})`),
+      Custom: (custom) =>
+        Option.match(R.get(plan.operators, custom.op), {
+          onNone: () => unsupported(`has no SQL for the custom filter operator "${custom.op}"`),
+          onSome: (build) =>
+            Effect.map(column(custom.field), (name) => build(sql, name, custom.value)),
+        }),
     });
   const membership = <V>(field: string, values: ReadonlyArray<V>, operator: "IN" | "NOT IN") =>
     Effect.flatMap(column(field), (name) =>

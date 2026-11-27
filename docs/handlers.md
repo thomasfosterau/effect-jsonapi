@@ -78,7 +78,7 @@ const articles =
 ```
 
 - **Columns.** A row has an `id` column (or `options.id`) and one column per attribute, named by `options.columns`, then a `sqlColumn` annotation on the attribute's schema, then the attribute's own name. A cell holds the attribute's JSON encoding, so a `Schema.Date` is ISO text. A to-one is a column holding the target id (`ToOneStorage`, else the relationship's `key`, else its name); a to-many is a join table (`ToManyStorage`), required for each one.
-- **Reads.** `find` and `findMany` load a batch with one statement per table. `list` turns an equality filter map or a `Filter` grammar tree into a `WHERE` clause with bound parameters, sorts with the id as tie-break, and pages by offset or number with a `COUNT(*)` total. The text operators are case-sensitive, through `instr`/`substr` on SQLite and `strpos`/`left`/`right` elsewhere.
+- **Reads.** `find` and `findMany` load a batch with one statement per table. `list` turns an equality filter map or a `Filter` grammar tree into a `WHERE` clause with bound parameters, sorts with the id as tie-break, and pages by offset or number with a `COUNT(*)` total. The text operators are case-sensitive, through `instr`/`substr` on SQLite and `strpos`/`left`/`right` elsewhere. A custom operator (`Filter.operator`) needs its SQL in `options.operators`, by name, such as ``{ like: (sql, column, value) => sql`${column} LIKE ${value}` }``.
 - **Writes.** `create` inserts with `RETURNING` and writes join-table members in one transaction; `update`, `delete` and the relationship writes do the same.
 - **Not supported.** Cursor pages and a paged to-many (`related`) die: wrap the service to add them. A SQL error is a defect.
 
