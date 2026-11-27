@@ -74,6 +74,7 @@ import type { Relationships, RelationshipSchemas } from "./Relationship.js";
 import * as Sort from "./Sort.js";
 import { render } from "./internal/json.js";
 import { declarationError } from "./internal/errors.js";
+import { isMemberName } from "./internal/memberName.js";
 
 // The relationship descriptor types (`Descriptor`, `Relationships`,
 // `RelationshipSchemas`) are part of the public API under the `Relationship`
@@ -2879,11 +2880,62 @@ type CheckFieldNames<Own, Other> = string extends keyof Own
 // relationship. Refused at definition time, naming the field.
 const reservedFieldNames: HashSet.HashSet<string> = HashSet.make("type", "id");
 
+// JSON:API 1.1 §7.10 Member Names: a resource type, attribute or
+// relationship name is a member name. One with `.` or `,` would also break
+// the package's own query grammar (include paths, `fields[TYPE]`, `sort`).
+const validateMemberName = (context: string, what: string, name: string): void => {
+  if (!isMemberName(name)) {
+    throw declarationError(
+      `${context}: ${what} ${render(name)} is not a legal JSON:API member name; ` +
+        "it must be non-empty, start and end with a letter, digit or non-ASCII character, " +
+        "and use only those, `-`, `_` and a space in between " +
+        "(https://jsonapi.org/format/1.1/#document-member-names)",
+    );
+  }
+};
+
+const reservedInAttributes = ["links", "relationships"] as const;
+
+// JSON:API 1.1 §7.2.2.1: an object in an attribute value "MUST NOT contain a
+// `relationships` or `links` member". The encoded side is walked through
+// structs, arrays and unions; a suspended (recursive) schema is not entered.
+const reservedMemberIn = (ast: SchemaAST.AST): Option.Option<string> => {
+  if (SchemaAST.isObjects(ast)) {
+    const own = Arr.findFirst(ast.propertySignatures, (property) =>
+      Arr.contains(reservedInAttributes, property.name),
+    );
+    return Option.isSome(own)
+      ? Option.some(String(own.value.name))
+      : Arr.findFirst(ast.propertySignatures, (property) => reservedMemberIn(property.type));
+  }
+  if (SchemaAST.isArrays(ast)) {
+    return Arr.findFirst([...ast.elements, ...ast.rest], reservedMemberIn);
+  }
+  if (SchemaAST.isUnion(ast)) return Arr.findFirst(ast.types, reservedMemberIn);
+  return Option.none();
+};
+
+const validateAttributeValues = (context: string, attributes: Schema.Struct.Fields): void => {
+  Arr.forEach(R.toEntries(attributes), ([key, schema]) => {
+    const reserved = reservedMemberIn(SchemaAST.toEncoded(schema.ast));
+    if (Option.isSome(reserved)) {
+      throw declarationError(
+        `${context}: attribute "${key}" holds an object with a "${reserved.value}" member, ` +
+          "which JSON:API reserves inside attribute values " +
+          "(https://jsonapi.org/format/1.1/#document-resource-object-attributes)",
+      );
+    }
+  });
+};
+
 const validateFieldNames = (
   context: string,
   attributes: Schema.Struct.Fields,
   relationships: Relationships,
 ): void => {
+  Arr.forEach(R.keys(attributes), (key) => validateMemberName(context, "attribute", key));
+  Arr.forEach(R.keys(relationships), (key) => validateMemberName(context, "relationship", key));
+  validateAttributeValues(context, attributes);
   Arr.forEach(R.keys(attributes), (key) => {
     if (HashSet.has(reservedFieldNames, key)) {
       throw declarationError(
@@ -3122,7 +3174,9 @@ export const make = <
     options.maxUndeclaredMemberErrors ?? defaultMaxUndeclaredMemberErrors,
   );
   const relationships = (options.relationships ?? {}) as Rels;
-  // No field named `type` / `id`, and no attribute and relationship sharing a name.
+  // A legal type and field names, no field named `type` / `id`, and no
+  // attribute and relationship sharing a name.
+  validateMemberName("Resource.make", "type", type);
   validateFieldNames(`Resource.make("${type}")`, options.attributes, relationships);
   const meta = (options.meta ?? AnyMeta) as Meta;
   const id = (options.id ?? Id(type)) as IdSchema;
@@ -3675,6 +3729,7 @@ export const extend = <
   const relationships = { ...base.relationships, ...options?.relationships };
   // Checked here too, so a clash an extension introduces names the call that
   // introduced it.
+  validateMemberName("Resource.extend", "type", type);
   validateFieldNames(`Resource.extend("${type}")`, attributes, relationships);
   const declaration = {
     attributes,
@@ -4000,6 +4055,7 @@ export function family(nameOrBase: string | Any, members: ReadonlyArray<Any>): A
   }
   const base = P.isString(nameOrBase) ? undefined : nameOrBase;
   const name = base !== undefined ? base.type : (nameOrBase as string);
+  validateMemberName("Resource.family", "name", name);
 
   const memberUnion = Schema.Union(members);
   const identifier = Schema.Union(members.map((member) => member.identifier));

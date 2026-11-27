@@ -33,7 +33,7 @@ import {
   sortable,
 } from "./Resource.js";
 import * as Sort from "./Sort.js";
-import { parse } from "./internal/json.js";
+import { parse, render } from "./internal/json.js";
 
 const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
 
@@ -2344,5 +2344,70 @@ describe("field names", () => {
         }),
       ),
     ).toEqual(["title", "author"]);
+  });
+
+  // JSON:API 1.1 §Member Names.
+  it.each(["bad type!", "", "a.b", "-lead", "trail_"])("rejects the type %j", (type) => {
+    expect(() => Resource(type, { attributes: {} })).toThrow(
+      `Resource.make: type ${render(type)} is not a legal JSON:API member name`,
+    );
+  });
+
+  it.each(["first name!", "a.b", "x,y", "@context", "_hidden"])(
+    "rejects the attribute name %j",
+    (name) => {
+      expect(() => Resource("things", { attributes: fields({ [name]: Schema.String }) })).toThrow(
+        `Resource.make("things"): attribute ${render(name)} is not a legal JSON:API member name`,
+      );
+    },
+  );
+
+  it("rejects an illegal relationship name", () => {
+    expect(() =>
+      Resource("things", {
+        attributes: {},
+        relationships: rels({ "owner.id": Relationship.one(() => Person) }),
+      }),
+    ).toThrow(
+      `Resource.make("things"): relationship "owner.id" is not a legal JSON:API member name`,
+    );
+  });
+
+  it("accepts legal names with inner spaces, dashes, underscores and non-ASCII", () => {
+    expect(() =>
+      Resource("blog-posts", {
+        attributes: fields({ "first name": Schema.String, x_y: Schema.String, été: Schema.String }),
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects an illegal type in extend and family", () => {
+    const Base = Resource("bases", { attributes: {} });
+    expect(() => extend(Base, "a,b")).toThrow(`Resource.extend: type "a,b" is not a legal`);
+    expect(() => family("a b!", [Base])).toThrow(`Resource.family: name "a b!" is not a legal`);
+  });
+
+  // JSON:API 1.1 §Attributes: no `links` / `relationships` in an attribute value.
+  it.each([
+    ["an object", Schema.Struct({ links: Schema.String })],
+    ["a nested object", Schema.Struct({ geo: Schema.Struct({ relationships: Schema.String }) })],
+    ["an array of objects", Schema.Array(Schema.Struct({ links: Schema.String }))],
+    ["a union member", Schema.Union([Schema.String, Schema.Struct({ links: Schema.Finite })])],
+  ])("rejects an attribute holding %s with a reserved member", (_, schema) => {
+    expect(() => Resource("places", { attributes: { geo: schema } })).toThrow(
+      /Resource\.make\("places"\): attribute "geo" holds an object with a "(links|relationships)" member/,
+    );
+  });
+
+  it("checks the encoded side of an attribute", () => {
+    const renamed = Schema.Struct({ link: Schema.String }).pipe(
+      Schema.encodeKeys({ link: "links" }),
+    );
+    expect(() => Resource("places", { attributes: { geo: renamed } })).toThrow(
+      'attribute "geo" holds an object with a "links" member',
+    );
+    expect(() =>
+      Resource("places", { attributes: { geo: Schema.Struct({ link: Schema.String }) } }),
+    ).not.toThrow();
   });
 });

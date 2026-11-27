@@ -128,8 +128,8 @@ import {
   type Family,
   isFamily,
   isFamilyMember,
-  isMemberName,
 } from "./internal/vocabulary.js";
+import { isMemberName } from "./internal/memberName.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
 import { someMember } from "./internal/members.js";
 import { type AcceptWithoutJsonApi, defaults, JsonApiConfig } from "./JsonApiConfig.js";

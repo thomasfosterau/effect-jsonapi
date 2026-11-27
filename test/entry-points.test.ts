@@ -57,6 +57,9 @@ const SCHEMA_TIER = [
   // (`effect/avoid-direct-json`); imports only `effect` modules.
   "internal/json.ts",
   "internal/media.ts",
+  // The §Member Names grammar `Resource.make` checks declared names against;
+  // a regular expression, importing nothing.
+  "internal/memberName.ts",
   "internal/operators.ts",
   // `Resource.createPayload` refuses a client-generated `data.id` with the
   // issue `Middleware.SchemaErrorsLive` answers 403; pure schema.
