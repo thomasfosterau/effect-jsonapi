@@ -69,7 +69,7 @@ import { refusingClientId } from "./internal/refusedClientId.js";
 import {
   closedStruct,
   defaultMaxUndeclaredMemberErrors,
-  validateMaxUndeclaredMemberErrors,
+  validateCarriedCap,
 } from "./internal/schemaExt.js";
 import * as Relationship from "./Relationship.js";
 import type { Relationships } from "./Relationship.js";
@@ -350,7 +350,7 @@ export type UpdateRelationshipFields<Rels extends Relationships> = {
 // is validated here by the same rule, and a bad one throws when the operation
 // schema is defined, as `Resource.make` throws when the resource is.
 const maxUndeclaredMemberErrorsOf = (operation: string, resource: Any): number =>
-  validateMaxUndeclaredMemberErrors(
+  validateCarriedCap(
     `Atomic.${operation}("${resource.type}")`,
     resource.maxUndeclaredMemberErrors ?? defaultMaxUndeclaredMemberErrors,
   );

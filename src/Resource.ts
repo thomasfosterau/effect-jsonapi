@@ -66,6 +66,7 @@ import { resolveOperators } from "./internal/operators.js";
 import { refusingClientId } from "./internal/refusedClientId.js";
 import {
   closedStruct,
+  IGNORE_UNDECLARED_MEMBERS,
   defaultMaxUndeclaredMemberErrors,
   validateMaxUndeclaredMemberErrors,
 } from "./internal/schemaExt.js";
@@ -1425,7 +1426,8 @@ export interface Any extends Schema.Top {
    * `maxUndeclaredMemberErrors`). Every definition {@link make} or {@link extend}
    * builds carries one, as does a {@link family} anchored on one; the atomic
    * `add` / `update` operations read it, use `12` when it is absent, and
-   * throw when it is not a positive integer or `Infinity`.
+   * throw when it is not a positive integer or `Infinity`. A definition built
+   * with `undeclaredMembers: "ignore"` carries `0`, which drops them.
    *
    * @since 0.17.0
    */
@@ -3162,17 +3164,31 @@ export const make = <
      * `updateInput` and the atomic `add` / `update` operations — when
      * decoding and when encoding (`Client`). A
      * positive integer, or `Infinity` to report every undeclared member;
-     * anything else throws. Defaults to `12`. {@link extend} inherits it.
+     * anything else throws (to drop them, use `undeclaredMembers`). Defaults to `12`. {@link extend} inherits it.
      *
      * @since 0.17.0
      */
     readonly maxUndeclaredMemberErrors?: number;
+    /**
+     * What a write body member does with a member it doesn't declare (an
+     * unknown attribute or relationship): `"reject"`, the default, answers
+     * 400 at its pointer; `"ignore"` drops it, so the handler never sees it,
+     * which suits rolling deploys and clients built against a newer schema.
+     * The specification permits either. Applies to every write body member
+     * `maxUndeclaredMemberErrors` does, and {@link extend} inherits it.
+     *
+     * @since 0.23.0
+     */
+    readonly undeclaredMembers?: UndeclaredMembers;
   },
 ): Resource<Type, Attributes, Rels, Meta, IdSchema> => {
-  const maxUndeclaredMemberErrors = validateMaxUndeclaredMemberErrors(
-    `Resource.make("${type}")`,
-    options.maxUndeclaredMemberErrors ?? defaultMaxUndeclaredMemberErrors,
-  );
+  const maxUndeclaredMemberErrors =
+    options.undeclaredMembers === "ignore"
+      ? IGNORE_UNDECLARED_MEMBERS
+      : validateMaxUndeclaredMemberErrors(
+          `Resource.make("${type}")`,
+          options.maxUndeclaredMemberErrors ?? defaultMaxUndeclaredMemberErrors,
+        );
   const relationships = (options.relationships ?? {}) as Rels;
   // A legal type and field names, no field named `type` / `id`, and no
   // attribute and relationship sharing a name.
@@ -3579,6 +3595,40 @@ type InheritedId<BaseId extends Schema.Top, Type extends string> = BaseId extend
   : Schema.brand<BaseId, `${Type}Id`>;
 
 /**
+ * What a write body member does with a member it doesn't declare: answer 400
+ * (`"reject"`, the default) or drop it (`"ignore"`). See {@link make}'s
+ * `undeclaredMembers` option.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export type UndeclaredMembers = "reject" | "ignore";
+
+// The undeclared-member policy an `extend` passes on to `make`: the
+// child's own, else the base's. Validated here, so a bad cap names the call
+// that passed it.
+interface UndeclaredPolicy {
+  readonly undeclaredMembers: UndeclaredMembers;
+  readonly maxUndeclaredMemberErrors: number;
+}
+
+const extendedUndeclaredPolicy = (
+  where: string,
+  base: { readonly maxUndeclaredMemberErrors: number },
+  options?: Partial<UndeclaredPolicy>,
+): UndeclaredPolicy => {
+  const inheritsIgnore = base.maxUndeclaredMemberErrors === IGNORE_UNDECLARED_MEMBERS;
+  const policy = options?.undeclaredMembers ?? (inheritsIgnore ? "ignore" : "reject");
+  const cap =
+    options?.maxUndeclaredMemberErrors ??
+    (inheritsIgnore ? defaultMaxUndeclaredMemberErrors : base.maxUndeclaredMemberErrors);
+  return {
+    undeclaredMembers: policy,
+    maxUndeclaredMemberErrors: validateMaxUndeclaredMemberErrors(where, cap),
+  };
+};
+
+/**
  * Defines a new resource that **extends** (subtypes) an existing one: the new
  * resource inherits the base's attributes and relationships, to which `options`
  * adds more — keys present in `options` override the base's.
@@ -3698,6 +3748,13 @@ export const extend = <
      * @since 0.17.0
      */
     readonly maxUndeclaredMemberErrors?: number;
+    /**
+     * What write bodies do with undeclared members, exactly as {@link make}'s
+     * `undeclaredMembers` option. Defaults to the base's.
+     *
+     * @since 0.23.0
+     */
+    readonly undeclaredMembers?: UndeclaredMembers;
   },
 ): Resource<
   Type,
@@ -3739,10 +3796,7 @@ export const extend = <
     // relationships are, the child's own keys winning.
     annotations: { ...Schema.resolveAnnotations(base), ...options?.annotations },
     // Validated here, so a bad value names the call that passed it.
-    maxUndeclaredMemberErrors: validateMaxUndeclaredMemberErrors(
-      `Resource.extend("${type}")`,
-      options?.maxUndeclaredMemberErrors ?? base.maxUndeclaredMemberErrors,
-    ),
+    ...extendedUndeclaredPolicy(`Resource.extend("${type}")`, base, options),
   };
   // `id` is a member only when one was given or inherited.
   // A double assertion, not a single one: the spread maps are not provably

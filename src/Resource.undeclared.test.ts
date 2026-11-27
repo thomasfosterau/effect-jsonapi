@@ -804,15 +804,19 @@ describe("the maxUndeclaredMemberErrors option", () => {
     ).toEqual([...twelve, "1 more undeclared member not listed"]);
   });
 
-  it.each(invalid)("the atomic operations refuse a hand-rolled Any's cap of %s", (cap, shown) => {
-    const resource = withCap(handRolled({ maxUndeclaredMemberErrors: 1 }), cap);
-    expect(() => Atomic.AddOperation(resource)).toThrow(
-      refusal('Atomic.AddOperation("notes")', shown),
-    );
-    expect(() => Atomic.UpdateOperation(resource)).toThrow(
-      refusal('Atomic.UpdateOperation("notes")', shown),
-    );
-  });
+  // A carried `0` is how `undeclaredMembers: "ignore"` reaches the operations.
+  it.each(invalid.slice(1))(
+    "the atomic operations refuse a hand-rolled Any's cap of %s",
+    (cap, shown) => {
+      const resource = withCap(handRolled({ maxUndeclaredMemberErrors: 1 }), cap);
+      expect(() => Atomic.AddOperation(resource)).toThrow(
+        refusal('Atomic.AddOperation("notes")', shown),
+      );
+      expect(() => Atomic.UpdateOperation(resource)).toThrow(
+        refusal('Atomic.UpdateOperation("notes")', shown),
+      );
+    },
+  );
 
   it("takes an omitted cap as the default", () => {
     expect(Resource("plain", { attributes: {} }).maxUndeclaredMemberErrors).toBe(12);
