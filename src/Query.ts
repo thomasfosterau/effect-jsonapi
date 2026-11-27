@@ -89,7 +89,7 @@ import type {
   IncludeEnabled,
   LegalIncludePaths,
 } from "./internal/includeGraph.js";
-import { expandFamilies, includePathsFor, wireIncludePath } from "./internal/includeGraph.js";
+import { includePathsFor, keyPath, wirePath } from "./internal/includeGraph.js";
 import type { IncludeArgument } from "./internal/sparse.js";
 import { fieldsetResources } from "./internal/sparse.js";
 import { isFamily, vocabularyAnnotation, vocabularyAnnotations } from "./internal/vocabulary.js";
@@ -105,7 +105,7 @@ import type {
   IncludePath,
   IncludePathsTo,
 } from "./Resource.js";
-import { attributeKeys, fieldKeys, filterable, memberNames } from "./Resource.js";
+import { attributeKeys, fieldKeys, filterable } from "./Resource.js";
 import { declarationError } from "./internal/errors.js";
 
 // ---------------------------------------------------------------------------
@@ -764,7 +764,7 @@ export const Include = <Res extends Any, const O extends IncludeOptions<Res> | A
       // never".
       renamedLiterals(
         paths,
-        (path) => wireIncludePath(resources, path),
+        (path) => wirePath(resources, path),
         (values) =>
           vocabularyAnnotations(
             { family: "include", values },
@@ -1358,25 +1358,17 @@ const filterIssues = (
         options,
       );
 
-// Each of `resources`' members' wire name (`Resource.memberNames`), a
-// family's members standing for it, and the key each wire name stands for.
+// The wire spelling of a member of `resources`, or of a dotted path through
+// their relationships (`Resource.memberNames`, segment by segment), and back.
 interface Naming {
   readonly toWire: (key: string) => string;
   readonly toKey: (wire: string) => string;
 }
 
-const naming = (resources: ReadonlyArray<Any>): Naming => {
-  const names = Arr.reduce(
-    expandFamilies(resources),
-    {} as R.ReadonlyRecord<string, string>,
-    (acc, resource) => ({ ...acc, ...memberNames(resource) }),
-  );
-  const keys = R.fromEntries(R.toEntries(names).map(([key, wire]) => [wire, key] as const));
-  return {
-    toWire: (key) => Option.getOrElse(R.get(names, key), () => key),
-    toKey: (wire) => Option.getOrElse(R.get(keys, wire), () => wire),
-  };
-};
+const naming = (resources: ReadonlyArray<Any>): Naming => ({
+  toWire: (key) => wirePath(resources, key),
+  toKey: (wire) => keyPath(resources, wire),
+});
 
 const wireNamer = (resources: ReadonlyArray<Any>): ((key: string) => string) =>
   naming(resources).toWire;

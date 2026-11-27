@@ -281,4 +281,22 @@ describe("memberNames", () => {
       "createdAt" | "wordCount"
     >();
   });
+
+  it("renames a relationship path segment by segment, in filter and sort", () => {
+    const Author = Resource("authors", {
+      attributes: { fullName: attribute(Schema.String, { filter: true, sort: true }) },
+      memberNames: "kebab",
+    });
+    const Post = Resource("posts", {
+      attributes: { title: Schema.String },
+      relationships: { blogAuthor: Relationship.one(() => Author, { traverse: true }) },
+      memberNames: "kebab",
+    });
+    const query = Query.schema(Post, { filter: true, sort: ["blogAuthor.fullName"] });
+    const wire = { sort: "-blog-author.full-name", "filter[blog-author.full-name]": "Ada" };
+    const decoded = Schema.decodeSync(query)(wire);
+    expect(decoded.sort).toEqual([{ field: "blogAuthor.fullName", direction: "desc" }]);
+    expect(decoded.filter).toEqual(Filter.eq("blogAuthor.fullName", "Ada"));
+    expect(Schema.encodeSync(query)(decoded)).toEqual(wire);
+  });
 });
