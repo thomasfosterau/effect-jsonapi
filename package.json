@@ -93,6 +93,10 @@
       "types": "./dist/Include.d.ts",
       "default": "./dist/Include.js"
     },
+    "./JsonApiConfig": {
+      "types": "./dist/JsonApiConfig.d.ts",
+      "default": "./dist/JsonApiConfig.js"
+    },
     "./Lid": {
       "types": "./dist/Lid.d.ts",
       "default": "./dist/Lid.js"

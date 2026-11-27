@@ -130,6 +130,7 @@ import {
 } from "./internal/vocabulary.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
 import { someMember } from "./internal/members.js";
+import { type AcceptWithoutJsonApi, defaults, JsonApiConfig } from "./JsonApiConfig.js";
 
 // ---------------------------------------------------------------------------
 // Tracing
@@ -201,6 +202,25 @@ export interface NegotiationOptions {
 }
 
 /**
+ * The server's content-negotiation options: the {@link NegotiationOptions}
+ * plus what to answer an `Accept` header that names no JSON:API media type.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export interface ContentNegotiationOptions extends NegotiationOptions {
+  /**
+   * What an `Accept` naming no instance of the JSON:API media type and no
+   * wildcard (`application/json`, `text/html`) is answered with:
+   * `"notAcceptable"`, the default, is a 406; `"serve"` answers with the
+   * JSON:API document anyway. An `Accept` that names the JSON:API media
+   * type is judged by §5 either way. Falls back to
+   * `JsonApiConfig.acceptWithoutJsonApi` in the middleware layers.
+   */
+  readonly acceptWithoutJsonApi?: AcceptWithoutJsonApi;
+}
+
+/**
  * JSON:API §5: the server MUST respond with 415 if the request `Content-Type`
  * is the JSON:API media type with any media type parameters other than `ext`
  * or `profile`, or with an `ext` parameter carrying unsupported extension
@@ -240,12 +260,24 @@ export const contentTypeIsAcceptable = (header?: string, options?: NegotiationOp
  * @since 0.1.0
  * @category utils
  */
-export const acceptIsAcceptable = (header?: string, options?: NegotiationOptions): boolean => {
+export const acceptIsAcceptable = (
+  header?: string,
+  options?: ContentNegotiationOptions,
+): boolean => {
   if (header === undefined) return true;
-  const entries = header.split(",").map((entry) => entry.trim());
-  return Arr.some(entries, (entry) => {
-    if (entry === "") return false;
-    const { base, parameters, weight } = parseMediaType(entry);
+  const entries = Arr.map(
+    Arr.filter(
+      header.split(",").map((entry) => entry.trim()),
+      (entry) => entry !== "",
+    ),
+    parseMediaType,
+  );
+  if (
+    options?.acceptWithoutJsonApi === "serve" &&
+    !Arr.some(entries, ({ base }) => base === MEDIA_TYPE)
+  )
+    return true;
+  return Arr.some(entries, ({ base, parameters, weight }) => {
     if (base === "*/*" || base === "application/*") return true;
     if (base !== MEDIA_TYPE) return false;
     // A malformed `q` is the default weight, not a refusal (as in `Negotiation`).
@@ -291,7 +323,7 @@ export const acceptIsAcceptable = (header?: string, options?: NegotiationOptions
  */
 export const negotiate = (
   headers: Headers.Input,
-  options?: NegotiationOptions,
+  options?: ContentNegotiationOptions,
 ): Option.Option<UnsupportedMediaType | NotAcceptable> => {
   const read = Headers.fromInput(headers);
   if (!contentTypeIsAcceptable(Option.getOrUndefined(Headers.get(read, "content-type")), options))
@@ -599,11 +631,6 @@ const kindOf = (base: string): BaseNameKind =>
           ? "implementation"
           : "illegal";
 
-// The allow-list when the options name none: jQuery's `_` cache-buster
-// (`$.ajax({ cache: false })` appends `?_=<timestamp>`), not a legal member
-// name, so otherwise a 400.
-const DEFAULT_ALLOWED: ReadonlyArray<string> = ["_"];
-
 // A parameter's family base name: everything before its first `[` — `page`
 // for `page[limit]`, `foo` for `foo[bar]`, the whole name when unbracketed.
 const baseName = (name: string): string => {
@@ -813,7 +840,7 @@ const refusal = (parameter: string): Option.Option<string> => {
 // The allow-list, every entry checked to be a family base name the check
 // rejects and the specification does not define.
 const allowedBaseNames = (options?: QueryParameterOptions): ReadonlyArray<string> => {
-  const allowed = options?.allowedQueryParameters ?? DEFAULT_ALLOWED;
+  const allowed = options?.allowedQueryParameters ?? defaults.allowedQueryParameters;
   const refused = Arr.findFirst(allowed, (parameter) =>
     Option.map(
       refusal(parameter),
@@ -1068,20 +1095,27 @@ export class SchemaErrors extends HttpApiMiddleware.Service<SchemaErrors>()(
 
 /**
  * Creates the live {@link ContentNegotiation} implementation, optionally
- * supporting JSON:API extensions (e.g. atomic operations).
+ * supporting JSON:API extensions (e.g. atomic operations) or serving an
+ * `Accept` that names no JSON:API media type
+ * ({@link ContentNegotiationOptions}). A member left out is read from
+ * `JsonApiConfig` when the layer is built.
  *
  * @since 0.1.0
  * @category constructors
  */
 export const contentNegotiationLayer = (
-  options?: NegotiationOptions,
+  options?: ContentNegotiationOptions,
 ): Layer.Layer<ContentNegotiation> =>
   Layer.effect(
     ContentNegotiation,
-    Effect.succeed<typeof ContentNegotiation.Service>(
-      Effect.fnUntraced(function* (httpEffect) {
+    Effect.map(Effect.service(JsonApiConfig), (config): typeof ContentNegotiation.Service => {
+      const resolved: ContentNegotiationOptions = {
+        extensions: options?.extensions ?? config.extensions,
+        acceptWithoutJsonApi: options?.acceptWithoutJsonApi ?? config.acceptWithoutJsonApi,
+      };
+      return Effect.fnUntraced(function* (httpEffect) {
         const request = yield* HttpServerRequest;
-        const error = yield* Effect.sync(() => negotiate(request.headers, options)).pipe(
+        const error = yield* Effect.sync(() => negotiate(request.headers, resolved)).pipe(
           Effect.tap((error) =>
             Effect.annotateCurrentSpan(
               Option.match(error, {
@@ -1098,8 +1132,8 @@ export const contentNegotiationLayer = (
         );
         if (Option.isSome(error)) return yield* error.value;
         return yield* httpEffect;
-      }),
-    ),
+      });
+    }),
   );
 
 /**
@@ -1350,39 +1384,53 @@ const checkWireLinkage = (
  * @category constructors
  */
 export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<SchemaErrors> => {
-  // Checked here, so a misspelt entry fails when the layer is built.
-  const allowedQueryParameters = allowedBaseNames(options);
-  const checkLinkage = options?.checkLinkage !== false;
-  return Layer.succeed(
+  // Checked here, so a misspelt entry fails when it is passed; one read
+  // from `JsonApiConfig` is checked when the layer is built.
+  const explicit = Option.map(
+    Option.fromUndefinedOr(options?.allowedQueryParameters),
+    (allowedQueryParameters) => allowedBaseNames({ allowedQueryParameters }),
+  );
+  return Layer.effect(
     SchemaErrors,
-    // Untraced: the middleware's span surface is `Span.schemaError` alone.
-    Effect.fnUntraced(function* (httpEffect, { endpoint }) {
-      const declared = declaredFor(endpoint);
-      const params = yield* ParsedSearchParams;
-      if (Option.isSome(declared)) {
-        const rejected = rejectQueryParameters(
-          R.keys(params),
-          declared.value,
-          allowedQueryParameters,
-        );
-        if (Option.isSome(rejected)) return yield* badRequestResponse("Query", rejected.value);
-      }
-      // The linkage check reads the encoded success only: a defect it dies
-      // with passes `catch`, which sees failures alone.
-      return yield* Effect.catchFilter(
-        checkLinkage
-          ? Effect.flatMap(httpEffect, (response) =>
-              checkWireLinkage(response, requestedFieldsets(searchPairs(params))),
-            )
-          : httpEffect,
-        Filter.make((error) =>
-          HttpApiError.HttpApiSchemaError.is(error) ? Result.succeed(error) : Result.fail(error),
-        ),
-        (error) => transformSchemaError(endpoint, error),
-      );
-    }),
+    Effect.map(Effect.service(JsonApiConfig), (config) =>
+      schemaErrorsMiddleware(
+        Option.getOrElse(explicit, () => allowedBaseNames(config)),
+        options?.checkLinkage ?? config.checkLinkage,
+      ),
+    ),
   );
 };
+
+const schemaErrorsMiddleware = (
+  allowedQueryParameters: ReadonlyArray<string>,
+  checkLinkage: boolean,
+): typeof SchemaErrors.Service =>
+  // Untraced: the middleware's span surface is `Span.schemaError` alone.
+  Effect.fnUntraced(function* (httpEffect, { endpoint }) {
+    const declared = declaredFor(endpoint);
+    const params = yield* ParsedSearchParams;
+    if (Option.isSome(declared)) {
+      const rejected = rejectQueryParameters(
+        R.keys(params),
+        declared.value,
+        allowedQueryParameters,
+      );
+      if (Option.isSome(rejected)) return yield* badRequestResponse("Query", rejected.value);
+    }
+    // The linkage check reads the encoded success only: a defect it dies
+    // with passes `catch`, which sees failures alone.
+    return yield* Effect.catchFilter(
+      checkLinkage
+        ? Effect.flatMap(httpEffect, (response) =>
+            checkWireLinkage(response, requestedFieldsets(searchPairs(params))),
+          )
+        : httpEffect,
+      Filter.make((error) =>
+        HttpApiError.HttpApiSchemaError.is(error) ? Result.succeed(error) : Result.fail(error),
+      ),
+      (error) => transformSchemaError(endpoint, error),
+    );
+  });
 
 /**
  * The live {@link SchemaErrors} implementation: answers every request
@@ -1661,6 +1709,10 @@ export const layerHostNegotiated: Layer.Layer<ContentNegotiation | SchemaErrors 
  * {@link SchemaErrors} and {@link CreatedLocation}: provide this layer
  * alongside your `HttpApiBuilder` group implementations.
  *
+ * Its policies are `JsonApiConfig`'s, read when the layer is built: provide
+ * `JsonApiConfig.layer(…)` beneath it to change them api-wide, or use
+ * {@link layerWith} to set them here.
+ *
  * @example
  * ```ts
  * import { Layer } from "effect"
@@ -1688,7 +1740,9 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors | CreatedLocat
  * {@link schemaErrorsLayer} (`allowedQueryParameters`, for a host that must
  * accept its own all-lowercase, extension or illegally named parameters,
  * and `checkLinkage`, which turns off the full-linkage check on the encoded
- * response; since 0.17.0).
+ * response; since 0.17.0), and `acceptWithoutJsonApi` (since 0.23.0). Each
+ * option overrides the api-wide `JsonApiConfig`; one left out is read from
+ * it when the layer is built, as {@link layer} reads every one.
  *
  * Throws {@link InvalidAllowedQueryParameter}, when called, for an
  * `allowedQueryParameters` entry that is not a family base name the check
@@ -1714,6 +1768,6 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors | CreatedLocat
  * @category layers
  */
 export const layerWith = (
-  options: NegotiationOptions & SchemaErrorsOptions,
+  options: ContentNegotiationOptions & SchemaErrorsOptions,
 ): Layer.Layer<ContentNegotiation | SchemaErrors | CreatedLocation> =>
   Layer.mergeAll(contentNegotiationLayer(options), schemaErrorsLayer(options), CreatedLocationLive);

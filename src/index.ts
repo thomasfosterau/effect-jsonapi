@@ -126,6 +126,15 @@ export * as Idempotency from "./Idempotency.js";
 export * as Include from "./Include.js";
 
 /**
+ * Api-wide JSON:API policy (`JsonApiConfig.layer`, `JsonApiConfig.defaults`):
+ * the choices the specification leaves to the server, read by the
+ * middleware when it is built.
+ *
+ * @since 0.23.0
+ */
+export * as JsonApiConfig from "./JsonApiConfig.js";
+
+/**
  * Lid (local id) resolution (`Lid.make`).
  *
  * @since 0.1.0
