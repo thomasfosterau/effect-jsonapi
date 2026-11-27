@@ -14,6 +14,12 @@ A `Resource.make(type, { attributes, relationships, meta })` call is the single 
 
 Imports point one way: `Resource.ts` imports neither `Query.ts` nor `Endpoint.ts`. `Query.ts` is generic over the structural shape a definition produces, so when tracing where a type comes from, follow the generic parameters rather than the imports.
 
+## Core options, preset defaults
+
+Where the specification lets a server choose (a status, a linkage policy, how strict to be about unknown members), the choice is an explicit option on the core constructor, and today's behaviour is its default or a named preset over it. Users take the preset, the core, or the core with a preset of their own. The conformance kit's `spec` tier is the contract every setting must keep; the `profile` tier holds this package's own opinions.
+
+A policy read at request time belongs in `JsonApiConfig` (a `Context.Reference` the middleware reads when its layer is built), with the layer's own option overriding it. A policy that shapes a schema is fixed when the resource or endpoint is defined, so it stays a constructor option.
+
 ## Type machinery
 
 `Resource.ts` and `Query.ts` hold most of the conditional and mapped types; start there with a type error that doesn't obviously belong to one endpoint.

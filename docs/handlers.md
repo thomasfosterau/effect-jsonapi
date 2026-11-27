@@ -142,6 +142,30 @@ if (parsed._tag === "Failure") {
 }
 ```
 
+### Api-wide policy: `JsonApiConfig`
+
+Where the specification leaves a choice to the server, the middleware reads it from `JsonApiConfig`, a `Context.Reference` whose default is the behaviour described in this guide. Provide `JsonApiConfig.layer(…)` beneath `Middleware.layer` to change a policy for the whole api, instead of repeating it on each layer:
+
+```ts
+HttpApiBuilder.layer(Api).pipe(
+  Layer.provide(ArticlesLive),
+  Layer.provide(Middleware.layer),
+  Layer.provide(
+    JsonApiConfig.layer({
+      extensions: [Atomic.EXTENSION_URI],
+      acceptWithoutJsonApi: "serve", // answer `Accept: application/json` instead of 406
+      allowedQueryParameters: ["_", "lang"],
+    }),
+  ),
+);
+```
+
+An option passed to `Middleware.layerWith` (or `contentNegotiationLayer` / `schemaErrorsLayer`) overrides the config for that layer; a member neither sets is `JsonApiConfig.defaults`. The middleware reads the config once, when its layer is built.
+
+`acceptWithoutJsonApi: "serve"` answers an `Accept` that names no JSON:API media type and no wildcard (`application/json`, `text/html`) with the JSON:API document, as RFC 9110 lets a server do with its only representation. An `Accept` that does name the JSON:API media type is still held to §5: if every instance carries a disallowed parameter, the answer is 406.
+
+Policies that shape a schema, such as `maxUndeclaredMemberErrors` or page bounds, are fixed when the resource or endpoint is defined, before any layer exists, so they stay options of `Resource.make` and the `Endpoint` constructors.
+
 ### When the host already negotiated
 
 If you _do_ adopt the endpoint constructors but your host negotiates content upstream — a framework hook serving JSON:API and HTML on one URL space — the constructors' `ContentNegotiation` middleware would run §5 a second time. That's redundant at best, and contradictory when the host deliberately admits something the spec's rules reject (an api that accepts `Accept: application/json` would see those requests 406'd after the hook let them through).
