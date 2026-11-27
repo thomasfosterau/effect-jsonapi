@@ -2,11 +2,12 @@
  * The JSON:API `filter` query family — the operator vocabulary and the
  * per-attribute declaration.
  *
- * The filter grammar fixes a **closed** operator
- * core: `eq ne lt lte gt gte in nin isnull`. This module names it once — as a
- * schema ({@link Operator}) with typed constants ({@link Op}) — so a resource's
- * per-attribute declaration and the URL codec agree byte for byte on what an
- * operator is.
+ * The filter grammar fixes a **closed** operator vocabulary: the core,
+ * `eq ne lt lte gt gte in nin isnull`, which `filter: true` declares, and the
+ * opt-in text operators `contains startsWith endsWith` for string attributes.
+ * This module names it once — as a schema ({@link Operator}) with typed
+ * constants ({@link Op}) — so a resource's per-attribute declaration and the
+ * URL codec agree byte for byte on what an operator is.
  *
  * An attribute is declared filterable by piping its schema through
  * {@link able}, which stamps the declaration as a schema annotation under
@@ -30,13 +31,15 @@
  *   attributes: {
  *     name: Schema.NonEmptyString, // not filterable
  *     priceCents: Schema.Int.pipe(Filter.able([Filter.Op.eq, Filter.Op.gt, Filter.Op.lt])),
- *     status: Schema.Literals(["draft", "published"]).pipe(Filter.able()) // the whole core
+ *     status: Schema.Literals(["draft", "published"]).pipe(Filter.able()), // the whole core
+ *     sku: Schema.String.pipe(Filter.able([Filter.Op.eq, Filter.Op.startsWith])) // a text operator, opted into
  *   }
  * })
  *
  * Resource.filterable(Product).priceCents.operators // ["eq", "gt", "lt"]
  * Resource.filterable(Product).status.operators // ["eq", "ne", "lt", "lte", "gt", "gte", "in", "nin", "isnull"]
- * Filter.isOperator("like") // false — the core is closed
+ * Resource.filterable(Product).sku.operators // ["eq", "startsWith"]
+ * Filter.isOperator("like") // false — the vocabulary is closed
  * ```
  *
  * @since 0.13.0
@@ -47,8 +50,10 @@ import type { FieldCodecs } from "./internal/filter.js";
 import { literalEncoder, operatorCheck, prepare } from "./internal/filter.js";
 import {
   compareOperators,
+  coreOperators as core,
   operators as vocabulary,
   resolveOperators,
+  textOperators as text,
 } from "./internal/operators.js";
 
 // ---------------------------------------------------------------------------
@@ -57,13 +62,16 @@ import {
 
 /**
  * The filter operator vocabulary, as a schema: a `Schema.Literals` over the
- * closed core, in the grammar's order — the six comparisons, the two list
- * memberships and the null test.
+ * closed vocabulary, in the grammar's order — the core (the six comparisons,
+ * the two list memberships and the null test), then the three text operators.
  *
  *   - `eq` / `ne` / `lt` / `lte` / `gt` / `gte` compare against one literal;
  *   - `in` / `nin` test membership of a non-empty literal list;
  *   - `isnull` tests for `NULL` (`true`) or its absence (`false`). `NULL` is
- *     never a literal, so this is the only way to name it.
+ *     never a literal, so this is the only way to name it;
+ *   - `contains` / `startsWith` / `endsWith` match a string attribute against
+ *     one string fragment ({@link Text}). Declared only by name, never by
+ *     `filter: true`, and only on an attribute whose encoded form is a string.
  *
  * Being a schema, the vocabulary decodes wire input (`Schema.decodeUnknownSync(Filter.Operator)("gt")`),
  * guards it ({@link isOperator}) and lists itself ({@link operators}) from one
@@ -75,7 +83,7 @@ import {
  * import { Filter } from "@thomasfosterau/effect-jsonapi"
  *
  * Schema.decodeUnknownSync(Filter.Operator)("gt") // "gt"
- * Filter.Operator.literals.length // 9
+ * Filter.Operator.literals.length // 12
  * ```
  *
  * @since 0.13.0
@@ -94,6 +102,50 @@ export const Operator = Schema.Literals(vocabulary);
 export type Operator = typeof Operator.Type;
 
 /**
+ * The operator core — the comparisons, list memberships and the null test —
+ * as a union of string literals: what `Filter.able()` and `filter: true`
+ * declare.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export type CoreOperator = (typeof core)[number];
+
+/**
+ * The operators of the core, in the grammar's order: what `Filter.able()` and
+ * `filter: true` declare.
+ *
+ * @example
+ * ```ts
+ * import { Filter } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Filter.coreOperators // ["eq", "ne", "lt", "lte", "gt", "gte", "in", "nin", "isnull"]
+ * ```
+ *
+ * @since 0.24.0
+ * @category constants
+ */
+export const coreOperators: ReadonlyArray<CoreOperator> = core;
+
+/**
+ * The text-matching operators, as a union of string literals.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export type TextOperator = (typeof text)[number];
+
+/**
+ * The text-matching operators, in the grammar's order. Each matches a string
+ * attribute against one string fragment, case-sensitively and by code point;
+ * see {@link Text} for the semantics.
+ *
+ * @since 0.24.0
+ * @category constants
+ */
+export const textOperators: ReadonlyArray<TextOperator> = text;
+
+/**
  * Every filter operator, in the grammar's order — the literals of the
  * {@link Operator} schema.
  *
@@ -101,8 +153,8 @@ export type Operator = typeof Operator.Type;
  * ```ts
  * import { Filter } from "@thomasfosterau/effect-jsonapi"
  *
- * Filter.operators // ["eq", "ne", "lt", "lte", "gt", "gte", "in", "nin", "isnull"]
- * Filter.operators.length // 9
+ * Filter.operators // ["eq", "ne", "lt", "lte", "gt", "gte", "in", "nin", "isnull", "contains", "startsWith", "endsWith"]
+ * Filter.operators.length // 12
  * ```
  *
  * @since 0.13.0
@@ -162,6 +214,9 @@ export const Op = Object.freeze({
   in: "in",
   nin: "nin",
   isnull: "isnull",
+  contains: "contains",
+  startsWith: "startsWith",
+  endsWith: "endsWith",
 } as const satisfies { readonly [K in Operator]: K });
 
 // ---------------------------------------------------------------------------
@@ -191,7 +246,7 @@ export const AnnotationId = "@thomasfosterau/effect-jsonapi/filter";
 
 /**
  * The runtime value stored under {@link AnnotationId}: the declared operators
- * (normalised — `true` expanded to the whole core, duplicates dropped, order
+ * (normalised — `true` expanded to the core, duplicates dropped, order
  * kept) and the explicit literal codec, if one was given.
  *
  * @since 0.13.0
@@ -253,17 +308,34 @@ export type Declared<
 
 /**
  * The operators an {@link able} argument admits, as a union of string
- * literals: every {@link Operator} for `true` (or no argument), the elements
- * for an array.
+ * literals: every {@link CoreOperator} for `true` (or no argument), the
+ * elements for an array.
  *
  * @since 0.13.0
  * @category type-level
  */
 export type OperatorsIn<D extends true | ReadonlyArray<Operator>> = [D] extends [true]
-  ? Operator
+  ? CoreOperator
   : D extends ReadonlyArray<infer Op extends Operator>
     ? Op
     : never;
+
+/**
+ * Refuses, at the type level, a declaration of a {@link TextOperator} on a
+ * schema whose decoded literal is not a string: `unknown` when `Op` names no
+ * text operator, or the literal is a string or erased (`unknown`, left to the
+ * runtime check), `never` otherwise.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type TextOnString<Op extends Operator, Literal> = [Extract<Op, TextOperator>] extends [never]
+  ? unknown
+  : unknown extends Literal
+    ? unknown
+    : [Literal] extends [string]
+      ? unknown
+      : never;
 
 /**
  * Declares an attribute filterable — a pipeable combinator on the attribute's
@@ -272,6 +344,8 @@ export type OperatorsIn<D extends true | ReadonlyArray<Operator>> = [D] extends 
  *   - `Filter.able()` (or `Filter.able(true)`) admits the whole operator core;
  *   - `Filter.able(["eq", "gt"])` admits that subset, in the order given
  *     (duplicates dropped). Use {@link Op} to spell the operators as constants.
+ *     The text operators (`contains`, `startsWith`, `endsWith`) are declared
+ *     this way only, and only on a schema whose decoded type is a string.
  *
  * The declaration is a schema annotation under {@link AnnotationId} — the one
  * source of truth `Resource.filterable` reads — and a type-level
@@ -288,8 +362,10 @@ export type OperatorsIn<D extends true | ReadonlyArray<Operator>> = [D] extends 
  * filter that decodes to one is a 400 (and a tree holding one does not
  * encode); `isnull` names it.
  *
- * Definition-time errors: an empty array, and an operator outside the core
- * (also a compile error).
+ * Definition-time errors: an empty array, an operator outside the
+ * vocabulary (also a compile error), and — when the resource is made — a text
+ * operator on an attribute whose encoded form is not a string (a compile error
+ * too, when the decoded type is not a string).
  *
  * **Annotate last, for the types.** The runtime declaration survives any later
  * rebuild — `.check(...)`, `.annotate(...)`, `Schema.brand` — but a rebuild
@@ -323,18 +399,23 @@ export type OperatorsIn<D extends true | ReadonlyArray<Operator>> = [D] extends 
 export function able<const Ops extends true | ReadonlyArray<Operator> = true>(
   operators?: Ops,
   options?: { readonly literal?: never },
-): <S extends Schema.Top>(self: S) => Declared<S, OperatorsIn<Ops>>;
+): <S extends Schema.Top>(
+  self: S & TextOnString<OperatorsIn<Ops>, LiteralType<S>>,
+) => Declared<S, OperatorsIn<Ops>>;
 export function able<const Ops extends true | ReadonlyArray<Operator>, Literal>(
   operators: Ops,
   options: { readonly literal: Schema.Codec<Literal, string> },
 ): <S extends Schema.Top>(
-  self: S & { readonly Type: Schema.NullOr<Schema.Schema<Literal>>["Type"] },
+  self: S & { readonly Type: Schema.NullOr<Schema.Schema<Literal>>["Type"] } & TextOnString<
+      OperatorsIn<Ops>,
+      Literal
+    >,
 ) => Declared<S, OperatorsIn<Ops>, Literal>;
 export function able(
   operators: true | ReadonlyArray<Operator> = true,
   options?: { readonly literal?: Schema.Codec<unknown, string> },
 ): (self: Schema.Top) => Schema.Top {
-  const resolved = resolveOperators(operators, Operator, "Filter.able");
+  const resolved = resolveOperators(operators, Operator, "Filter.able", core);
   const annotation: Annotation =
     options?.literal === undefined
       ? { operators: resolved }
@@ -403,6 +484,27 @@ export interface NotIn<Field extends string = string, Literal = unknown> {
 }
 
 /**
+ * A text match of one string field against one string fragment: `contains`
+ * (the fragment occurs anywhere in the value), `startsWith` (it is a prefix)
+ * or `endsWith` (a suffix). The fragment is the wire string itself, unescaped
+ * — never decoded through the field's schema, since a fragment of a valid
+ * value need not be one.
+ *
+ * The profile's semantics: matching is case-sensitive and by code point, with
+ * no Unicode normalisation or collation; the empty fragment matches every
+ * value; a NULL value gives UNKNOWN, as every comparison does.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface Text<Field extends string = string> {
+  readonly _tag: "Text";
+  readonly op: TextOperator;
+  readonly field: Field;
+  readonly value: string;
+}
+
+/**
  * The null test: `IS NULL` (`negated: false`) or `IS NOT NULL` (`negated:
  * true`). `NULL` is never a literal, so this is the only way to name it.
  *
@@ -422,9 +524,9 @@ export interface IsNull<Field extends string = string> {
  * @since 0.13.0
  * @category models
  */
-export interface And<Fields extends FieldTypes = FieldTypes> {
+export interface And<Fields extends FieldTypes = FieldTypes, TextFields extends string = never> {
   readonly _tag: "And";
-  readonly members: ReadonlyArray<Ast<Fields>>;
+  readonly members: ReadonlyArray<Ast<Fields, TextFields>>;
 }
 
 /**
@@ -434,9 +536,9 @@ export interface And<Fields extends FieldTypes = FieldTypes> {
  * @since 0.13.0
  * @category models
  */
-export interface Or<Fields extends FieldTypes = FieldTypes> {
+export interface Or<Fields extends FieldTypes = FieldTypes, TextFields extends string = never> {
   readonly _tag: "Or";
-  readonly members: ReadonlyArray<Ast<Fields>>;
+  readonly members: ReadonlyArray<Ast<Fields, TextFields>>;
 }
 
 /**
@@ -446,34 +548,38 @@ export interface Or<Fields extends FieldTypes = FieldTypes> {
  * @since 0.13.0
  * @category models
  */
-export interface Not<Fields extends FieldTypes = FieldTypes> {
+export interface Not<Fields extends FieldTypes = FieldTypes, TextFields extends string = never> {
   readonly _tag: "Not";
-  readonly member: Ast<Fields>;
+  readonly member: Ast<Fields, TextFields>;
 }
 
 /**
  * The condition nodes of a filter AST over a field vocabulary: for each
  * declared field, a {@link Compare}, {@link In}, {@link NotIn} or
  * {@link IsNull} whose `field` is that name and whose literals are that
- * field's type.
+ * field's type — and, for a field named in `TextFields` (the fields declaring
+ * a text operator; none by default), a {@link Text}.
  *
  * @since 0.13.0
  * @category models
  */
-export type Condition<Fields extends FieldTypes = FieldTypes> = {
+export type Condition<Fields extends FieldTypes = FieldTypes, TextFields extends string = never> = {
   readonly [F in keyof Fields & string]:
     | Compare<F, Fields[F]>
     | In<F, Fields[F]>
     | NotIn<F, Fields[F]>
-    | IsNull<F>;
+    | IsNull<F>
+    | (F extends TextFields ? Text<F> : never);
 }[keyof Fields & string];
 
 /**
  * The filter AST: an initial encoding — plain data, no methods — that every
  * consumer pattern-matches on. `Fields` narrows `field` to the declared names
  * and each literal to its field's decoded type, so over a resource the type is
- * `Compare<"age", number> | Compare<"title", string> | …`. The decoded
- * `filter` of a query is one root node.
+ * `Compare<"age", number> | Compare<"title", string> | …`. `TextFields` names
+ * the fields a {@link Text} node may test — those that declare a text
+ * operator; none by default, and `Query.FilterAst` fills it in from the
+ * resource. The decoded `filter` of a query is one root node.
  *
  * The AST itself carries no evaluator — it is plain data. What a tree
  * *means*, though, is not open: the filter profile defines it, operator by
@@ -484,11 +590,11 @@ export type Condition<Fields extends FieldTypes = FieldTypes> = {
  * @since 0.13.0
  * @category models
  */
-export type Ast<Fields extends FieldTypes = FieldTypes> =
-  | Condition<Fields>
-  | And<Fields>
-  | Or<Fields>
-  | Not<Fields>;
+export type Ast<Fields extends FieldTypes = FieldTypes, TextFields extends string = never> =
+  | Condition<Fields, TextFields>
+  | And<Fields, TextFields>
+  | Or<Fields, TextFields>
+  | Not<Fields, TextFields>;
 
 /**
  * The untyped filter AST: any field name, any literal. What the runtime
@@ -497,7 +603,7 @@ export type Ast<Fields extends FieldTypes = FieldTypes> =
  * @since 0.13.0
  * @category models
  */
-export type Node = Ast;
+export type Node = Ast<FieldTypes, string>;
 
 const Literal = Schema.Unknown;
 const LazyNode: Schema.Codec<Node> = Schema.suspend((): Schema.Codec<Node> => Ast);
@@ -513,6 +619,11 @@ const InNode = Schema.TaggedStruct("In", {
 const NotInNode = Schema.TaggedStruct("NotIn", {
   field: Schema.String,
   values: Schema.NonEmptyArray(Literal),
+});
+const TextNode = Schema.TaggedStruct("Text", {
+  op: Schema.Literals(text),
+  field: Schema.String,
+  value: Schema.String,
 });
 const IsNullNode = Schema.TaggedStruct("IsNull", {
   field: Schema.String,
@@ -546,6 +657,7 @@ export const Ast: Schema.Codec<Node> = Schema.Union([
   CompareNode,
   InNode,
   NotInNode,
+  TextNode,
   IsNullNode,
   AndNode,
   OrNode,
@@ -651,6 +763,49 @@ export const notIn = <const Field extends string, const Literal>(
   field: Field,
   values: readonly [Literal, ...Array<Literal>],
 ): NotIn<Field, Literal> => ({ _tag: "NotIn", field, values });
+
+const textMatch =
+  <Op extends TextOperator>(op: Op) =>
+  <const Field extends string>(field: Field, value: string): Text<Field> => ({
+    _tag: "Text",
+    op,
+    field,
+    value,
+  });
+
+/**
+ * `field` contains the fragment `value` (case-sensitive). The field must
+ * declare `contains`.
+ *
+ * @example
+ * ```ts
+ * import { Filter } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Filter.contains("title", "effect") // { _tag: "Text", op: "contains", field: "title", value: "effect" }
+ * ```
+ *
+ * @since 0.24.0
+ * @category constructors
+ */
+export const contains = textMatch("contains");
+
+/**
+ * `field` starts with the fragment `value` (case-sensitive). The field must
+ * declare `startsWith`.
+ *
+ * @since 0.24.0
+ * @category constructors
+ */
+export const startsWith = textMatch("startsWith");
+
+/**
+ * `field` ends with the fragment `value` (case-sensitive). The field must
+ * declare `endsWith`.
+ *
+ * @since 0.24.0
+ * @category constructors
+ */
+export const endsWith = textMatch("endsWith");
 
 /**
  * `field IS NULL`, or `IS NOT NULL` when `negated`.

@@ -59,7 +59,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as ApiError from "./ApiError.js";
-import type { Ast, Node } from "./Filter.js";
+import type { Ast, Node, TextOperator } from "./Filter.js";
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js";
 import type { AnySurface, SurfaceFor } from "./Include.js";
 import type { FlatQuery, Pair as CanonicalPair } from "./internal/canonical.js";
@@ -97,6 +97,7 @@ import type {
   FieldKeys,
   Filterable,
   FilterableKeys,
+  FilterOperators,
   IncludeDepth,
   IncludePath,
   IncludePathsTo,
@@ -1211,7 +1212,21 @@ export type FilterFields<Res extends Any> = {
  * @since 0.13.0
  * @category type-level
  */
-export type FilterAst<Res extends Any> = Ast<FilterFields<Res>>;
+export type FilterAst<Res extends Any> = Ast<FilterFields<Res>, FilterTextFields<Res>>;
+
+/**
+ * The filterable keys of a resource that declare a text operator
+ * (`Filter.TextOperator`): the fields a `Filter.Text` node of its
+ * {@link FilterAst} may test.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type FilterTextFields<Res extends Any> = {
+  [K in FilterableKeys<Res>]: [Extract<FilterOperators<Res, K>, TextOperator>] extends [never]
+    ? never
+    : K;
+}[FilterableKeys<Res>];
 
 /**
  * The schema of a decoded {@link FilterAst} as it sits in a query's nested

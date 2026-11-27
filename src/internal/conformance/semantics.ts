@@ -158,6 +158,23 @@ const comparison = (
   return truth(RELATIONS[op](compare(value, literal)));
 };
 
+/** The text operators' relations on a non-NULL string value and its fragment. */
+const MATCHES = {
+  contains: (value, fragment) => value.includes(fragment),
+  startsWith: (value, fragment) => value.startsWith(fragment),
+  endsWith: (value, fragment) => value.endsWith(fragment),
+} as const satisfies {
+  readonly [Op in Filter.TextOperator]: (value: string, fragment: string) => boolean;
+};
+
+/** A text match of the row's field against one fragment: UNKNOWN on NULL, like a comparison. */
+const textMatch = (op: Filter.TextOperator, row: Row, field: string, fragment: string): Truth => {
+  const value = row[field];
+  if (value === undefined || value === NULL) return "UNKNOWN";
+  if (!P.isString(value)) throw new DomainMismatch({ value, literal: fragment });
+  return truth(MATCHES[op](value, fragment));
+};
+
 /** F-IN-1: a disjunction of equalities. */
 const membership = (row: Row, field: string, literals: Filter.In["values"]): Truth =>
   literals.reduce<Truth>((acc, literal) => OR[acc][comparison("eq", row, field, literal)], "FALSE");
@@ -175,6 +192,7 @@ export const evaluate = (node: Filter.Node, row: Row): Truth =>
     In: ({ field, values }) => membership(row, field, values),
     // F-IN-2: the negation of F-IN-1.
     NotIn: ({ field, values }) => NOT[membership(row, field, values)],
+    Text: ({ op, field, value }) => textMatch(op, row, field, value),
     // F-ISNULL-1 / F-ISNULL-2: total, never UNKNOWN.
     IsNull: ({ field, negated }) => truth(isNullIn(row, field) !== negated),
     // F-AND-1 / F-AND-2: the folds, with TRUE and FALSE as identities.

@@ -13,15 +13,31 @@ const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUns
 const now = (): Date => DateTime.toDateUtc(DateTime.nowUnsafe());
 
 describe("Filter", () => {
-  it("names the closed operator core in the grammar's order, as a schema", () => {
-    expect(Filter.operators).toEqual(["eq", "ne", "lt", "lte", "gt", "gte", "in", "nin", "isnull"]);
+  it("names the closed operator vocabulary in the grammar's order, as a schema", () => {
+    expect(Filter.operators).toEqual([
+      "eq",
+      "ne",
+      "lt",
+      "lte",
+      "gt",
+      "gte",
+      "in",
+      "nin",
+      "isnull",
+      "contains",
+      "startsWith",
+      "endsWith",
+    ]);
+    expect(Filter.coreOperators).toEqual(Filter.operators.slice(0, 9));
+    expect(Filter.textOperators).toEqual(["contains", "startsWith", "endsWith"]);
     // `operators` is derived from the schema, not a second list
     expect(Filter.Operator.literals).toBe(Filter.operators);
     expect(Schema.decodeSync(Filter.Operator)("gt")).toBe("gt");
     expect(() => Schema.decodeUnknownSync(Filter.Operator)("like")).toThrow();
-    expectTypeOf<Filter.Operator>().toEqualTypeOf<
+    expectTypeOf<Filter.CoreOperator>().toEqualTypeOf<
       "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "in" | "nin" | "isnull"
     >();
+    expectTypeOf<Filter.Operator>().toEqualTypeOf<Filter.CoreOperator | Filter.TextOperator>();
     expectTypeOf<Filter.Operator>().toEqualTypeOf<Filter.Operator>();
     expectTypeOf<(typeof Filter.operators)[number]>().toEqualTypeOf<Filter.Operator>();
   });
@@ -86,10 +102,10 @@ describe("Filter", () => {
     it("declares the whole core with no argument or `true`", () => {
       expect(
         Option.map(annotationOf(Schema.String.pipe(Filter.able())), (a) => a.operators),
-      ).toEqual(Option.some(Filter.operators));
+      ).toEqual(Option.some(Filter.coreOperators));
       expect(
         Option.map(annotationOf(Schema.String.pipe(Filter.able(true))), (a) => a.operators),
-      ).toEqual(Option.some(Filter.operators));
+      ).toEqual(Option.some(Filter.coreOperators));
     });
 
     it("carries the declaration at the type level", () => {
@@ -99,11 +115,11 @@ describe("Filter", () => {
       const whole = Schema.String.pipe(Filter.able());
       expectTypeOf<
         (typeof whole)[Filter.MarkerKey]["operators"]
-      >().toEqualTypeOf<Filter.Operator>();
+      >().toEqualTypeOf<Filter.CoreOperator>();
       // the literal type is the schema's own, minus null
       const nullable = Schema.NullOr(Schema.Finite).pipe(Filter.able(["isnull"]));
       expectTypeOf<(typeof nullable)[Filter.MarkerKey]["literal"]>().toEqualTypeOf<number>();
-      expectTypeOf<Filter.OperatorsIn<true>>().toEqualTypeOf<Filter.Operator>();
+      expectTypeOf<Filter.OperatorsIn<true>>().toEqualTypeOf<Filter.CoreOperator>();
       expectTypeOf<Filter.OperatorsIn<readonly ["lt", "lte"]>>().toEqualTypeOf<"lt" | "lte">();
     });
 
@@ -189,7 +205,7 @@ describe("Filter AST", () => {
     // the tree: test/rejected-calls.types.ts
     // the untyped Node admits anything
     expectTypeOf(Filter.eq("anything", now())).toMatchTypeOf<Filter.Node>();
-    expectTypeOf<Filter.Node>().toEqualTypeOf<Filter.Ast>();
+    expectTypeOf<Filter.Node>().toEqualTypeOf<Filter.Ast<Filter.FieldTypes, string>>();
   });
 
   it("validates a tree's shape with the runtime Ast schema", () => {

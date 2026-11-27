@@ -21,19 +21,32 @@ export const listOperators = ["in", "nin"] as const;
 export const nullOperator = "isnull";
 
 /**
- * The closed operator core, in the grammar's order. `Filter.Operator` is the
- * `Schema.Literals` over exactly this tuple.
+ * The operator core, in the grammar's order: what `filter: true` declares.
  */
-export const operators = [...compareOperators, ...listOperators, nullOperator] as const;
+export const coreOperators = [...compareOperators, ...listOperators, nullOperator] as const;
+
+/**
+ * The text-matching operators: one string literal matched against a string
+ * attribute. Opt-in only, never part of `filter: true`.
+ */
+export const textOperators = ["contains", "startsWith", "endsWith"] as const;
+
+/**
+ * The whole operator vocabulary, in the grammar's order: the core, then the
+ * text operators. `Filter.Operator` is the `Schema.Literals` over exactly this
+ * tuple.
+ */
+export const operators = [...coreOperators, ...textOperators] as const;
 
 /** The conjunctions of the group form. */
 export const conjunctions = ["AND", "OR", "NOT"] as const;
 
 /**
  * Normalises a `filter` declaration to the operator list it declares, checked
- * against `allowed` — a `Schema.Literals` over the vocabulary (the closed core
- * for an attribute, the id-comparison subset for a relationship): `true` is
- * every literal, an array is itself (deduplicated, order kept).
+ * against `allowed` — a `Schema.Literals` over the vocabulary (the whole
+ * vocabulary for an attribute, the id-comparison subset for a relationship):
+ * `true` is `whole` (every literal of `allowed` unless given — the core for an
+ * attribute), an array is itself (deduplicated, order kept).
  *
  * An empty array, or one naming an operator outside `allowed`, is a definition
  * error, not a wire error; `subject` names the declaration in the message.
@@ -42,8 +55,9 @@ export const resolveOperators = <const L extends ReadonlyArray<string>>(
   filter: true | ReadonlyArray<string>,
   allowed: Schema.Literals<L>,
   subject: string,
+  whole: ReadonlyArray<L[number]> = allowed.literals,
 ): ReadonlyArray<L[number]> => {
-  if (filter === true) return allowed.literals;
+  if (filter === true) return whole;
   if (Arr.isReadonlyArrayEmpty(filter)) {
     throw declarationError(
       `${subject} declares filter: [] — no operators; omit \`filter\` (or pass false) instead`,

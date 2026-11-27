@@ -135,6 +135,18 @@ type Fields = { readonly age: number; readonly status: "open" | "done" };
 export const undeclaredField: Filter.Ast<Fields> = Filter.eq("title", "x");
 // @ts-expect-error a literal of the wrong type is not a node of the tree
 export const wrongLiteral: Filter.Ast<Fields> = Filter.eq("age", "18");
+// @ts-expect-error a Text node names only a field declaring a text operator
+export const undeclaredText: Filter.Ast<Fields> = Filter.contains("status", "o");
+export const declaredText: Filter.Ast<Fields, "status"> = Filter.contains("status", "o");
+
+// A thunk, so the binding is not itself an exported schema constant.
+export const textOnNumber = () =>
+  // @ts-expect-error a text operator needs a string attribute
+  Schema.Finite.pipe(Filter.able(["contains"]));
+export const textOnNumberSugar = () =>
+  // @ts-expect-error the `filter` sugar refuses it too
+  Resource.attribute(Schema.Finite, { filter: ["eq", "startsWith"] });
+export const textOnString = () => Schema.String.pipe(Filter.able(["eq", "endsWith"]));
 
 // ---------------------------------------------------------------------------
 // Resource: filterable keys and the `filter` / `sort` sugar

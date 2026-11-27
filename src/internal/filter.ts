@@ -18,7 +18,13 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import type { Compare, LiteralCodecs, Node } from "../Filter.js";
-import { conjunctions, listOperators, nullOperator, operators } from "./operators.js";
+import {
+  conjunctions,
+  listOperators,
+  nullOperator,
+  operators,
+  textOperators,
+} from "./operators.js";
 import { render } from "./json.js";
 
 // ---------------------------------------------------------------------------
@@ -183,6 +189,8 @@ const MALFORMED_KEY =
 const allOperators: ReadonlyArray<string> = operators;
 const isListOperator = (operator: string): boolean =>
   (listOperators as ReadonlyArray<string>).includes(operator);
+const isTextOperator = (operator: string): operator is (typeof textOperators)[number] =>
+  (textOperators as ReadonlyArray<string>).includes(operator);
 const isConjunction = (value: string): value is (typeof conjunctions)[number] =>
   (conjunctions as ReadonlyArray<string>).includes(value);
 
@@ -292,6 +300,10 @@ export const decodeFilter = (
     }
     if (operator === nullOperator)
       return Option.some({ _tag: "IsNull", field, negated: items[0] === "false" });
+    // A text operator's literal is a fragment of the value, not a value: it is
+    // the unescaped string itself, never decoded through the field's codec.
+    if (isTextOperator(operator))
+      return Option.some({ _tag: "Text", op: operator, field, value: items[0] });
     const decode = Schema.decodeUnknownResult(codec.literal as Schema.Codec<unknown, string>);
     const values: Array<unknown> = [];
     const invalid = Arr.findFirst(items, (item) => {
@@ -697,6 +709,22 @@ export const prepare = (
         op: P.isTagged(node, "In") ? "in" : "nin",
         value: items.map((item) => item.wire).join(","),
         arity: items.length,
+      };
+    }),
+    Match.tag("Text", (node): Prepared => {
+      check(node.field, node.op);
+      if (!P.isString(node.value)) {
+        throw new InvalidFilter({
+          message: `A Text node's value must be a string, got ${render(node.value)}`,
+        });
+      }
+      return {
+        kind: "condition",
+        node,
+        field: node.field,
+        op: node.op,
+        value: escape(node.value),
+        arity: 1,
       };
     }),
     Match.tag("IsNull", (node): Prepared => {
