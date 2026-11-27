@@ -106,6 +106,17 @@ return Effect.succeed(Handlers.data({ ...article, links: { self } }, { self }));
 
 With neither link the header is omitted, and so is a link that isn't a URI-reference (a space, a control character or a non-ASCII character in it), rather than sent malformed. Only a `201` is touched: a create answering another [`status`](#overriding-the-write-status) is left alone, as is a response that already carries `Location`, and a body that isn't a JSON document (or isn't settled bytes) passes through unchanged rather than failing the request. The middleware sits inside `Idempotency.Middleware`, so a [replayed](#idempotent-writes-idempotency-key) `201` keeps its `Location`. `Middleware.layer`, `Middleware.layerWith` and `Middleware.layerHostNegotiated` all provide it, and `Registry.layer` / `Registry.webHandler` provide it beneath whatever `middleware` they are given; any other api that composes its own middleware set adds `Middleware.CreatedLocationLive`. The header is not declared on the endpoint, so the typed client does not surface it.
 
+## Client-generated ids
+
+`Endpoint.create`'s default payload refuses a `data.id` with 403 (§Client-Generated IDs). To accept one, say so:
+
+```ts
+// POST /articles with { data: { type: "articles", id: "…", attributes: … } }
+Endpoint.create(Article, { clientId: "optional", errors: [ApiError.DuplicateId] });
+```
+
+`"optional"` lets the server assign an id when the client sends none; `"required"` insists on one. The id is decoded with the resource's `Id` schema, and every other member is the default payload's, so an undeclared attribute is still a 400. A handler answers a taken id with `ApiError.DuplicateId`, the spec's 409, whose `source.pointer` is `/data/id`. For a narrower id schema (a UUID), build the payload with `Resource.clientIdPayload(Article, { id })` and pass it as `payload`.
+
 ## Overriding the write payload
 
 `Endpoint.create` and `Endpoint.update` bind their request body to the resource's `createPayload` / `updatePayload` — the nested JSON:API envelope — which is what a spec-compliant client sends. Some apis deliberately keep a **flat** write contract instead: a command input carrying foreign-key ids or nested arrays that JSON:API's relationship-linkage model can't express, while still _answering_ with JSON:API documents.
