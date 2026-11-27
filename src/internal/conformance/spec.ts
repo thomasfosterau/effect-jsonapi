@@ -2583,6 +2583,73 @@ const judgeConflict = (target: Target, payload: Payload, observation: Observatio
   ]);
 };
 
+/**
+ * An update rule that sends the fixture's update to a resource the kit just
+ * created with its resource object's `type` or `id` replaced by one that
+ * doesn't match the endpoint, and expects 409.
+ */
+const updateConflict = (
+  member: "type" | "id",
+  requirement: string,
+  replace: (type: string, id: string) => string,
+): RuleImpl => {
+  const conflictRule = rule(
+    `spec/status/update-conflict-${member}`,
+    "Updating Resources",
+    "crud-updating-responses-409",
+    "MUST",
+    requirement,
+  );
+  return {
+    creates: true,
+    rule: conflictRule,
+    run: (ctx) =>
+      overTargets(ctx, conflictRule, targets(ctx, "update"), "update endpoint", (target) =>
+        withCreated(
+          ctx,
+          conflictRule,
+          target,
+          viaCreateEndpoint(ctx, target),
+          onAccepted(target, (created) =>
+            Result.match(Result.all({ id: ownId(created), patch: buildUpdate(target) }), {
+              onFailure: (reason) => Effect.succeed(undecided(reason)),
+              onSuccess: ({ id, patch }) => {
+                const type = created.payload.type;
+                const sent = replace(type, id);
+                return sendUpdate(ctx, target, type, id, patch, { [member]: sent }).pipe(
+                  Effect.map((observation): Verdict => {
+                    if (observation.status === 0)
+                      return undecided(`the PATCH got no answer (${describe(observation)})`);
+                    if (observation.status === 409) return decided(1, []);
+                    return decided(1, [
+                      finding(conflictRule, {
+                        detail: `a PATCH to ${observation.probe.url} of writes["${target.key}"].update with \`${member}\` ${render(sent)} in its resource object answered ${observation.status}${succeeded(observation) ? ", accepting it" : ""}`,
+                        expected: "409 Conflict",
+                        observed: describe(observation),
+                        probe: observation.probe,
+                      }),
+                    ]);
+                  }),
+                );
+              },
+            }),
+          ),
+        ),
+      ),
+  };
+};
+
+const UPDATE_CONFLICT =
+  "A server MUST return 409 Conflict when processing a PATCH request in which the resource object's `type` or `id` do not match the server's endpoint.";
+
+const updateConflictType = updateConflict("type", UPDATE_CONFLICT, () => UNSERVED_TYPE);
+
+const updateConflictId = updateConflict(
+  "id",
+  UPDATE_CONFLICT,
+  (_, id) => `${id}-conformance-other`,
+);
+
 // ---------------------------------------------------------------------------
 // Reading a write back
 // ---------------------------------------------------------------------------
@@ -2879,6 +2946,8 @@ export const rules: ReadonlyArray<RuleImpl> = [
   updateResponse,
   deleteResponse,
   createConflictType,
+  updateConflictType,
+  updateConflictId,
   createReadBack,
   updateReadBack,
   ...clientIdRules,

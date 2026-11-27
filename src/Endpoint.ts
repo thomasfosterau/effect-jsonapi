@@ -93,7 +93,7 @@ import type { AnySurface, SurfaceFor } from "./Include.js";
 import { asJsonApi, asJsonApiAtomic, asMediaType } from "./internal/httpMedia.js";
 import { closedStruct, defaultMaxUndeclaredMemberErrors } from "./internal/schemaExt.js";
 import { MEDIA_TYPE } from "./internal/media.js";
-import { ServedTypes } from "./internal/servedTypes.js";
+import { PathIdentified, ServedTypes } from "./internal/servedTypes.js";
 import { ContentNegotiation, CreatedLocation, SchemaErrors } from "./Middleware.js";
 import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
@@ -1067,9 +1067,11 @@ export const create = <
  *
  * A resource object whose `data.type` names a type other than the resource's
  * is answered with 409 Conflict naming `/data/type` (§Updating Resources → 409
- * Conflict), as {@link create} describes. A `data.id` that differs from `:id`
- * is the handler's to refuse with `ApiError.Conflict`, as
- * `ResourceHandlers.make` does.
+ * Conflict), as {@link create} describes, and so, before the handler runs,
+ * is a `data.id` that differs from `:id`, naming `/data/id` (the two compared
+ * as the wire strings the id codec encodes to). With a `payload` override
+ * (`updateInput`, say) the id is the application's, and refusing a mismatch
+ * is the handler's, with `ApiError.Conflict`.
  *
  * @example
  * ```ts
@@ -1189,8 +1191,13 @@ export const update = <
     )
       .middleware(ContentNegotiation)
       .middleware(SchemaErrors)
-      // `SchemaErrors` answers a `data.type` of another type with 409.
-      .annotate(ServedTypes, [resource.type]),
+      // `SchemaErrors` answers a `data.type` of another type with 409, and,
+      // for the resource's own payload, a `data.id` other than `:id`; a
+      // `payload` override's id is the application's.
+      .annotate(ServedTypes, [resource.type])
+      .pipe((endpoint) =>
+        options?.payload === undefined ? endpoint.annotate(PathIdentified, "id") : endpoint,
+      ),
     options?.idempotency,
   );
 

@@ -98,7 +98,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaIssue from "effect/SchemaIssue";
-import { Headers, HttpEffect, HttpServerRespondable } from "effect/http";
+import { Headers, HttpEffect, HttpRouter, HttpServerRespondable } from "effect/http";
 import { HttpServerRequest, ParsedSearchParams } from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import type { HttpApiEndpoint } from "effect/http-api";
@@ -123,7 +123,13 @@ import {
   varyAccept,
 } from "./internal/media.js";
 import { CLIENT_ID_UNSUPPORTED, refusedClientIdPointer } from "./internal/refusedClientId.js";
-import { conflictingType, isTypePath, ServedTypes } from "./internal/servedTypes.js";
+import {
+  conflictingId,
+  conflictingType,
+  isTypePath,
+  PathIdentified,
+  ServedTypes,
+} from "./internal/servedTypes.js";
 import { requestedFieldsets } from "./internal/linkage.js";
 import { unlinkedOnWire, withCreatedLocation } from "./internal/responseBody.js";
 import { wireLeaves } from "./internal/wireNames.js";
@@ -138,6 +144,7 @@ import { isMemberName } from "./internal/memberName.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
 import { someMember } from "./internal/members.js";
 import { type AcceptWithoutJsonApi, defaults, JsonApiConfig } from "./JsonApiConfig.js";
+import { render } from "./internal/json.js";
 
 // ---------------------------------------------------------------------------
 // Tracing
@@ -1299,6 +1306,33 @@ const payloadConflict = Effect.fnUntraced(function* (
   );
 });
 
+// An update of the resource's own payload whose body names another `id`
+// than its `:id` path parameter (§Updating Resources → 409 Conflict: "A
+// server MUST return 409 Conflict when processing a PATCH request in which
+// the resource object's type or id do not match the server's endpoint").
+// Read before the payload decodes, so the handler never sees it.
+const mismatchedId = Effect.fnUntraced(function* (endpoint: HttpApiEndpoint.Top) {
+  const parameter = Context.getOption(endpoint.annotations, PathIdentified);
+  if (Option.isNone(parameter))
+    return Option.none<{ readonly id: string; readonly path: string }>();
+  const pathId = Option.fromUndefinedOr((yield* HttpRouter.params)[parameter.value]);
+  if (Option.isNone(pathId)) return Option.none();
+  const request = yield* HttpServerRequest;
+  // `text` is cached on the request, so the payload decode reads it again.
+  const body = yield* Effect.option(request.text);
+  return Option.map(
+    Option.flatMap(body, (text) => conflictingId(text, pathId.value)),
+    (id) => ({ id, path: pathId.value }),
+  );
+});
+
+const idConflictResponse = ({ id, path }: { readonly id: string; readonly path: string }) =>
+  payloadRefusal(
+    Conflict,
+    `Resource object id ${render(id)} does not match the endpoint's id ${render(path)}`,
+    "/data/id",
+  );
+
 const transformSchemaError = (
   endpoint: HttpApiEndpoint.Top,
   error: HttpApiError.HttpApiSchemaError,
@@ -1464,6 +1498,8 @@ const schemaErrorsMiddleware = (
       );
       if (Option.isSome(rejected)) return yield* badRequestResponse("Query", rejected.value);
     }
+    const mismatched = yield* mismatchedId(endpoint);
+    if (Option.isSome(mismatched)) return yield* idConflictResponse(mismatched.value);
     // The linkage check reads the encoded success only: a defect it dies
     // with passes `catch`, which sees failures alone.
     return yield* Effect.catchFilter(
