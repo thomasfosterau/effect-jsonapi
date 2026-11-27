@@ -50,6 +50,7 @@
 import * as MutableHashSet from "effect/MutableHashSet";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as HashMap from "effect/HashMap";
@@ -58,7 +59,14 @@ import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import type * as Schema from "effect/Schema";
+import type { HttpApi, HttpApiGroup } from "effect/http-api";
 import type { JsonApiObject } from "./Document.js";
+import {
+  LinkRoutes,
+  relationshipRelated,
+  relationshipSelf,
+  resourceSelf,
+} from "./internal/linkRoutes.js";
 import { serialise, withPagePairs } from "./internal/canonical.js";
 import { assign } from "./internal/define.js";
 import { isLinkageData, reachable, seeds } from "./internal/linkage.js";
@@ -1907,6 +1915,139 @@ export const relatedLink = (
   name: string,
   options?: LinkOptions,
 ): string => linkPath([type, id, name], options);
+
+// ---------------------------------------------------------------------------
+// links — resource and relationship links from the route table
+// ---------------------------------------------------------------------------
+
+// The href of a route whose only path parameter is `:id`, with `id` (percent-
+// encoded) in its place; literal segments are kept as declared.
+const expandRoute = (path: string, id: string, options?: LinkOptions): string =>
+  `${(options?.base ?? "").replace(/\/$/, "")}${path
+    .split("/")
+    .map((segment) => (segment === ":id" ? encodeURIComponent(id) : segment))
+    .join("/")}`;
+
+const takesOnlyId = (path: string): boolean => {
+  const params = path.split("/").filter((segment) => segment.startsWith(":"));
+  return params.length === 1 && params[0] === ":id";
+};
+
+// Each generated link that the existing `links` member doesn't already carry
+// is added; a link the handler set always wins.
+const fillLinks = (
+  existing: Option.Option<object>,
+  generated: R.ReadonlyRecord<string, Option.Option<string>>,
+): Option.Option<object> => {
+  const current = Option.getOrElse(existing, () => ({}));
+  const added = R.getSomes(
+    R.map(generated, (href, key) => (P.hasProperty(current, key) ? Option.none() : href)),
+  );
+  return R.isEmptyRecord(added) ? Option.none() : Option.some({ ...current, ...added });
+};
+
+const linksMember = (links: { readonly links?: unknown }): Option.Option<object> =>
+  Option.filter(Option.fromUndefinedOr(links.links), P.isObject);
+
+/**
+ * An `onResource` transform that fills each resource's `links.self` and each
+ * relationship's `links.self` / `links.related` from the routes `api`
+ * declares, so no handler writes a link by hand and none drifts from the
+ * route that serves it.
+ *
+ * A resource of type `T` gets the path of the `Endpoint.get` serving `T`; a
+ * relationship `name` gets its `Endpoint.getRelationship` as `self` and its
+ * `Endpoint.related` as `related`. A link is generated only when that
+ * endpoint is declared, so a relationship `self` never promises a route the
+ * api doesn't serve, and a custom `path` or a group / api prefix is followed
+ * as declared. A link the handler already set is kept, never overwritten.
+ *
+ * Every resource in the document is filled, `included` too. `base` prefixes
+ * each path, e.g. `https://example.com` for absolute links; the default is a
+ * root-relative path. Combine it with another transform through
+ * {@link compose}.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { HttpApi } from "effect/http-api"
+ * import { Endpoint, Group, Handlers, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { deepStrictEqual } from "node:assert"
+ *
+ * const Person = Resource.make("people", { attributes: { name: Schema.String } })
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.String },
+ *   relationships: { author: Relationship.one(() => Person) }
+ * })
+ * const Api = HttpApi.make("blog").add(
+ *   Group.make(
+ *     Article,
+ *     Endpoint.get(Article),
+ *     Endpoint.related(Article, "author"),
+ *     Endpoint.getRelationship(Article, "author")
+ *   )
+ * )
+ *
+ * const article = Article.make({
+ *   id: Article.Id.make("1"),
+ *   attributes: { title: "Hi" },
+ *   relationships: { author: { data: { type: "people", id: Person.Id.make("9") } } }
+ * })
+ * const document = Handlers.data(article, { onResource: Handlers.links(Api) })
+ *
+ * deepStrictEqual(document.data.links, { self: "/articles/1" })
+ * deepStrictEqual(document.data.relationships?.author.links, {
+ *   self: "/articles/1/relationships/author",
+ *   related: "/articles/1/author"
+ * })
+ * ```
+ *
+ * @since 0.24.0
+ * @category constructors
+ */
+export function links<ApiId extends string, Groups extends HttpApiGroup.Constraint>(
+  api: HttpApi.HttpApi<ApiId, Groups>,
+  options?: LinkOptions,
+): ResourceTransform;
+export function links(api: HttpApi.Top, options?: LinkOptions): ResourceTransform {
+  const routes = HashMap.fromIterable(
+    R.values(api.groups).flatMap((group) =>
+      R.values(group.endpoints).flatMap((endpoint) =>
+        Option.match(Context.getOption(endpoint.annotations, LinkRoutes), {
+          onNone: () => [],
+          onSome: (key): ReadonlyArray<readonly [string, string]> =>
+            takesOnlyId(endpoint.path) ? [[key, endpoint.path]] : [],
+        }),
+      ),
+    ),
+  );
+  const href = (key: string, id: string): Option.Option<string> =>
+    Option.map(HashMap.get(routes, key), (path) => expandRoute(path, id, options));
+  return transform((resource) => {
+    const self = fillLinks(linksMember(resource), {
+      self: href(resourceSelf(resource.type), resource.id),
+    });
+    const relationships = Option.map(Option.fromUndefinedOr(resource.relationships), (members) =>
+      R.map(members, (member, name) =>
+        Option.match(
+          fillLinks(linksMember(member), {
+            self: href(relationshipSelf(resource.type, name), resource.id),
+            related: href(relationshipRelated(resource.type, name), resource.id),
+          }),
+          { onNone: () => member, onSome: (filled) => ({ ...member, links: filled }) },
+        ),
+      ),
+    );
+    return {
+      ...resource,
+      ...Option.match(self, { onNone: () => ({}), onSome: (filled) => ({ links: filled }) }),
+      ...Option.match(relationships, {
+        onNone: () => ({}),
+        onSome: (filled) => ({ relationships: filled }),
+      }),
+    };
+  });
+}
 
 /**
  * Builds the relationship object value for a `paginated` relationship: no

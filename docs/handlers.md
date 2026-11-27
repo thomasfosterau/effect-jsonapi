@@ -259,8 +259,11 @@ The same option is on `Handlers.collection`, on `Handlers.linkage` (where it rea
 | --- | --- |
 | `Handlers.project(fields)` | Sparse fieldsets: narrows `attributes` and `relationships` to the names requested for the resource's type. |
 | `Handlers.withMeta(compute)` | Merges computed `meta` over the resource's own; `compute` returns an `Option`, `Option.none()` for a resource it has nothing to say about. |
+| `Handlers.links(api, { base })` | Fills `links.self` and each relationship's `links.self` / `links.related` from the routes `api` declares; never overwrites a link already set. |
 | `Handlers.compose(first, second)` | One pass doing both. |
 | `Handlers.transform<Lambda>(f)` | Anything else, with its type-level effect declared. |
+
+`Handlers.links(api)` reads the route table rather than a URL convention: a resource of type `T` links to the path of the `Endpoint.get` serving `T`, and a relationship to its `Endpoint.getRelationship` (`self`) and `Endpoint.related` (`related`), each only when that endpoint is declared. A custom `path`, a group or api `prefix` and an id carrying `/` all come out as the router serves them, and a relationship `self` never promises a route the api lacks. `base` prefixes every path (`https://example.com` for absolute links). A route with path parameters besides `:id` is skipped.
 
 `Middleware.layer` applies the same projection to the encoded 2xx document of every endpoint it serves, so a handler that skips `Handlers.project` still answers to §Sparse Fieldsets; projecting in the handler saves the middleware's rewrite and lets a handler avoid loading what it would drop. `sparseFieldsets` on `JsonApiConfig.layer`, or on `Middleware.layerWith` (or `schemaErrorsLayer`), chooses: `"project"` (the default), `"verify"`, which answers a document carrying an excluded field with the opaque JSON:API 500, or `"handler"`, which leaves fieldsets to the handler unchecked.
 
