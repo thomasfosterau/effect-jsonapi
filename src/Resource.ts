@@ -1275,13 +1275,15 @@ export interface Resource<
    * encoding, every member they don't declare: the first
    * `maxUndeclaredMemberErrors` each as an "Expected no excess property"
    * issue at that member, any more as one issue at the `attributes` /
-   * `relationships` member saying how many.
+   * `relationships` member saying how many. An @-member (`@context`), which
+   * JSON:API 1.1 §7.10.2 says to ignore, is accepted and dropped.
    */
   readonly createPayload: CreatePayload<Type, Attributes, Rels>;
   /**
    * Request body schema for updating this resource (`id` required, attributes
    * partial). Its `attributes` and `relationships` members reject, when
-   * decoding and when encoding, every member they don't declare.
+   * decoding and when encoding, every member they don't declare, except an
+   * @-member, which is dropped.
    */
   readonly updatePayload: UpdatePayload<Type, Attributes, Rels, IdSchema>;
   /**

@@ -28,7 +28,9 @@
  *     (§Creating Resources; §Updating Resources), as is a client-generated
  *     `data.id` on a `createPayload`, answered with 403 Forbidden naming
  *     `/data/id` (§Client-Generated IDs), and on an atomic `add`, naming
- *     `/atomic:operations/N/data/id`. It also rejects, with a 400
+ *     `/atomic:operations/N/data/id`. An undeclared `attributes` /
+ *     `relationships` member is a 400 at that member, except an @-member
+ *     (`@context`), which is ignored (§Member Names: @-Members). It also rejects, with a 400
  *     naming it, a query parameter whose family base name is made only of
  *     a-z, names an extension's parameter (`ext:param`) or is not a legal
  *     member name (`foo!`, `page.limit`), and that neither the specification
