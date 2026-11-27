@@ -38,7 +38,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as Types from "effect/Types";
 import { HttpApiSchema } from "effect/http-api";
-import { ErrorDocument, ErrorObject } from "./Document.js";
+import { ErrorDocument, ErrorLinks, ErrorObject } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
 import { asJsonApi } from "./internal/httpMedia.js";
 import { definedMember, someMember } from "./internal/members.js";
@@ -201,6 +201,50 @@ export interface Config<Fields extends Schema.Struct.Fields> {
     | ((
         fields: Schema.Struct.Encoded<NoInfer<Fields>>,
       ) => ErrorSource | Option.Option<ErrorSource>);
+  /**
+   * JSON:API error `id`: a unique identifier for this occurrence, such as a
+   * correlation or trace id. A function of the (encoded) fields, returning
+   * the id or an `Option` of it; usually read from a field the error
+   * carries (`id: (e) => e.traceId`).
+   *
+   * @since 0.23.0
+   */
+  readonly id?: (fields: Schema.Struct.Encoded<NoInfer<Fields>>) => string | Option.Option<string>;
+  /**
+   * JSON:API error `links`: `type`, a link identifying the kind of error
+   * (the way a profile names its errors), and `about`, details of this
+   * occurrence. In their wire form (strings or link objects), either
+   * constant or a function of the (encoded) fields.
+   *
+   * @since 0.23.0
+   */
+  readonly links?:
+    | typeof ErrorLinks.Encoded
+    | ((
+        fields: Schema.Struct.Encoded<NoInfer<Fields>>,
+      ) => typeof ErrorLinks.Encoded | Option.Option<typeof ErrorLinks.Encoded>);
+  /**
+   * The error object's `meta`, as a function of the (encoded) fields.
+   * Defaults to the fields themselves, which is how a client reconstructs
+   * the error. With `meta` set, a field is read back from the `meta` member
+   * of its own name when present; give `fromMeta` to read fields from a
+   * differently shaped `meta`.
+   *
+   * @since 0.23.0
+   */
+  readonly meta?: (
+    fields: Schema.Struct.Encoded<NoInfer<Fields>>,
+  ) => R.ReadonlyRecord<string, unknown> | Option.Option<R.ReadonlyRecord<string, unknown>>;
+  /**
+   * The inverse of `meta`: the error's encoded fields from a decoded error
+   * object's `meta`, for a client to reconstruct the error. Defaults to
+   * reading each field from the `meta` member of its name.
+   *
+   * @since 0.23.0
+   */
+  readonly fromMeta?: (
+    meta: R.ReadonlyRecord<string, unknown>,
+  ) => R.ReadonlyRecord<string, unknown>;
 }
 
 // A concrete `Self` for the base class below: `Schema.TaggedError`'s `Self`
@@ -234,6 +278,14 @@ const makeWire = <Fields extends Schema.Struct.Fields>(
     readonly fieldKeys: ReadonlyArray<string>;
     readonly detail: (fields: Schema.Struct.Encoded<Fields>) => Option.Option<string>;
     readonly source: (fields: Schema.Struct.Encoded<Fields>) => Option.Option<ErrorSource>;
+    readonly id: (fields: Schema.Struct.Encoded<Fields>) => Option.Option<string>;
+    readonly links: (fields: Schema.Struct.Encoded<Fields>) => Option.Option<ErrorLinks>;
+    readonly meta: Option.Option<
+      (fields: Schema.Struct.Encoded<Fields>) => Option.Option<R.ReadonlyRecord<string, unknown>>
+    >;
+    readonly fromMeta: Option.Option<
+      (meta: R.ReadonlyRecord<string, unknown>) => R.ReadonlyRecord<string, unknown>
+    >;
   },
 ) => {
   const cached = wireCache.get(klass);
@@ -255,6 +307,26 @@ const makeWire = <Fields extends Schema.Struct.Fields>(
     throw declarationError("ApiError.wire expects an ApiError.make(...) class (a Schema)");
   }
 
+  // The default `meta`: the fields, so a client reconstructs the error. A
+  // `detail` field the error object's own `detail` already carries is not
+  // copied, and an empty `meta` (every field optional and absent) is left
+  // out rather than sent as `{}`. `decode` reads either place.
+  const defaultMeta = (
+    fields: Schema.Struct.Encoded<Fields> & R.ReadonlyRecord<string, unknown>,
+    detail: Option.Option<string>,
+  ) =>
+    definedMember(
+      "meta",
+      Arr.match(
+        options.fieldKeys.flatMap((key) =>
+          fields[key] === undefined || (key === "detail" && Option.contains(detail, fields[key]))
+            ? []
+            : [[key, fields[key]] as const],
+        ),
+        { onEmpty: () => undefined, onNonEmpty: R.fromEntries },
+      ),
+    );
+
   const wire = strictDocument.pipe(
     Schema.decodeTo(
       klass,
@@ -267,7 +339,10 @@ const makeWire = <Fields extends Schema.Struct.Fields>(
         // middleware carry it there and nowhere else.
         decode: (doc) => {
           const first = doc.errors[0];
-          const meta = first?.meta ?? {};
+          const meta = Option.match(options.fromMeta, {
+            onNone: () => first?.meta ?? {},
+            onSome: (fromMeta) => fromMeta(first?.meta ?? {}),
+          });
           const fields: Types.Mutable<R.ReadonlyRecord<string, unknown>> = {};
           Arr.forEach(options.fieldKeys, (key) => {
             if (key in meta) fields[key] = meta[key];
@@ -287,27 +362,17 @@ const makeWire = <Fields extends Schema.Struct.Fields>(
           return {
             errors: [
               {
+                ...someMember("id", options.id(fields)),
+                ...someMember("links", options.links(fields)),
                 status: String(options.status),
                 code: options.code,
                 ...someMember("title", options.title),
                 ...someMember("detail", detail),
                 ...someMember("source", options.source(fields)),
-                // A `detail` field the error object's own `detail` already
-                // carries is not copied into `meta`, and an empty `meta` —
-                // every field optional and absent — is left out rather than
-                // sent as `{}`. `decode` reads either place.
-                ...definedMember(
-                  "meta",
-                  Arr.match(
-                    options.fieldKeys.flatMap((key) =>
-                      fields[key] === undefined ||
-                      (key === "detail" && Option.contains(detail, fields[key]))
-                        ? []
-                        : [[key, fields[key]] as const],
-                    ),
-                    { onEmpty: () => undefined, onNonEmpty: R.fromEntries },
-                  ),
-                ),
+                ...Option.match(options.meta, {
+                  onNone: () => defaultMeta(fields, detail),
+                  onSome: (meta) => someMember("meta", meta(fields)),
+                }),
               },
             ],
           };
@@ -403,6 +468,19 @@ function makeClass(
     encoded: Schema.Struct.Encoded<Schema.Struct.Fields>,
   ): Option.Option<ErrorSource> => maybe(P.isFunction(sourceOf) ? sourceOf(encoded) : sourceOf);
   const title = Option.fromUndefinedOr(config.title);
+  const idOf = config.id;
+  const id = (encoded: Schema.Struct.Encoded<Schema.Struct.Fields>): Option.Option<string> =>
+    idOf === undefined ? Option.none() : maybe(idOf(encoded));
+  // Declared in wire form, so decoded here into the value the document holds.
+  const decodeLinks = Schema.decodeUnknownSync(ErrorLinks);
+  const linksOf = config.links;
+  const links = (encoded: Schema.Struct.Encoded<Schema.Struct.Fields>): Option.Option<ErrorLinks> =>
+    Option.map(maybe(P.isFunction(linksOf) ? linksOf(encoded) : linksOf), decodeLinks);
+  const meta = Option.map(
+    Option.fromUndefinedOr(config.meta),
+    (metaOf) => (encoded: Schema.Struct.Encoded<Schema.Struct.Fields>) => maybe(metaOf(encoded)),
+  );
+  const fromMeta = Option.fromUndefinedOr(config.fromMeta);
 
   // The conditional `MissingSelfGeneric` branch only matters at the user's
   // `extends` clause, where `Self` is concrete: `ApiErrorSelf` stands in.
@@ -427,6 +505,10 @@ function makeClass(
         fieldKeys,
         detail,
         source,
+        id,
+        links,
+        meta,
+        fromMeta,
       });
     }
   }

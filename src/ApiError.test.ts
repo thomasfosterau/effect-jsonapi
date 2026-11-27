@@ -481,3 +481,71 @@ describe("ApiError.toDocument", () => {
     expect(ApiError.isApiError(decoded)).toBe(true);
   });
 });
+
+describe("ApiError.make id, links and meta", () => {
+  const TYPE = "https://jsonapi.org/profiles/ethanresnick/cursor-pagination/max-size-exceeded";
+
+  const PageMeta = Schema.Struct({ page: Schema.Struct({ maxSize: Schema.Int }) });
+
+  class MaxSizeExceeded extends ApiError.make<MaxSizeExceeded>()("MaxSizeExceeded", {
+    status: 400,
+    fields: { maxSize: Schema.Int, traceId: Schema.String },
+    id: (e) => e.traceId,
+    links: { type: TYPE },
+    meta: (e) => ({ page: { maxSize: e.maxSize }, traceId: e.traceId }),
+    fromMeta: (meta) => ({
+      maxSize: Option.getOrUndefined(Schema.decodeUnknownOption(PageMeta)(meta))?.page.maxSize,
+      traceId: meta.traceId,
+    }),
+    source: { parameter: "page[size]" },
+  }) {}
+
+  it("writes the id, links and shaped meta", () => {
+    const document = ApiError.toDocument(new MaxSizeExceeded({ maxSize: 100, traceId: "t-1" }));
+    expect(Schema.encodeSync(ApiError.WireDocument)(document)).toEqual({
+      errors: [
+        {
+          id: "t-1",
+          links: { type: TYPE },
+          status: "400",
+          code: "max_size_exceeded",
+          source: { parameter: "page[size]" },
+          meta: { page: { maxSize: 100 }, traceId: "t-1" },
+        },
+      ],
+    });
+  });
+
+  it("round-trips through the wire with fromMeta", () => {
+    const wire = Schema.encodeUnknownSync(MaxSizeExceeded.wire)(
+      new MaxSizeExceeded({ maxSize: 100, traceId: "t-1" }),
+    );
+    const error = Schema.decodeSync(MaxSizeExceeded.wire)(wire);
+    expect(error).toBeInstanceOf(MaxSizeExceeded);
+    expect(error.maxSize).toBe(100);
+    expect(error.traceId).toBe("t-1");
+  });
+
+  it("reads a field back by name when meta keeps it and fromMeta is absent", () => {
+    class Hidden extends ApiError.make<Hidden>()("Hidden", {
+      status: 409,
+      fields: { reason: Schema.String },
+      links: (e) => ({ about: `/errors/${e.reason}` }),
+      meta: (e) => ({ reason: e.reason, extra: true }),
+    }) {}
+    const wire = Schema.encodeUnknownSync(Hidden.wire)(new Hidden({ reason: "dup" }));
+    expect(wire).toMatchObject({ errors: [{ links: { about: "/errors/dup" } }] });
+    expect(Schema.decodeSync(Hidden.wire)(wire).reason).toBe("dup");
+  });
+
+  it("leaves meta out when the function returns None", () => {
+    class Quiet extends ApiError.make<Quiet>()("Quiet", {
+      status: 403,
+      fields: { internal: Schema.optionalKey(Schema.String) },
+      meta: () => Option.none(),
+    }) {}
+    expect(Schema.encodeUnknownSync(Quiet.wire)(new Quiet({ internal: "x" }))).toEqual({
+      errors: [{ status: "403", code: "quiet" }],
+    });
+  });
+});

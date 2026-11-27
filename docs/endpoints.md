@@ -33,6 +33,28 @@ One declaration gives you all of:
 
 `ApiError.BadRequest` (400), `ApiError.NotAcceptable` (406), `ApiError.UnsupportedMediaType` (415), `ApiError.Forbidden` (403) and `ApiError.Conflict` (409) are predefined.
 
+The rest of the error object is optional too. `id` names this occurrence (a correlation or trace id), `links` carries `type` (the kind of error, the way a profile brands its errors) and `about`, and `meta` reshapes the error object's `meta`, which otherwise holds the fields. Give `fromMeta` when the shaped `meta` no longer holds each field under its own name, so a client can still reconstruct the error:
+
+```ts
+const PageMeta = Schema.Struct({ page: Schema.Struct({ maxSize: Schema.Int }) });
+
+class MaxSizeExceeded extends ApiError.make<MaxSizeExceeded>()("MaxSizeExceeded", {
+  status: 400,
+  fields: { maxSize: Schema.Int, traceId: Schema.String },
+  id: (e) => e.traceId,
+  links: { type: "https://jsonapi.org/profiles/ethanresnick/cursor-pagination/max-size-exceeded" },
+  meta: (e) => ({ page: { maxSize: e.maxSize }, traceId: e.traceId }),
+  fromMeta: (meta) => ({
+    maxSize: Option.getOrUndefined(Schema.decodeUnknownOption(PageMeta)(meta))?.page.maxSize,
+    traceId: meta.traceId,
+  }),
+    maxSize: (meta.page as { maxSize?: unknown })?.maxSize,
+    traceId: meta.traceId,
+  }),
+  source: { parameter: "page[size]" },
+}) {}
+```
+
 ## Endpoints & groups — conventions baked in
 
 ```ts
