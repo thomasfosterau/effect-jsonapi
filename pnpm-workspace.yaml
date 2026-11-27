@@ -17,6 +17,9 @@ catalog:
   # node_modules/@effect/tsgo/dist/effect-tsgo.cjs. Read it before bumping any
   # of them.
   "@effect/tsgo": 0.73.4
+  # The SQLite driver `src/SqlService.test.ts` runs the adapter against (over
+  # `node:sqlite`, no native build). Peers `effect` at its own version.
+  "@effect/sql-sqlite-node": 4.1.5
   # Peers `effect` at its own version.
   "@effect/vitest": 4.1.5
   "@enfect/oxlint": 0.10.0

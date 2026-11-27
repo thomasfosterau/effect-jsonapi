@@ -135,6 +135,7 @@ const HTTP_TIER = [
   "internal/conformance/write.ts",
   "internal/declaredQuery.ts",
   "internal/define.ts",
+  "internal/erasedService.ts",
   "internal/errorMeta.ts",
   "internal/httpMedia.ts",
   "internal/linkRoutes.ts",
@@ -347,6 +348,15 @@ const namespacesOf = (barrel: string): ReadonlyArray<string> => {
 /** Every module the root barrel re-exports: one subpath each. */
 const PUBLIC_MODULES = namespacesOf(path.join(SRC, "index.ts"));
 
+/**
+ * Modules published only as their own subpath, not re-exported from the root:
+ * `SqlService` needs `effect/sql`, which the root must not load.
+ */
+const SUBPATH_ONLY_MODULES: ReadonlyArray<string> = ["SqlService"];
+
+/** Every published module subpath. */
+const SUBPATH_MODULES = [...PUBLIC_MODULES, ...SUBPATH_ONLY_MODULES];
+
 /** The modules the schema barrel re-exports: the schema-tier subpaths. */
 const SCHEMA_MODULES = namespacesOf(path.join(SRC, "schema.ts"));
 
@@ -432,12 +442,12 @@ describe("schema-only entry point", () => {
 describe("module subpaths", () => {
   it("publish every public module, and only those", () => {
     // `vp pack` takes every `src/[A-Z]*.ts` as an entry (vite.config.ts), so
-    // a module file the root does not re-export would ship unlisted.
+    // a module file neither the root nor `SUBPATH_ONLY_MODULES` lists would ship unlisted.
     const files = fs
       .readdirSync(SRC)
       .filter((file) => /^[A-Z]\w*\.ts$/.test(file))
       .map((file) => path.basename(file, ".ts"));
-    expect(Arr.sort(PUBLIC_MODULES, Order.String)).toEqual(Arr.sort(files, Order.String));
+    expect(Arr.sort(SUBPATH_MODULES, Order.String)).toEqual(Arr.sort(files, Order.String));
     expect(PUBLIC_MODULES.length).toBeGreaterThan(SCHEMA_MODULES.length);
   });
 
@@ -600,7 +610,7 @@ describe("package exports map", () => {
       ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
       "./schema": { types: "./dist/schema.d.ts", default: "./dist/schema.js" },
       ...R.fromEntries(
-        PUBLIC_MODULES.map(
+        SUBPATH_MODULES.map(
           (module) =>
             [
               `./${module}`,
@@ -644,7 +654,7 @@ describe("built artifact", () => {
   );
 
   it.skipIf(!hasDist)("ships JavaScript and declarations for every entry point", () => {
-    const missing = ["index", "schema", ...PUBLIC_MODULES]
+    const missing = ["index", "schema", ...SUBPATH_MODULES]
       .flatMap((entry) => [`${entry}.js`, `${entry}.d.ts`])
       .filter((file) => !fs.existsSync(path.join(DIST, file)));
     expect(missing).toEqual([]);
@@ -677,7 +687,7 @@ describe("built artifact", () => {
    */
   it.skipIf(!hasDist)("ships declarations that never name effect-ext", () => {
     expect(
-      ["index", "schema", ...PUBLIC_MODULES].flatMap((entry) =>
+      ["index", "schema", ...SUBPATH_MODULES].flatMap((entry) =>
         Arr.fromIterable(
           MutableHashMap.keys(graphFrom(path.join(DIST, `${entry}.d.ts`), DIST).externals),
         )

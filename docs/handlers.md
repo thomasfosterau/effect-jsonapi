@@ -63,6 +63,25 @@ const ArticlesLive = ResourceService.layer(Api, "articles", Article, ArticleServ
 
 `ResourceService.memory(resource, { notFound, initial })` is an in-memory implementation for tests, examples and prototypes: equality filter maps, attribute sorts, offset and number pages, and relationship writes stored as given. Over it, `ResourceService.layer` passes the conformance kit's spec tier, reads and writes.
 
+### A service over SQL (`/SqlService`)
+
+`SqlService.make(resource, { table, notFound })` builds a complete `ResourceService` over the `SqlClient` from `effect/sql`, so any of its drivers serve a group: `@effect/sql-sqlite-node`, `@effect/sql-pg` and the rest. It is published only as the `@thomasfosterau/effect-jsonapi/SqlService` subpath, so the root never loads `effect/sql`.
+
+```ts skip-type-checking
+const articles =
+  yield *
+  SqlService.make(Article, {
+    table: "articles",
+    notFound: (id) => new NotFound({ id }),
+    relationships: { tags: { table: "article_tags", from: "article_id", to: "tag_id" } },
+  });
+```
+
+- **Columns.** A row has an `id` column (or `options.id`) and one column per attribute, named by `options.columns`, then a `sqlColumn` annotation on the attribute's schema, then the attribute's own name. A cell holds the attribute's JSON encoding, so a `Schema.Date` is ISO text. A to-one is a column holding the target id (`ToOneStorage`, else the relationship's `key`, else its name); a to-many is a join table (`ToManyStorage`), required for each one.
+- **Reads.** `find` and `findMany` load a batch with one statement per table. `list` turns an equality filter map or a `Filter` grammar tree into a `WHERE` clause with bound parameters, sorts with the id as tie-break, and pages by offset or number with a `COUNT(*)` total. The text operators are case-sensitive, through `instr`/`substr` on SQLite and `strpos`/`left`/`right` elsewhere.
+- **Writes.** `create` inserts with `RETURNING` and writes join-table members in one transaction; `update`, `delete` and the relationship writes do the same.
+- **Not supported.** Cursor pages and a paged to-many (`related`) die: wrap the service to add them. A SQL error is a defect.
+
 ## Resolving `included` — one batch per level
 
 `Handlers.resolveIncluded` is the other half: the walk that _produces_ `included` from the paths the client requested. It takes the primary data (one resource, or a whole page), the validated `include` paths, and a registry of **batch loaders keyed by resource type** — and nothing else. There is no service to provide and no runtime to set up; it is a plain `Effect` a handler composes.

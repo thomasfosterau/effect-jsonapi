@@ -137,6 +137,10 @@
       "types": "./dist/ResourceService.d.ts",
       "default": "./dist/ResourceService.js"
     },
+    "./SqlService": {
+      "types": "./dist/SqlService.d.ts",
+      "default": "./dist/SqlService.js"
+    },
     "./ServerErrors": {
       "types": "./dist/ServerErrors.d.ts",
       "default": "./dist/ServerErrors.js"
@@ -159,6 +163,7 @@
     "@changesets/cli": "catalog:",
     "@effect/docgen": "catalog:",
     "@effect/language-service": "catalog:",
+    "@effect/sql-sqlite-node": "catalog:",
     "@effect/tsgo": "catalog:",
     "@effect/vitest": "catalog:",
     "@enfect/oxlint": "catalog:",
