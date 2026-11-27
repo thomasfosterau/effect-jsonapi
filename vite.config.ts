@@ -132,11 +132,13 @@ export default defineConfig({
       "vitest/require-to-throw-message": "off",
       // Reports prose comments that mention `expect(` as commented-out tests.
       "vitest/no-commented-out-tests": "off",
-      // `@effect/vitest`'s runners are test blocks too.
+      // `@effect/vitest`'s runners are test blocks too, and so is the `it` a
+      // `layer(…)` block passes its body.
       "vitest/no-standalone-expect": [
         "error",
         {
           additionalTestBlockFunctions: [
+            "it",
             "it.effect",
             "it.live",
             "it.layer",
@@ -147,9 +149,15 @@ export default defineConfig({
       ],
     },
     overrides: [
-      // Tests and example programs are their own entry points.
+      // Each test here runs the conformance kit as a whole program against a
+      // fresh in-process server, so its `Effect.provide` is that program's
+      // entry point.
       {
-        files: ["**/*.test.ts", "examples/**"],
+        files: [
+          "src/Conformance.test.ts",
+          "src/Endpoint.relationshipInclude.test.ts",
+          "examples/*/test/conformance.test.ts",
+        ],
         rules: {
           "effecttsgo/strict-effect-provide": "off",
         },

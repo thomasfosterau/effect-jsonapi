@@ -999,7 +999,7 @@ describe("Conformance: requestTimeout", () => {
             settled.at(-1) === true ? Option.some(yield* Fiber.join(fiber)) : Option.none();
           yield* Fiber.interrupt(fiber);
           return { settled, report, interrupted: server.interrupted() };
-        }).pipe(Effect.provide(TestClock.layer())),
+        }),
       );
     });
 
@@ -1064,10 +1064,7 @@ describe("Conformance: requestTimeout", () => {
             steps.at(-1)?.settled === true ? Option.some(yield* Fiber.join(fiber)) : Option.none();
           yield* Fiber.interrupt(fiber);
           return { steps, report };
-        }).pipe(
-          Effect.provide(Layer.mergeAll(Live, Registry.platformLayer, TestClock.layer())),
-          Effect.scoped,
-        ),
+        }).pipe(Effect.provide(Layer.mergeAll(Live, Registry.platformLayer)), Effect.scoped),
       );
       expect(Exit.isSuccess(exit)).toBe(true);
       if (Exit.isFailure(exit)) return;
