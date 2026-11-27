@@ -22,6 +22,7 @@ import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaGetter from "effect/SchemaGetter";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as SchemaIssue from "effect/SchemaIssue";
 import { tryStringify } from "./json.js";
 import { declarationError } from "./errors.js";
@@ -35,8 +36,8 @@ export const defaultMaxUndeclaredMemberErrors = 12;
 /**
  * Validates a `maxUndeclaredMemberErrors` value: a positive integer, or
  * `Infinity` for no cap. Zero would report a summary with no member beside
- * it, and a fraction, a negative number, `NaN` or a non-number (from a caller
- * the types don't check) no count at all, so each throws, naming `where`
+ * it, and a fraction, a negative number, `NaN` or a non-number (from a
+ * caller the types don't check) no count at all, so each throws, naming `where`
  * (`Resource.make("notes")`) and the value: a number with `String`, anything
  * else with `JSON.stringify`.
  */
@@ -48,6 +49,20 @@ export const validateMaxUndeclaredMemberErrors = (where: string, cap: number): n
     `${where}: maxUndeclaredMemberErrors must be a positive integer or Infinity, got ${showValue(cap)}`,
   );
 };
+
+/**
+ * The cap a definition carries under `undeclaredMembers: "ignore"`:
+ * {@link closedStruct} then drops undeclared members instead of rejecting
+ * them. Never accepted from `maxUndeclaredMemberErrors` itself.
+ */
+export const IGNORE_UNDECLARED_MEMBERS = 0;
+
+/**
+ * A definition's cap as it carries it: {@link IGNORE_UNDECLARED_MEMBERS}, or
+ * one {@link validateMaxUndeclaredMemberErrors} accepts.
+ */
+export const validateCarriedCap = (where: string, cap: number): number =>
+  cap === IGNORE_UNDECLARED_MEMBERS ? cap : validateMaxUndeclaredMemberErrors(where, cap);
 
 // A number prints with `String` (`NaN`, `-Infinity`, `1.5`), anything else
 // with `JSON.stringify` (`"12"`, `true`), or `String` again for a value JSON
@@ -190,6 +205,35 @@ const dropAtMembers = EmptyObject.pipe(
   }),
 );
 
+// Drops every member of its input, so an empty struct hands the handler `{}`.
+const dropAll = SchemaTransformation.transform<object, object>({
+  decode: () => ({}),
+  encode: () => ({}),
+});
+
+/**
+ * `Schema.Struct(fields)` that drops the members `fields` doesn't declare. A
+ * struct with fields does so already; a struct with **no** fields would
+ * return its input unchanged, so it is given an encoding that drops them.
+ */
+const openStruct = <const Fields extends Schema.Struct.Fields>(
+  fields: Fields,
+): Schema.Struct<Fields> => {
+  const struct = Schema.Struct(fields);
+  if (!R.isEmptyReadonlyRecord(fields)) return struct;
+  const { ast } = struct;
+  return struct.rebuild(
+    new SchemaAST.Objects(
+      ast.propertySignatures,
+      ast.indexSignatures,
+      ast.annotations,
+      ast.checks,
+      [new SchemaAST.Link(Schema.Struct({}).ast, dropAll)],
+      ast.context,
+    ),
+  );
+};
+
 /**
  * `Schema.Struct(fields)`, closed: a member of its input that `fields` doesn't
  * declare is rejected, each of the first `cap` as an `UnexpectedKey` issue at
@@ -233,11 +277,16 @@ const dropAtMembers = EmptyObject.pipe(
  *
  * Deriving a new struct (`mapFields`, `Struct.pick`, …) builds a plain one
  * from the fields, without the check.
+ *
+ * A `cap` of `0` ({@link IGNORE_UNDECLARED_MEMBERS}) ignores undeclared
+ * members instead: they are dropped, in both directions, and never reach the
+ * decoded value (see {@link openStruct}).
  */
 export const closedStruct = <const Fields extends Schema.Struct.Fields>(
   fields: Fields,
   cap: number,
 ): Schema.Struct<Fields> => {
+  if (cap === IGNORE_UNDECLARED_MEMBERS) return openStruct(fields);
   const empty = R.isEmptyReadonlyRecord(fields);
   const struct = empty
     ? Schema.Struct<Fields>(fields).annotate(nullAsObject)
