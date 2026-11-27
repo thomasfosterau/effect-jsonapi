@@ -1158,16 +1158,6 @@ export class SchemaErrors extends HttpApiMiddleware.Service<SchemaErrors>()(
 // Layers
 // ---------------------------------------------------------------------------
 
-/**
- * Creates the live {@link ContentNegotiation} implementation, optionally
- * supporting JSON:API extensions (e.g. atomic operations) or serving an
- * `Accept` that names no JSON:API media type
- * ({@link ContentNegotiationOptions}). A member left out is read from
- * `JsonApiConfig` when the layer is built.
- *
- * @since 0.1.0
- * @category constructors
- */
 const withVaryAccept: HttpEffect.PreResponseHandler = (_, response) =>
   Effect.succeed(
     HttpServerResponse.setHeader(response, "vary", varyAccept(response.headers["vary"])),
@@ -1178,6 +1168,16 @@ const withVaryAccept: HttpEffect.PreResponseHandler = (_, response) =>
 const registerVaryAccept = (varyAccept: boolean) =>
   varyAccept ? HttpEffect.appendPreResponseHandler(withVaryAccept) : Effect.void;
 
+/**
+ * Creates the live {@link ContentNegotiation} implementation, optionally
+ * supporting JSON:API extensions (e.g. atomic operations) or serving an
+ * `Accept` that names no JSON:API media type
+ * ({@link ContentNegotiationOptions}). A member left out is read from
+ * `JsonApiConfig` when the layer is built.
+ *
+ * @since 0.1.0
+ * @category constructors
+ */
 export const contentNegotiationLayer = (
   options?: ContentNegotiationOptions,
 ): Layer.Layer<ContentNegotiation> =>
