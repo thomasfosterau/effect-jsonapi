@@ -1,13 +1,14 @@
 # The server skeleton
 
-Three applications built on this package each grew the same two thousand lines on top of it: an error catalogue and the seam that turns a failure into an error document, a content-negotiation verdict for an api that shares its URLs with rendered pages, a document assembler that stamps per-viewer `meta` and stringifies links, a handler factory over "the operations", and a registry that checks every family against its group at module init. That scaffolding lives here now, as the modules below. Each is optional — an api built from `Group.make` and `HttpApiBuilder` directly never meets them — and each is generic in what an application owns: its viewer, its transaction boundary, its cache, its database's errors.
+Three applications built on this package each grew the same two thousand lines on top of it: an error catalogue and the seam that turns a failure into an error document, a content-negotiation verdict for an api that shares its URLs with rendered pages, a document assembler that stamps per-viewer `meta` and stringifies links, a handler factory over "the operations", and a registry that checks every family against its group at module init. That scaffolding lives here now, as the modules below, an opt-in layer over the core published at `@thomasfosterau/effect-jsonapi/skeleton` (`Assemble`, `ResourceHandlers`, `Registry`, `FlatQuery`; `ServerErrors`, `Negotiation` and `Group.flat` stay where they are). Each is optional — an api built from `Group.make` and `HttpApiBuilder` directly never meets them — and each is generic in what an application owns: its viewer, its transaction boundary, its cache, its database's errors.
 
 ## The flat contract
 
 A _flat_ contract is one whose list inputs are one struct the rest of the application consumes directly — `{ limit, offset, status, sort }` — and whose write payloads are flat command inputs rather than the JSON:API envelope. `FlatQuery` is the grammar such a struct is built from (bounded pagination with decoding defaults, the `?sort=` string in both wire spellings, a `filter[ids]` list, a slug attribute), `Query.flatList` puts it on the wire, and `Group.flat` / `Group.flatReadOnly` derive the standard endpoint set from it:
 
 ```ts
-import { FlatQuery, Group, Include, Resource } from "@thomasfosterau/effect-jsonapi";
+import { Group, Include, Resource } from "@thomasfosterau/effect-jsonapi";
+import { FlatQuery } from "@thomasfosterau/effect-jsonapi/skeleton";
 import { Schema } from "effect";
 
 const ListPeople = FlatQuery.listInput({ maxLimit: 100 }, { q: Schema.optionalKey(Schema.String) });
@@ -137,7 +138,7 @@ const document = Assemble.unpaginatedCollection(colours, {
 `ResourceHandlers.make` / `readOnly` build the handler set the presets' endpoints expect, with everything an application owns passed in; `Registry` collects the families, checks each against its group at module init, and builds the router:
 
 ```ts
-import { Assemble, Registry, ResourceHandlers } from "@thomasfosterau/effect-jsonapi"
+import { Assemble, Registry, ResourceHandlers } from "@thomasfosterau/effect-jsonapi/skeleton"
 import * as Option from "effect/Option"
 
 const peopleFamily = {
@@ -167,7 +168,8 @@ Every write runs its operation inside `transact`, re-reads the row as the writer
 A committed write the writer can no longer read would otherwise answer 404, and a client retrying a "failed" create duplicates it. `hiddenWrite` names the re-read failures that mean "hidden", and the handler answers those with the resource's identifier instead: `201` / `200` with `{ data: { type, id, meta: { version } } }` and no attributes (attributes and relationships are optional members of a resource object), `version` coming from the operation's write result when it reports one. The group must declare that document, with `hiddenWrites: true`; without it the writes declare the full document alone, and `Registry.FamilyFor` rejects a handler set that could answer anything else:
 
 ```ts
-import { Group, ResourceHandlers } from "@thomasfosterau/effect-jsonapi";
+import { Group } from "@thomasfosterau/effect-jsonapi";
+import { ResourceHandlers } from "@thomasfosterau/effect-jsonapi/skeleton";
 import { Predicate } from "effect";
 
 const { group } = Group.flat({

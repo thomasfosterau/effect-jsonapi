@@ -455,7 +455,7 @@ export type CrudHandlers<
  * @example
  * ```ts
  * import { Effect } from "effect"
- * import { ResourceHandlers } from "@thomasfosterau/effect-jsonapi"
+ * import { ResourceHandlers } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * console.log(Effect.runSync(Effect.flip(ResourceHandlers.assertIdMatchesPath("a", "b"))).detail)
  * // → URL id "a" does not match payload id "b".
@@ -490,7 +490,8 @@ const none = Effect.undefined;
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { FlatQuery, Group, Resource, ResourceHandlers } from "@thomasfosterau/effect-jsonapi"
+ * import { Group, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { FlatQuery, ResourceHandlers } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const Contest = Resource.make("contests", { attributes: { name: Schema.NonEmptyString } })
  * const { listQuery } = Group.flatReadOnly({
@@ -612,7 +613,8 @@ export const readOnly = <
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { FlatQuery, Group, Resource, ResourceHandlers } from "@thomasfosterau/effect-jsonapi"
+ * import { Group, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { FlatQuery, ResourceHandlers } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const Person = Resource.make("people", { attributes: { name: Schema.NonEmptyString } })
  * const { listQuery } = Group.flat({

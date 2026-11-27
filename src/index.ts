@@ -34,6 +34,9 @@ export * as Atomic from "./Atomic.js";
  * and the link / wire coercions.
  *
  * @since 0.16.0
+ *
+ * @deprecated Part of the flat server skeleton: import `Assemble` from
+ * `@thomasfosterau/effect-jsonapi/skeleton` (or `/Assemble`) instead.
  */
 export * as Assemble from "./Assemble.js";
 
@@ -91,6 +94,9 @@ export * as Filter from "./Filter.js";
  * `FlatQuery.SortParam`, `FlatQuery.idList`, `FlatQuery.slug`).
  *
  * @since 0.16.0
+ *
+ * @deprecated Part of the flat server skeleton: import `FlatQuery` from
+ * `@thomasfosterau/effect-jsonapi/skeleton` (or `/FlatQuery`) instead.
  */
 export * as FlatQuery from "./FlatQuery.js";
 
@@ -177,6 +183,9 @@ export * as Query from "./Query.js";
  * `Registry.webHandler`).
  *
  * @since 0.16.0
+ *
+ * @deprecated Part of the flat server skeleton: import `Registry` from
+ * `@thomasfosterau/effect-jsonapi/skeleton` (or `/Registry`) instead.
  */
 export * as Registry from "./Registry.js";
 
@@ -210,6 +219,9 @@ export * as ResourceService from "./ResourceService.js";
  * counterpart of `Group.flat` / `Group.flatReadOnly`.
  *
  * @since 0.16.0
+ *
+ * @deprecated Part of the flat server skeleton: import `ResourceHandlers` from
+ * `@thomasfosterau/effect-jsonapi/skeleton` (or `/ResourceHandlers`) instead.
  */
 export * as ResourceHandlers from "./ResourceHandlers.js";
 

@@ -119,7 +119,7 @@ export type RequiredPagination = {
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { FlatQuery } from "@thomasfosterau/effect-jsonapi"
+ * import { FlatQuery } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const ListArticles = Schema.Struct({
  *   ...FlatQuery.pagination({ maxLimit: 100 }),
@@ -237,7 +237,7 @@ const formatSortFields = (fields: ReadonlyArray<SortField>): string =>
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { FlatQuery } from "@thomasfosterau/effect-jsonapi"
+ * import { FlatQuery } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * console.log(Schema.decodeUnknownSync(FlatQuery.SortParam)("-createdAt,title"))
  * // → [ { field: "createdAt", direction: "desc" }, { field: "title", direction: "asc" } ]
@@ -325,7 +325,7 @@ export const DEFAULT_MAX_ID_LIST: 100 = Bounded.DEFAULT_MAX_ID_LIST;
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { FlatQuery } from "@thomasfosterau/effect-jsonapi"
+ * import { FlatQuery } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const ids = FlatQuery.idList({ maxLength: 2 })
  * console.log(
@@ -399,7 +399,7 @@ export type ListInputBaseFields = DefaultedPagination & typeof sortField;
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { FlatQuery } from "@thomasfosterau/effect-jsonapi"
+ * import { FlatQuery } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const ListArticles = FlatQuery.listInput({ maxLimit: 100 }, {
  *   status: Schema.optionalKey(Schema.String)
@@ -460,7 +460,7 @@ export interface SlugOptions {
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { FlatQuery } from "@thomasfosterau/effect-jsonapi"
+ * import { FlatQuery } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const Slug = FlatQuery.slug({ reserved: ["create", "edit"] })
  * console.log(Schema.decodeUnknownSync(Slug)("my-post-title"))
@@ -496,7 +496,8 @@ export const Slug: Schema.String = Ids.Slug;
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { FlatQuery, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { FlatQuery } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const Post = Resource.make("posts", {
  *   attributes: {
@@ -549,7 +550,7 @@ export const slugCreateFields = <S extends Schema.String>(schema: S) =>
  * @example
  * ```ts
  * import { Option } from "effect"
- * import { FlatQuery } from "@thomasfosterau/effect-jsonapi"
+ * import { FlatQuery } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * console.log(FlatQuery.suppliedValue(undefined), FlatQuery.suppliedValue(Option.some("x")))
  * // → { _id: "Option", _tag: "None" } { _id: "Option", _tag: "Some", value: "x" }

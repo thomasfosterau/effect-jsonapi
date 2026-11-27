@@ -1132,7 +1132,8 @@ export const stripUndefined = <T extends object>(
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { Client, FlatQuery } from "@thomasfosterau/effect-jsonapi"
+ * import { Client } from "@thomasfosterau/effect-jsonapi"
+ * import { FlatQuery } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const ListPeople = FlatQuery.listInput({ maxLimit: 100 }, { q: Schema.optionalKey(Schema.String) })
  * const decode = Client.decodeInput(ListPeople)

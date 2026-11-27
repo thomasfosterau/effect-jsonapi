@@ -10,6 +10,10 @@
  * override it there. Resolution order: middleware option, then
  * `JsonApiConfig`, then {@link defaults}.
  *
+ * Two presets name a whole policy: {@link strict}, today's behaviour and the
+ * default, and {@link lenient}, for an api migrating to JSON:API. Pass either
+ * to {@link layer}, or spread one and override a member.
+ *
  * Every member here is read when the middleware layer is **built**, so a
  * policy is fixed for the api's lifetime. Policies that shape a schema
  * (the undeclared-member error cap, page bounds, include depth, idempotency)
@@ -56,6 +60,21 @@ export type AcceptWithoutJsonApi = "notAcceptable" | "serve";
 export type SparseFieldsets = "project" | "verify" | "handler";
 
 /**
+ * What the middleware does with a query parameter whose family base name is
+ * not one of the specification's families and that the endpoint does not
+ * declare: a reserved all-lowercase name (`?lang=en`), an extension's, or one
+ * that is not a legal member name.
+ *
+ * - `"reject"` (the default): 400 naming it, as JSON:API 1.1 requires.
+ * - `"ignore"`: pass it over. Undeclared spec families (`include`, `fields`,
+ *   `sort`, `page`, `filter`) are still refused.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export type UnknownQueryParameters = "reject" | "ignore";
+
+/**
  * The api-wide policies. Each member is optional in {@link layer}'s options
  * and falls back to {@link defaults}.
  *
@@ -81,6 +100,14 @@ export interface Policy {
    * apply to each entry. Defaults to `["_"]`, jQuery's cache-buster.
    */
   readonly allowedQueryParameters: ReadonlyArray<string>;
+  /**
+   * What a query parameter outside the specification's families that the
+   * endpoint does not declare is answered with; see
+   * {@link UnknownQueryParameters} and
+   * `Middleware.QueryParameterOptions.unknownQueryParameters`. Defaults to
+   * `"reject"`.
+   */
+  readonly unknownQueryParameters: UnknownQueryParameters;
   /**
    * `false` skips the middleware's full-linkage check on every encoded
    * response; see `Middleware.SchemaErrorsOptions.checkLinkage`. Defaults to
@@ -125,6 +152,7 @@ export const defaults: Policy = {
   extensions: [],
   acceptWithoutJsonApi: "notAcceptable",
   allowedQueryParameters: ["_"],
+  unknownQueryParameters: "reject",
   checkLinkage: true,
   varyAccept: true,
   sparseFieldsets: "project",
@@ -148,6 +176,51 @@ export const defaults: Policy = {
  * @category constructors
  */
 export const make = (options?: Options): Policy => ({ ...defaults, ...options });
+
+/**
+ * The strict preset: {@link defaults}, today's behaviour. Every choice the
+ * specification leaves open is answered the strictest conformant way:
+ * unknown query parameters are a 400, a non-JSON:API `Accept` a 406, and the
+ * middleware checks full linkage and projects sparse fieldsets on every
+ * response.
+ *
+ * @since 0.23.0
+ * @category presets
+ */
+export const strict: Policy = defaults;
+
+/**
+ * The lenient preset, for an api migrating to JSON:API whose clients don't
+ * yet speak it strictly: it serves an `Accept: application/json` client
+ * instead of answering 406, and ignores query parameters outside the
+ * specification's families instead of answering 400. Everything else is
+ * {@link strict}'s: the specification's families are still checked, full
+ * linkage still holds, sparse fieldsets are still projected.
+ *
+ * Undeclared members of a request body are a schema's choice, fixed when the
+ * resource is defined; pair this with `Resource.make(type, { undeclaredMembers:
+ * "ignore", … })` to accept those too.
+ *
+ * @example
+ * ```ts
+ * import { Layer } from "effect"
+ * import { JsonApiConfig, Middleware } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const HandlersLive: Layer.Layer<never> = Layer.empty
+ *
+ * const ApiLive = HandlersLive.pipe(
+ *   Layer.provideMerge(Middleware.layer),
+ *   Layer.provide(JsonApiConfig.layer(JsonApiConfig.lenient))
+ * )
+ * ```
+ *
+ * @since 0.23.0
+ * @category presets
+ */
+export const lenient: Policy = make({
+  acceptWithoutJsonApi: "serve",
+  unknownQueryParameters: "ignore",
+});
 
 /**
  * The api-wide policy, read by the middleware layers when they are built.

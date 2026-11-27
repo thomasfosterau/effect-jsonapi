@@ -41,6 +41,10 @@
       "types": "./dist/schema.d.ts",
       "default": "./dist/schema.js"
     },
+    "./skeleton": {
+      "types": "./dist/skeleton.d.ts",
+      "default": "./dist/skeleton.js"
+    },
     "./ApiError": {
       "types": "./dist/ApiError.d.ts",
       "default": "./dist/ApiError.js"

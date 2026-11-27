@@ -393,7 +393,8 @@ const flatWire = <
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { FlatQuery, Group, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Group, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { FlatQuery } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const Contest = Resource.make("contests", { attributes: { name: Schema.NonEmptyString } })
  * const ListContests = FlatQuery.listInput({ maxLimit: 100 }, {
@@ -463,7 +464,8 @@ export const flatReadOnly = <
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { FlatQuery, Group, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Group, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { FlatQuery } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const Person = Resource.make("people", { attributes: { name: Schema.NonEmptyString } })
  * const ListPeople = FlatQuery.listInput({ maxLimit: 100 }, { q: Schema.optionalKey(Schema.String) })

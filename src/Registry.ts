@@ -182,7 +182,8 @@ export class FamilyMismatch extends Schema.TaggedError<
  * ```ts
  * import { Effect, Schema } from "effect"
  * import { HttpApi } from "effect/http-api"
- * import { Endpoint, Group, Registry, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Registry } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const Article = Resource.make("articles", { attributes: { title: Schema.NonEmptyString } })
  * const Api = HttpApi.make("blog").add(Group.make(Article, Endpoint.get(Article)))
@@ -406,7 +407,8 @@ export interface WebHandler<R> {
  * ```ts
  * import { Context, Effect, Schema } from "effect"
  * import { HttpApi } from "effect/http-api"
- * import { Assemble, Endpoint, Group, MEDIA_TYPE, Registry, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Endpoint, Group, MEDIA_TYPE, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Assemble, Registry } from "@thomasfosterau/effect-jsonapi/skeleton"
  *
  * const Article = Resource.make("articles", { attributes: { title: Schema.NonEmptyString } })
  * const Api = HttpApi.make("blog").add(Group.make(Article, Endpoint.get(Article)))

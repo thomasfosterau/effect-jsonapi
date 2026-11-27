@@ -115,3 +115,30 @@ describe("Middleware.acceptIsAcceptable with acceptWithoutJsonApi", () => {
     );
   });
 });
+
+describe("the presets", () => {
+  const jsonApi = { accept: MEDIA_TYPE };
+
+  it("strict is today's policy", async () => {
+    expect(JsonApiConfig.strict).toEqual(JsonApiConfig.defaults);
+    const config = JsonApiConfig.layer(JsonApiConfig.strict);
+    expect(await status(Middleware.layer, config, `${url}?lang=en`, jsonApi)).toBe(400);
+    expect(await status(Middleware.layer, config, url, { accept: "application/json" })).toBe(406);
+  });
+
+  it("lenient serves plain JSON clients and passes over unknown parameters", async () => {
+    const config = JsonApiConfig.layer(JsonApiConfig.lenient);
+    expect(await status(Middleware.layer, config, url, { accept: "application/json" })).toBe(200);
+    expect(await status(Middleware.layer, config, `${url}?lang=en`, jsonApi)).toBe(200);
+    expect(await status(Middleware.layer, config, `${url}?ext:param=1`, jsonApi)).toBe(200);
+    // an undeclared family of the specification's is never dropped
+    expect(await status(Middleware.layer, config, `${url}?sort=title`, jsonApi)).toBe(400);
+    expect(await status(Middleware.layer, config, `${url}?page[size]=1`, jsonApi)).toBe(400);
+  });
+
+  it("lets a layerWith option override unknownQueryParameters", async () => {
+    const config = JsonApiConfig.layer(JsonApiConfig.lenient);
+    const strict = Middleware.layerWith({ unknownQueryParameters: "reject" });
+    expect(await status(strict, config, `${url}?lang=en`, jsonApi)).toBe(400);
+  });
+});

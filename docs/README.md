@@ -7,7 +7,7 @@
 | [Handlers](handlers.md) | Document builders, serving a group from a `ResourceService`, `included` resolution, middleware, sparse fieldsets |
 | [Query parameters](query.md) | `include`, `fields`, `sort`, `page`, `filter`, the canonical query string |
 | [The client](client.md) | `Client.make`, include narrowing, error documents, hydration, page cursors |
-| [The server skeleton](server.md) | Flat contracts, the error seam, negotiation, the assembler and registry |
+| [The server skeleton](server.md) | **Opt-in layer.** Flat contracts, the error seam, negotiation, the assembler and registry |
 | [Conformance kit](conformance.md) | Running `Conformance` against a server |
 
 ## Overview
@@ -79,6 +79,17 @@ const ApiLive = HttpApiBuilder.layer(Api).pipe(
 );
 ```
 
+## The core and the opt-in layers
+
+The guides above the skeleton describe the **core**: resources, endpoints, handlers, queries and the middleware, each spec-level choice an option whose default is the strict, conformant answer. Two opt-in layers sit on top of it:
+
+- **Policy presets.** `JsonApiConfig.strict` is the default policy; `JsonApiConfig.lenient` serves plain-JSON clients and passes over unknown query parameters, for an api migrating to JSON:API. Provide one with `JsonApiConfig.layer(JsonApiConfig.lenient)` beneath `Middleware.layer`, or spread it and override a member. A policy that shapes a schema (undeclared members, page bounds) stays a constructor option: `Resource.make(type, { undeclaredMembers: "ignore", … })`.
+- **The server skeleton** (`@thomasfosterau/effect-jsonapi/skeleton`): `Assemble`, `ResourceHandlers`, `Registry` and `FlatQuery`, one opinionated way to serve the core with a viewer, capability meta and a handler factory. An api built from `Group.make` and `HttpApiBuilder` never meets it. Its modules are still root namespaces, deprecated there.
+
+```ts
+import { Assemble, ResourceHandlers } from "@thomasfosterau/effect-jsonapi/skeleton";
+```
+
 ## The schema-only entry point
 
 The package root exports everything and is the import you want by default. It reaches `effect/http-api`, because the error classes, endpoints, groups, media type combinators and middleware are built on Effect's `HttpApi`.
@@ -145,14 +156,10 @@ Every module is a namespace export of the package root (`import { Resource } fro
 | `Filter` | The `filter` query family: operators, per-attribute declaration, the filter AST. |
 | `Sort` | The `sort` query family's per-attribute declaration (`Sort.able`). |
 | `Include` | Declared `?include=` surfaces (`Include.make`, `Include.nested`). |
-| `FlatQuery` | The flat list-input grammar (`FlatQuery.pagination`, `FlatQuery.listInput`, …). |
 | `Handlers` | Server-side document builders (`Handlers.data`, `Handlers.collection`, …). |
-| `Assemble` | The server-side document assembler over `Handlers`, with capability hooks. |
-| `ResourceHandlers` | The server handler factory, counterpart of `Group.flat`. |
 | `ResourceService` | A per-resource service contract and `ResourceService.layer`, which serves a whole group over it. |
 | `SqlService` | A `ResourceService` over `effect/sql` (subpath only: `@thomasfosterau/effect-jsonapi/SqlService`). |
 | `ServerErrors` | The server's error seam: the domain error catalogue and `ServerErrors.respond`. |
-| `Registry` | The handler registry and router (`Registry.webHandler`). |
 | `Negotiation` | The representation verdict for a host serving JSON:API on its page URLs. |
 | `Middleware` | Protocol middleware (`Middleware.layer`): content negotiation, schema errors and the create's `Location` header. |
 | `MediaType` | Media type annotation combinators for hand-rolled endpoints. |
@@ -162,6 +169,15 @@ Every module is a namespace export of the package root (`import { Resource } fro
 | `Client` | Client-side helpers: negotiation, error decoding, include narrowing and hydration, page cursors. |
 | `Conformance` | The conformance kit: an executable specification a server is driven through. |
 | `MEDIA_TYPE` | The JSON:API media type, `"application/vnd.api+json"`. |
+
+The skeleton's namespaces, from `@thomasfosterau/effect-jsonapi/skeleton` (and, deprecated, the root):
+
+| Namespace | Purpose |
+| --- | --- |
+| `FlatQuery` | The flat list-input grammar (`FlatQuery.pagination`, `FlatQuery.listInput`, …). |
+| `Assemble` | The server-side document assembler over `Handlers`, with capability hooks. |
+| `ResourceHandlers` | The server handler factory, counterpart of `Group.flat`. |
+| `Registry` | The handler registry and router (`Registry.webHandler`). |
 
 ## Examples
 
