@@ -66,7 +66,7 @@ import * as Filter from "./Filter.js";
 import { resolveOperators } from "./internal/operators.js";
 import { refusingClientId } from "./internal/refusedClientId.js";
 import {
-  closedStruct,
+  wireStruct,
   IGNORE_UNDECLARED_MEMBERS,
   defaultMaxUndeclaredMemberErrors,
   validateMaxUndeclaredMemberErrors,
@@ -77,6 +77,8 @@ import * as Sort from "./Sort.js";
 import { render } from "./internal/json.js";
 import { declarationError } from "./internal/errors.js";
 import { isMemberName } from "./internal/memberName.js";
+import type { MemberNames as MemberNameFormat, WireName } from "./internal/memberNames.js";
+import { resolveWireNames, wireName } from "./internal/memberNames.js";
 
 // The relationship descriptor types (`Descriptor`, `Relationships`,
 // `RelationshipSchemas`) are part of the public API under the `Relationship`
@@ -958,6 +960,110 @@ export type UpdateAttributes<Attributes extends Schema.Struct.Fields> = AsFields
 // ---------------------------------------------------------------------------
 
 /**
+ * How {@link make}'s `memberNames` option names a resource's members on the
+ * wire: `"kebab"` (`createdAt` as `created-at`), `"snake"` (`created_at`),
+ * `"camel"` (`created-at` as `createdAt`), a record from key to wire name
+ * (a key it omits keeps its name), or a function from key to wire name.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export type MemberNames = MemberNameFormat;
+
+/**
+ * The phantom property key carrying a member's wire name at the type level:
+ * the name `Resource.make`'s `memberNames` gives the member on the wire. Never
+ * present at runtime.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type WireNameKey = "~@thomasfosterau/effect-jsonapi/wireName";
+
+/**
+ * A member (an attribute schema or a relationship descriptor) whose wire name
+ * is `W`. Structurally it is the member itself; only the readers of
+ * {@link WireNameKey} see the tag.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type WireNamed<M, W extends string> = M & { readonly [K in WireNameKey]: W };
+
+/**
+ * The wire name of member `F` under key `K`: the name {@link WireNamed}
+ * records, or `K` itself.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type WireNameOf<F, K extends PropertyKey> = F extends {
+  readonly [W in WireNameKey]: infer Name extends string;
+}
+  ? Name
+  : K;
+
+/**
+ * The renamed members of a field or descriptor map, as an `encodeKeys`
+ * mapping: each key whose wire name differs, to that name. Empty when no
+ * member is renamed.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type WireMapping<Members, Keys = keyof Members> = {
+  readonly [
+    K in keyof Members as K extends string & Keys
+      ? WireNameOf<Members[K], K> extends K
+        ? never
+        : K
+      : never
+  ]: WireNameOf<Members[K], K>;
+};
+
+/**
+ * A struct whose renamed members (see {@link WireMapping}; those it has, of
+ * `Members`) carry their wire names on the encoded side: the struct itself
+ * when none is renamed, else `Schema.encodeKeys` over it, keeping the
+ * struct's `fields`.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type WireStruct<S extends Schema.Struct<Schema.Struct.Fields>, Members> = [
+  keyof WireMapping<Members, keyof S["fields"]>,
+] extends [never]
+  ? S
+  : Schema.encodeKeys<
+      S,
+      WireMapping<Members, keyof S["fields"]> extends infer M extends {
+        readonly [K in keyof S["fields"]]?: PropertyKey;
+      }
+        ? M
+        : never
+    > & { readonly fields: S["fields"] };
+
+/**
+ * Members with the wire names a `memberNames` option gives them, as
+ * {@link WireNamed} markers. `Names` of `never`, or the whole
+ * `MemberNames` union (no option given), leaves them as they are.
+ *
+ * @since 0.24.0
+ * @category type-level
+ */
+export type NamedMembers<Members, Names> = [Names] extends [never]
+  ? Members
+  : [MemberNames] extends [Names]
+    ? Members
+    : {
+        readonly [K in keyof Members]: K extends string
+          ? WireName<K, Names> extends K
+            ? Members[K]
+            : WireNamed<Members[K], WireName<K, Names>>
+          : Members[K];
+      };
+
+/**
  * The field map of a resource object schema. `attributes` is the
  * {@link ResourceAttributes} projection of the declared map: input-only
  * attributes (`resource: false`) are not on the resource object.
@@ -974,8 +1080,10 @@ export type ResourceFields<
 > = {
   readonly type: Schema.tag<Type>;
   readonly id: IdSchema;
-  readonly attributes: Schema.Struct<ResourceAttributes<Attributes>>;
-  readonly relationships: Schema.optionalKey<Schema.Struct<RelationshipSchemas<Rels>>>;
+  readonly attributes: WireStruct<Schema.Struct<ResourceAttributes<Attributes>>, Attributes>;
+  readonly relationships: Schema.optionalKey<
+    WireStruct<Schema.Struct<RelationshipSchemas<Rels>>, Rels>
+  >;
   readonly links: Schema.optionalKey<typeof ResourceLinks>;
   readonly meta: Schema.optionalKey<Meta>;
 };
@@ -1058,8 +1166,8 @@ export type CreateRelationshipFields<Rels extends Relationships> = {
  */
 export type CreateRelationshipsMember<Rels extends Relationships> =
   HasRequiredRelationship<Rels> extends true
-    ? Schema.Struct<AsFields<CreateRelationshipFields<Rels>>>
-    : Schema.optionalKey<Schema.Struct<AsFields<CreateRelationshipFields<Rels>>>>;
+    ? WireStruct<Schema.Struct<AsFields<CreateRelationshipFields<Rels>>>, Rels>
+    : Schema.optionalKey<WireStruct<Schema.Struct<AsFields<CreateRelationshipFields<Rels>>>, Rels>>;
 
 /**
  * The relationship fields of an update payload: every non-`paginated`
@@ -1110,7 +1218,7 @@ export interface CreatePayload<
   readonly data: Schema.Struct<{
     readonly type: Schema.tag<Type>;
     readonly lid: Schema.optionalKey<Schema.String>;
-    readonly attributes: Schema.Struct<CreateAttributes<Attributes>>;
+    readonly attributes: WireStruct<Schema.Struct<CreateAttributes<Attributes>>, Attributes>;
     readonly relationships: CreateRelationshipsMember<Rels>;
   }>;
 }> {}
@@ -1175,9 +1283,11 @@ export interface UpdatePayload<
   readonly data: Schema.Struct<{
     readonly type: Schema.tag<Type>;
     readonly id: IdSchema;
-    readonly attributes: Schema.optionalKey<Schema.Struct<UpdateAttributes<Attributes>>>;
+    readonly attributes: Schema.optionalKey<
+      WireStruct<Schema.Struct<UpdateAttributes<Attributes>>, Attributes>
+    >;
     readonly relationships: Schema.optionalKey<
-      Schema.Struct<AsFields<UpdateRelationshipFields<Rels>>>
+      WireStruct<Schema.Struct<AsFields<UpdateRelationshipFields<Rels>>>, Rels>
     >;
   }>;
 }> {}
@@ -1194,7 +1304,18 @@ export interface UpdatePayload<
  * @since 0.3.0
  * @category models
  */
-export interface CreateInput<Attributes extends Schema.Struct.Fields> extends Schema.Struct<
+export type CreateInput<Attributes extends Schema.Struct.Fields> = WireStruct<
+  CreateInputStruct<Attributes>,
+  Attributes
+>;
+
+/**
+ * The struct of a {@link CreateInput}, before any member is renamed.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface CreateInputStruct<Attributes extends Schema.Struct.Fields> extends Schema.Struct<
   CreateAttributes<Attributes>
 > {}
 
@@ -1205,7 +1326,18 @@ export interface CreateInput<Attributes extends Schema.Struct.Fields> extends Sc
  * @since 0.3.0
  * @category models
  */
-export interface UpdateInput<
+export type UpdateInput<
+  Attributes extends Schema.Struct.Fields,
+  IdSchema extends Schema.Codec<unknown, string>,
+> = WireStruct<UpdateInputStruct<Attributes, IdSchema>, Attributes>;
+
+/**
+ * The struct of an {@link UpdateInput}, before any member is renamed.
+ *
+ * @since 0.24.0
+ * @category models
+ */
+export interface UpdateInputStruct<
   Attributes extends Schema.Struct.Fields,
   IdSchema extends Schema.Codec<unknown, string>,
 > extends Schema.Struct<
@@ -3161,9 +3293,39 @@ interface Definition {
   readonly meta: Schema.Top;
   readonly annotations: Option.Option<Schema.Annotations.Annotations>;
   readonly maxUndeclaredMemberErrors: number;
+  readonly memberNames: R.ReadonlyRecord<string, string>;
 }
 
 const definitions = new WeakMap<object, Definition>();
+
+const wireNamesCache = new WeakMap<object, R.ReadonlyRecord<string, string>>();
+
+/**
+ * The wire names of a resource's renamed members, from each key to the name
+ * it carries on the wire: what {@link make}'s `memberNames` option (or
+ * {@link extend}'s) resolved to. A member it omits keeps its key on the wire;
+ * a resource that renames nothing, or a family, gives an empty record.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { strictEqual } from "node:assert"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.String, createdAt: Schema.String },
+ *   memberNames: "kebab"
+ * })
+ *
+ * strictEqual(Resource.memberNames(Article).createdAt, "created-at")
+ * strictEqual(Resource.memberNames(Article).title, undefined)
+ * ```
+ *
+ * @since 0.24.0
+ * @category accessors
+ */
+export const memberNames = (resource: Schema.Top): R.ReadonlyRecord<string, string> =>
+  wireNamesCache.get(resource) ?? {};
 
 /**
  * Defines a JSON:API resource — the single source of truth from which the
@@ -3276,6 +3438,9 @@ export const make = <
   const Rels extends Relationships = Record<never, never>,
   Meta extends Schema.Top = typeof AnyMeta,
   IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
+  // Not `never`: a context-sensitive function is typed from the default, and
+  // the whole union reads as "no option" (`NamedMembers`).
+  const Names extends MemberNames = MemberNames,
 >(
   type: Type,
   options: {
@@ -3334,7 +3499,49 @@ export const make = <
      * @since 0.23.0
      */
     readonly undeclaredMembers?: UndeclaredMembers;
+    /**
+     * The names attributes and relationships carry on the wire, when they
+     * differ from their keys: `"kebab"` (`createdAt` as `created-at`),
+     * `"snake"` (`created_at`) or `"camel"`, a record naming some keys' wire
+     * names (the rest keep theirs), or a function from key to wire name. The
+     * presets and the record are typed per key; the function's wire names are
+     * typed `string`. Everything on the wire uses the wire names — documents,
+     * payloads, `fields`, `sort`, `filter` and `include` vocabularies, error
+     * pointers — and everything decoded uses the keys, so handlers never see
+     * a wire name. Each wire name must be a legal member name other than
+     * `type` and `id`, and no two members may share one. {@link extend}
+     * inherits the base's names. Defaults to the keys themselves.
+     *
+     * @since 0.24.0
+     */
+    readonly memberNames?: Names;
   },
+): Resource<Type, NamedMembers<Attributes, Names>, NamedMembers<Rels, Names>, Meta, IdSchema> =>
+  // SAFETY: the wire names are phantom: the named members are the declared
+  // ones at runtime, and `makeNamed` builds every wire key from the names.
+  makeNamed(type, options, Option.fromUndefinedOr(options.memberNames)) as never;
+
+// `make` with the members' wire names resolved from `memberNames` (code names
+// as keys), shared by `extend` and `annotate`, which pass the record they
+// inherit.
+const makeNamed = <
+  const Type extends string,
+  const Attributes extends Schema.Struct.Fields,
+  const Rels extends Relationships,
+  Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<unknown, string>,
+>(
+  type: Type,
+  options: {
+    readonly id?: IdSchema;
+    readonly attributes: Attributes;
+    readonly relationships?: Rels;
+    readonly meta?: Meta;
+    readonly annotations?: Schema.Annotations.Annotations;
+    readonly maxUndeclaredMemberErrors?: number;
+    readonly undeclaredMembers?: UndeclaredMembers;
+  },
+  memberNames: Option.Option<MemberNames>,
 ): Resource<Type, Attributes, Rels, Meta, IdSchema> => {
   const maxUndeclaredMemberErrors =
     options.undeclaredMembers === "ignore"
@@ -3348,6 +3555,12 @@ export const make = <
   // attribute and relationship sharing a name.
   validateMemberName("Resource.make", "type", type);
   validateFieldNames(`Resource.make("${type}")`, options.attributes, relationships);
+  // Attribute and relationship wire names are checked together, so no two
+  // members of either kind share one.
+  const wire = resolveWireNames(`Resource.make("${type}")`, memberNames, [
+    ...R.keys(options.attributes),
+    ...R.keys(relationships),
+  ]);
   const meta = (options.meta ?? AnyMeta) as Meta;
   const id = (options.id ?? Id(type)) as IdSchema;
   const identifier = Identifier(type, id);
@@ -3358,8 +3571,8 @@ export const make = <
   // ones (`resource: false`); a descriptor that declares nothing anywhere, or
   // declares an input-only attribute filterable / sortable, is refused here.
   validateDescriptors(type, options.attributes);
-  const attributes = Schema.Struct(resourceAttributeFields<Attributes>(options.attributes));
-  const relationshipsStruct = Schema.Struct(relationshipSchemas);
+  const attributes = wireStruct(resourceAttributeFields<Attributes>(options.attributes), wire);
+  const relationshipsStruct = wireStruct(relationshipSchemas, wire);
 
   // Per-attribute projections: each attribute may carry a descriptor (from
   // `attribute` / `readOnlyAttribute`) controlling how it appears in the write
@@ -3370,12 +3583,14 @@ export const make = <
   // struct with fields would silently drop it and a bare empty struct
   // would hand it to the handler.
   // Each reports at most `maxUndeclaredMemberErrors` of them at their own paths.
-  const createAttributes = closedStruct(
+  const createAttributes = wireStruct(
     createAttributeFields<Attributes>(options.attributes),
+    wire,
     maxUndeclaredMemberErrors,
   );
-  const updateAttributes = closedStruct(
+  const updateAttributes = wireStruct(
     updateAttributeFields<Attributes>(options.attributes),
+    wire,
     maxUndeclaredMemberErrors,
   );
 
@@ -3418,8 +3633,9 @@ export const make = <
     relationshipEntries,
     ([, descriptor]) => descriptor.kind === "one",
   );
-  const createRelationshipsStruct = closedStruct(
+  const createRelationshipsStruct = wireStruct(
     createRelationshipFields,
+    wire,
     maxUndeclaredMemberErrors,
   );
 
@@ -3455,7 +3671,7 @@ export const make = <
       id,
       attributes: Schema.optionalKey(updateAttributes),
       relationships: Schema.optionalKey(
-        closedStruct(updateRelationshipFields, maxUndeclaredMemberErrors),
+        wireStruct(updateRelationshipFields, wire, maxUndeclaredMemberErrors),
       ),
     }),
   }) as UpdatePayload<Type, Attributes, Rels, IdSchema>;
@@ -3463,18 +3679,19 @@ export const make = <
   // Flat ("command-style") projections of the create/update inputs, without the
   // JSON:API `{ data: { type, ... } }` envelope. They mirror the enveloped
   // payloads' attribute projections.
-  const createInput: CreateInput<Attributes> = createAttributes;
+  const createInput = createAttributes as CreateInput<Attributes>;
   // Closed like the enveloped payload's attributes.
   // SAFETY: no attribute may be named `id` (`validateFieldNames`), so the
   // spread's `id` is the resource id and `UpdateInput`'s `Omit<…, "id">` drops
-  // nothing the spread carries.
-  const updateInput = closedStruct(
+  // nothing the spread carries; its renamed members are `WireStruct`'s.
+  const updateInput: UpdateInput<Attributes, IdSchema> = wireStruct(
     {
       ...updateAttributeFields<Attributes>(options.attributes),
       id,
     },
+    wire,
     maxUndeclaredMemberErrors,
-  ) as UpdateInput<Attributes, IdSchema>;
+  ) as never;
 
   // The default `included` union: resources referenced by non-`paginated`
   // relationships. Built lazily so out-of-order / mutually recursive
@@ -3542,7 +3759,9 @@ export const make = <
     meta,
     annotations: Option.fromUndefinedOr(options.annotations),
     maxUndeclaredMemberErrors,
+    memberNames: wire,
   });
+  wireNamesCache.set(resource, wire);
 
   return resource;
 };
@@ -3663,17 +3882,21 @@ export function annotate(resource: Any, annotationsToAdd: Schema.Annotations.Ann
         "annotate its members instead)",
     );
   }
-  return make(resource.type, {
-    id: definition.id,
-    attributes: definition.attributes,
-    relationships: definition.relationships,
-    meta: definition.meta,
-    annotations: {
-      ...Option.getOrElse(definition.annotations, (): Schema.Annotations.Annotations => ({})),
-      ...annotationsToAdd,
+  return makeNamed(
+    resource.type,
+    {
+      id: definition.id,
+      attributes: definition.attributes,
+      relationships: definition.relationships,
+      meta: definition.meta,
+      annotations: {
+        ...Option.getOrElse(definition.annotations, (): Schema.Annotations.Annotations => ({})),
+        ...annotationsToAdd,
+      },
+      maxUndeclaredMemberErrors: definition.maxUndeclaredMemberErrors,
     },
-    maxUndeclaredMemberErrors: definition.maxUndeclaredMemberErrors,
-  });
+    Option.some(definition.memberNames),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -3863,6 +4086,9 @@ export const extend = <
   BaseId extends Schema.Codec<unknown, string> = Id<BaseType>,
   const InheritId extends boolean = false,
   IdSchema extends Schema.Codec<unknown, string> = never,
+  // Not `never`: a context-sensitive function is typed from the default, and
+  // the whole union reads as "no option" (`NamedMembers`).
+  const Names extends MemberNames = MemberNames,
 >(
   base: Parameter<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>,
   type: Type,
@@ -3909,11 +4135,19 @@ export const extend = <
      * @since 0.23.0
      */
     readonly undeclaredMembers?: UndeclaredMembers;
+    /**
+     * The wire names of the members this call declares, exactly as
+     * {@link make}'s `memberNames` option. The base's members keep the wire
+     * names the base gives them, unless this call redeclares them.
+     *
+     * @since 0.24.0
+     */
+    readonly memberNames?: Names;
   },
 ): Resource<
   Type,
-  ExtendedAttributes<BaseAttributes, ExtraAttributes>,
-  ExtendedRelationships<BaseRels, ExtraRels>,
+  ExtendedAttributes<BaseAttributes, NamedMembers<ExtraAttributes, Names>>,
+  ExtendedRelationships<BaseRels, NamedMembers<ExtraRels, Names>>,
   Meta,
   ExtendedId<BaseId, Type, InheritId, IdSchema>
 > => {
@@ -3952,13 +4186,28 @@ export const extend = <
     // Validated here, so a bad value names the call that passed it.
     ...extendedUndeclaredPolicy(`Resource.extend("${type}")`, base, options),
   };
+  // The base's wire names for the members this call doesn't redeclare, then
+  // this call's for those it does; `makeNamed` checks them all together.
+  const extra = [...R.keys(options?.attributes ?? {}), ...R.keys(options?.relationships ?? {})];
+  const names = {
+    ...R.filter(memberNames(base), (_, key) => !extra.includes(key)),
+    ...R.fromEntries(
+      extra.map(
+        (key) => [key, wireName(Option.fromUndefinedOr(options?.memberNames), key)] as const,
+      ),
+    ),
+  };
   // `id` is a member only when one was given or inherited.
   // A double assertion, not a single one: the spread maps are not provably
   // `ExtendedAttributes` / `ExtendedRelationships` (`Struct.Assign`) while
   // the base and extra maps are generic, nor the id `ExtendedId`, so `make`'s
   // result and `extend`'s are not comparable; an overload would restate the
   // whole signature to the same effect.
-  return cast(id === undefined ? make(type, declaration) : make(type, { ...declaration, id }));
+  return cast(
+    id === undefined
+      ? makeNamed(type, declaration, Option.some(names))
+      : makeNamed(type, { ...declaration, id }, Option.some(names)),
+  );
 };
 
 // ---------------------------------------------------------------------------

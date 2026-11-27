@@ -206,7 +206,10 @@ const dropAtMembers = EmptyObject.pipe(
 );
 
 // Drops every member of its input, so an empty struct hands the handler `{}`.
-const dropAll = SchemaTransformation.transform<object, object>({
+const dropAll = SchemaTransformation.transform<
+  R.ReadonlyRecord<string, unknown>,
+  R.ReadonlyRecord<string, unknown>
+>({
   decode: () => ({}),
   encode: () => ({}),
 });
@@ -309,3 +312,63 @@ export const closedStruct = <const Fields extends Schema.Struct.Fields>(
     ),
   );
 };
+
+/**
+ * A struct of `fields` whose members `mapping` names are sent under their wire
+ * names: `Schema.Struct(fields)` (or, with a `cap`, the {@link closedStruct})
+ * for an empty mapping, else a wire struct of the renamed members decoding to
+ * it. `fields` stays readable on the result. With a `cap` the wire side is the
+ * closed struct, so an undeclared member is rejected at its wire name rather
+ * than dropped before the check sees it.
+ */
+export const wireStruct = <const Fields extends Schema.Struct.Fields>(
+  fields: Fields,
+  mapping: R.ReadonlyRecord<string, string>,
+  cap?: number,
+): Schema.Struct<Fields> => {
+  const struct = Schema.Struct(fields);
+  const renamed = R.filter(mapping, (_, key) => Object.hasOwn(fields, key));
+  if (R.isEmptyReadonlyRecord(renamed)) {
+    return cap === undefined ? struct : closedStruct(fields, cap);
+  }
+  const wireFields = R.fromEntries(
+    R.toEntries(fields).map(
+      ([key, field]) => [renamedKey(renamed, key), Schema.toEncoded(field)] as const,
+    ),
+  );
+  const wire = (cap === undefined ? Schema.Struct(wireFields) : closedStruct(wireFields, cap)).pipe(
+    Schema.decodeTo(
+      struct,
+      // SAFETY: renaming keys maps the wire struct's members onto `struct`'s
+      // encoded members one to one, which the generic `Fields` can't show.
+      SchemaTransformation.transform<
+        R.ReadonlyRecord<string, unknown>,
+        R.ReadonlyRecord<string, unknown>
+      >({
+        decode: (input) => renameKeys(input, inverse(renamed)),
+        encode: (input) => renameKeys(input, renamed),
+      }) as never,
+    ),
+  );
+  // SAFETY: the wire struct decodes to `struct`'s type, and `fields` keeps the
+  // declared members readable; the wire names are typed by
+  // `Resource.WireStruct`, which callers cast to.
+  return Object.assign(wire, { fields }) as never;
+};
+
+// `mapping` read backwards: each wire name to its key.
+const inverse = (mapping: R.ReadonlyRecord<string, string>): R.ReadonlyRecord<string, string> =>
+  R.fromEntries(R.toEntries(mapping).map(([key, wire]) => [wire, key] as const));
+
+// A copy of `input` with each key `mapping` names under its new name.
+const renameKeys = (
+  input: R.ReadonlyRecord<string, unknown>,
+  mapping: R.ReadonlyRecord<string, string>,
+): R.ReadonlyRecord<string, unknown> =>
+  R.fromEntries(
+    R.toEntries(input).map(([key, value]) => [renamedKey(mapping, key), value] as const),
+  );
+
+// The name `mapping` gives `key` (an own entry only), or `key` itself.
+const renamedKey = (mapping: R.ReadonlyRecord<string, string>, key: string): string =>
+  Option.getOrElse(R.get(mapping, key), () => key);

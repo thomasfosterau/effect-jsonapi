@@ -25,7 +25,7 @@ import type {
   IncludePathsTo,
   ResolveIncludePath,
 } from "../Resource.js";
-import { directTargets, includePaths, isFamily } from "../Resource.js";
+import { directTargets, includePaths, isFamily, memberNames } from "../Resource.js";
 
 // Each resource once, by identity, first occurrence first.
 const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> =>
@@ -172,3 +172,56 @@ export const includedResources = (
       resources.flatMap((resource) => reachedBy(resource, path.split("."))),
     ),
   ]);
+
+// One segment of a dotted path renamed through `names` (each resource's
+// renamed members, key to wire or wire to key) on the first of `current` that
+// renames it, with the resources the next segment is read on: the target of
+// the relationship it names (by `key`, its key spelling), or none.
+const renamedSegment = (
+  current: ReadonlyArray<Any>,
+  segment: string,
+  names: (resource: Any) => R.ReadonlyRecord<string, string>,
+  key: (segment: string, renamed: string) => string,
+): readonly [ReadonlyArray<Any>, string] => {
+  const renamed = Option.getOrElse(
+    Arr.findFirst(current, (resource) => R.get(names(resource), segment)),
+    () => segment,
+  );
+  const relationship = key(segment, renamed);
+  const next = Option.match(
+    Arr.findFirst(current, (resource) => R.get(resource.relationships, relationship)),
+    {
+      onNone: (): ReadonlyArray<Any> => [],
+      onSome: (descriptor) =>
+        descriptor.kind === "paginated" ? [] : expandFamilies([descriptor.ref()]),
+    },
+  );
+  return [next, renamed];
+};
+
+const inverse = (names: R.ReadonlyRecord<string, string>): R.ReadonlyRecord<string, string> =>
+  R.fromEntries(R.toEntries(names).map(([key, wire]) => [wire, key] as const));
+
+/**
+ * A dotted path (an include path, or a filter or sort path such as
+ * `author.createdAt`) spelled in wire names: each segment the name the
+ * resource declaring it gives that member (`Resource.make`'s `memberNames`),
+ * the path walked from `resources` through its relationships (a family's
+ * members standing for it). A segment no resource on the way renames keeps
+ * its spelling.
+ */
+export const wirePath = (resources: ReadonlyArray<Any>, path: string): string =>
+  Arr.mapAccum(path.split("."), expandFamilies(resources), (current, segment) =>
+    renamedSegment(current, segment, memberNames, (keySegment) => keySegment),
+  )[1].join(".");
+
+/** {@link wirePath} read backwards: a wire path spelled in keys. */
+export const keyPath = (resources: ReadonlyArray<Any>, path: string): string =>
+  Arr.mapAccum(path.split("."), expandFamilies(resources), (current, segment) =>
+    renamedSegment(
+      current,
+      segment,
+      (resource) => inverse(memberNames(resource)),
+      (_, keySegment) => keySegment,
+    ),
+  )[1].join(".");

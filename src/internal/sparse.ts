@@ -32,8 +32,9 @@ import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import { isSurface } from "../Include.js";
-import type { Any } from "../Resource.js";
-import { isFamily } from "../Resource.js";
+import type { Any, WireStruct } from "../Resource.js";
+import { isFamily, memberNames } from "../Resource.js";
+import { wireStruct } from "./schemaExt.js";
 import { expandFamilies, includedResources, includePathsFor } from "./includeGraph.js";
 
 // Resolves to `T` for every concrete field map; needed because the mapped
@@ -52,20 +53,24 @@ type OptionalMembers<A extends Schema.Struct.Fields> = {
     : Schema.optionalKey<A[K]>;
 };
 
-// A resource object's (optional) `relationships` struct made partial.
-type SparseRelationships<S> = S extends {
+// A resource object's (optional) `relationships` struct made partial, its
+// members under the wire names `Rels` gives them.
+type SparseRelationships<S, Rels> = S extends {
   readonly schema: { readonly fields: infer RF extends Schema.Struct.Fields };
 }
-  ? Schema.optionalKey<Schema.Struct<OptionalMembers<RF>>>
+  ? Schema.optionalKey<WireStruct<Schema.Struct<OptionalMembers<RF>>, Rels>>
   : S;
 
 // A resource object's field map with its `attributes` and `relationships`
-// structs made partial.
-type SparseFields<F extends Any["fields"]> = {
+// structs made partial, their members under their wire names.
+type SparseFields<Res extends Any, F extends Any["fields"] = Res["fields"]> = {
   readonly [K in keyof F]: K extends "attributes"
-    ? Schema.Struct<OptionalMembers<F["attributes"]["fields"]>>
+    ? WireStruct<
+        Schema.Struct<OptionalMembers<F["attributes"]["fields"]>>,
+        NonNullable<Res["declaredAttributes"]>
+      >
     : K extends "relationships"
-      ? SparseRelationships<F[K]>
+      ? SparseRelationships<F[K], Res["relationships"]>
       : F[K];
 };
 
@@ -74,7 +79,7 @@ type SparseFields<F extends Any["fields"]> = {
  * relationship optional.
  */
 export interface SparseResource<Res extends Any> extends Schema.Struct<
-  AsFields<SparseFields<Res["fields"]>>
+  AsFields<SparseFields<Res>>
 > {}
 
 /**
@@ -145,20 +150,28 @@ const optionalMember = (field: Schema.Struct.Fields[string]) =>
 // The `relationships` member of a resource object's field map, its struct
 // rebuilt with every relationship an optional key; anything else (a
 // hand-rolled definition's) as it stands.
-const rebuiltRelationships = (member: Schema.Struct.Fields[string]) => {
+const rebuiltRelationships = (
+  member: Schema.Struct.Fields[string],
+  names: R.ReadonlyRecord<string, string>,
+) => {
   const inner: unknown = P.hasProperty(member, "schema") ? member.schema : undefined;
   if (!P.hasProperty(inner, "fields") || !P.isObject(inner.fields))
     return { relationships: member };
   // SAFETY: the `fields` of a `Schema.Struct`, which a definition's
   // `relationships` member wraps (`Resource.make`).
   const fields = inner.fields as Schema.Struct.Fields;
-  return { relationships: Schema.optionalKey(Schema.Struct(R.map(fields, optionalMember))) };
+  return {
+    relationships: Schema.optionalKey(wireStruct(R.map(fields, optionalMember), names)),
+  };
 };
 
-const sparseRelationships = (fields: Schema.Struct.Fields) =>
+const sparseRelationships = (
+  fields: Schema.Struct.Fields,
+  names: R.ReadonlyRecord<string, string>,
+) =>
   Option.match(R.get(fields, "relationships"), {
     onNone: () => ({}),
-    onSome: rebuiltRelationships,
+    onSome: (member) => rebuiltRelationships(member, names),
   });
 
 /**
@@ -173,8 +186,11 @@ export const sparseResource = (resource: ResourceStruct): Schema.Top => {
   const { identifier: _identifier, ...annotations } = resource.ast.annotations ?? {};
   const sparse = Schema.Struct({
     ...resource.fields,
-    attributes: Schema.Struct(R.map(resource.fields.attributes.fields, optionalMember)),
-    ...sparseRelationships(resource.fields),
+    attributes: wireStruct(
+      R.map(resource.fields.attributes.fields, optionalMember),
+      memberNames(resource),
+    ),
+    ...sparseRelationships(resource.fields, memberNames(resource)),
   }).annotate(annotations);
   sparseCache.set(resource, sparse);
   return sparse;

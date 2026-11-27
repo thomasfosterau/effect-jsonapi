@@ -100,6 +100,41 @@ export interface Sort<Field extends string> extends Schema.decodeTo<
   Schema.String
 > {}
 
+const identity = (name: string): string => name;
+
+/**
+ * `Schema.Literals(values)`, each value sent as the name `toWire` gives it: a
+ * resource's member names (`Resource.make`'s `memberNames`) on the wire,
+ * decoded to their keys. `annotations` takes the wire names, so a
+ * vocabulary they publish is the one a client sends; they ride on both
+ * sides, where a rejection and the support check each read them.
+ */
+export const renamedLiterals = <const Value extends string>(
+  values: ReadonlyArray<Value>,
+  toWire: (value: string) => string,
+  annotations: (wire: ReadonlyArray<string>) => Schema.Annotations.Annotations,
+): Schema.Literals<ReadonlyArray<Value>> => {
+  const wire = values.map(toWire);
+  const literals = Schema.Literals(values);
+  if (Arr.every(values, (value, i) => wire[i] === value))
+    return literals.annotate(annotations(wire));
+  const keys = R.fromEntries(Arr.zip(wire, values));
+  // SAFETY: the wire literals decode to exactly `values`, one to one; the
+  // type keeps the decoded literals, which is what every caller reads.
+  return Schema.Literals(wire)
+    .annotate(annotations(wire))
+    .pipe(
+      Schema.decodeTo(
+        literals,
+        SchemaTransformation.transform<Value, string>({
+          decode: (name) => keys[name],
+          encode: toWire,
+        }),
+      ),
+    )
+    .annotate(annotations(wire)) as never;
+};
+
 /**
  * JSON:API `sort` codec: `"-createdAt,title"` ↔
  * `[{ field: "createdAt", direction: "desc" }, { field: "title", direction: "asc" }]`.
@@ -107,15 +142,18 @@ export interface Sort<Field extends string> extends Schema.decodeTo<
  * Per https://jsonapi.org/format/1.1/#fetching-sorting, a `-` prefix requests
  * descending order.
  */
-export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): Sort<Field> => {
+export const Sort = <const Field extends string>(
+  fields: ReadonlyArray<Field>,
+  toWire: (field: string) => string = identity,
+): Sort<Field> => {
   const item = Schema.Struct({
     // The sortable set rides on the literal schema as the `sort` vocabulary,
     // so the 400 for an unknown field carries `meta.sortableFields` (see
     // `errorMeta`), and an empty set makes `sort` unsupported. An
     // empty set's rejection says so rather than "Expected never".
-    field: Schema.Literals(fields).annotate(
+    field: renamedLiterals(fields, toWire, (values) =>
       vocabularyAnnotations(
-        { family: "sort", values: fields },
+        { family: "sort", values },
         "This endpoint supports no sortable fields.",
       ),
     ),

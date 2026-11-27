@@ -838,3 +838,17 @@ export const encodeFilter = (root: Prepared) => {
   }
   return R.fromEntries(pairs);
 };
+
+/**
+ * `node` with every condition's field renamed by `rename`: the wire names a
+ * resource's `memberNames` gives its fields, or back to their keys.
+ */
+export const renameFields = (node: Node, rename: (field: string) => string): Node =>
+  Match.value(node).pipe(
+    Match.tag("And", "Or", (group): Node => ({
+      ...group,
+      members: group.members.map((member) => renameFields(member, rename)),
+    })),
+    Match.tag("Not", (not): Node => ({ ...not, member: renameFields(not.member, rename) })),
+    Match.orElse((condition): Node => ({ ...condition, field: rename(condition.field) })),
+  );
