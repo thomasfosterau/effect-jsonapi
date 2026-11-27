@@ -79,8 +79,6 @@ export default defineConfig({
       // is a defect, not headroom: flip a rule back to `error` (delete its
       // line) when its count reaches zero.
       "effect/require-safety-comment-for-type-assertion": "warn",
-      "effect/no-chained-type-assertions": "warn",
-      "effect/prefer-effect-is": "warn",
       "typescript/no-unsafe-type-assertion": "warn",
       "typescript/no-unnecessary-type-parameters": "warn",
       "typescript/no-generated-empty-object-type": "warn",
