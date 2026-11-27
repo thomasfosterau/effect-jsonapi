@@ -89,7 +89,7 @@ export const LinkObject = Schema.Struct({
   describedby: Schema.optionalKey(Url),
   title: Schema.optionalKey(Schema.String),
   type: Schema.optionalKey(Schema.String),
-  hreflang: Schema.optionalKey(Schema.String),
+  hreflang: Schema.optionalKey(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
   meta: Schema.optionalKey(AnyMeta),
 });
 
@@ -150,7 +150,8 @@ export function href(link: Link): string {
 }
 
 /**
- * A resource object's `links`: the spec standardises `self`.
+ * A resource object's `links`: the spec standardises `self`. Other members
+ * are stripped on decode; {@link ResourceLinksOpen} keeps them.
  *
  * @since 0.1.0
  * @category schemas
@@ -167,8 +168,30 @@ export const ResourceLinks = Schema.Struct({
  */
 export type ResourceLinks = typeof ResourceLinks.Type;
 
+// Every member of a links object is a link or `null`: profiles and servers
+// may add names beyond the ones the spec standardises.
+const otherLinks = [Schema.Record(Schema.String, Schema.NullOr(Link))] as const;
+
+/**
+ * {@link ResourceLinks} that keeps every other member (each a link or
+ * `null`), for reading a server that adds its own, such as a `describedby`.
+ *
+ * @since 0.23.0
+ * @category schemas
+ */
+export const ResourceLinksOpen = Schema.StructWithRest(ResourceLinks, otherLinks);
+
+/**
+ * The decoded type of {@link ResourceLinksOpen}.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export type ResourceLinksOpen = typeof ResourceLinksOpen.Type;
+
 /**
  * A relationship object's `links`: the spec standardises `self` and `related`.
+ * Other members are not admitted here; {@link RelationshipLinksOpen} keeps them.
  *
  * @since 0.1.0
  * @category schemas
@@ -192,9 +215,7 @@ export type RelationshipLinks = typeof RelationshipLinks.Type;
  * @since 0.1.0
  * @category schemas
  */
-export const RelationshipLinksOpen = Schema.StructWithRest(RelationshipLinks, [
-  Schema.Record(Schema.String, Schema.NullOr(Link)),
-]);
+export const RelationshipLinksOpen = Schema.StructWithRest(RelationshipLinks, otherLinks);
 
 /**
  * The decoded type of {@link RelationshipLinksOpen}: relationship links plus profile-defined members.
@@ -231,7 +252,8 @@ export type PaginatedRelationshipLinks = typeof PaginatedRelationshipLinks.Type;
 
 /**
  * Top-level `links`: `self`/`related`/`describedby` plus the pagination
- * members (each nullable, per the spec).
+ * members (each nullable, per the spec). Other members are stripped on
+ * decode; {@link TopLevelLinksOpen} keeps them.
  *
  * @since 0.1.0
  * @category schemas
@@ -254,18 +276,37 @@ export const TopLevelLinks = Schema.Struct({
  */
 export type TopLevelLinks = typeof TopLevelLinks.Type;
 
+/**
+ * {@link TopLevelLinks} that keeps every other member (each a link or
+ * `null`), for reading a server that adds its own.
+ *
+ * @since 0.23.0
+ * @category schemas
+ */
+export const TopLevelLinksOpen = Schema.StructWithRest(TopLevelLinks, otherLinks);
+
+/**
+ * The decoded type of {@link TopLevelLinksOpen}.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export type TopLevelLinksOpen = typeof TopLevelLinksOpen.Type;
+
 // ---------------------------------------------------------------------------
 // jsonapi object
 // ---------------------------------------------------------------------------
 
 /**
- * The top-level `jsonapi` object: version (closed set), extensions, profiles.
+ * The top-level `jsonapi` object: version, extensions, profiles. `version` is
+ * any string, so a client keeps reading a server that has moved to a later
+ * minor version; {@link v1_1} is the value a server emits.
  *
  * @since 0.1.0
  * @category schemas
  */
 export const JsonApiObject = Schema.Struct({
-  version: Schema.optionalKey(Schema.Literals(["1.0", "1.1"])),
+  version: Schema.optionalKey(Schema.String),
   ext: Schema.optionalKey(Schema.Array(Url)),
   profile: Schema.optionalKey(Schema.Array(Url)),
   meta: Schema.optionalKey(AnyMeta),
@@ -292,17 +333,22 @@ export const v1_1: JsonApiObject = { version: "1.1" };
 // ---------------------------------------------------------------------------
 
 /**
- * An error's `source` members are alternatives — modelled as a union, not
- * three optional keys.
+ * An error's `source`. The spec says it SHOULD carry one of `pointer`,
+ * `parameter` or `header`, so each is optional and an empty or extended
+ * `source` still decodes (other members are kept). Build one with
+ * {@link pointer}, or as `{ parameter }` / `{ header }`.
  *
  * @since 0.1.0
  * @category schemas
  */
-export const ErrorSource = Schema.Union([
-  Schema.Struct({ pointer: Schema.String }),
-  Schema.Struct({ parameter: Schema.String }),
-  Schema.Struct({ header: Schema.String }),
-]);
+export const ErrorSource = Schema.StructWithRest(
+  Schema.Struct({
+    pointer: Schema.optionalKey(Schema.String),
+    parameter: Schema.optionalKey(Schema.String),
+    header: Schema.optionalKey(Schema.String),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+);
 
 /**
  * The decoded type of an error's {@link ErrorSource}.

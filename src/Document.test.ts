@@ -140,6 +140,41 @@ describe("JsonApiObject ext/profile", () => {
 // JSON Pointer (RFC 6901) construction and parsing
 // ---------------------------------------------------------------------------
 
+describe("spec-valid documents the schemas accept", () => {
+  it("reads `hreflang` as a string or an array of strings", () => {
+    const decode = Schema.decodeUnknownSync(Document.LinkObject);
+    expect(decode({ href: "/x", hreflang: "en" }).hreflang).toBe("en");
+    expect(decode({ href: "/x", hreflang: ["en", "fr"] }).hreflang).toEqual(["en", "fr"]);
+    expect(() => decode({ href: "/x", hreflang: 1 })).toThrow();
+  });
+
+  it("reads a `jsonapi.version` beyond 1.1", () => {
+    const decode = Schema.decodeUnknownSync(Document.JsonApiObject);
+    expect(decode({ version: "1.2" })).toEqual({ version: "1.2" });
+    expect(() => decode({ version: 1.1 })).toThrow();
+  });
+
+  it("reads an error `source` that is empty, extended or names a member", () => {
+    const decode = Schema.decodeUnknownSync(Document.ErrorSource);
+    expect(decode({})).toEqual({});
+    expect(decode({ pointer: "/data", extra: 1 })).toEqual({ pointer: "/data", extra: 1 });
+    expect(decode({ header: "Accept" })).toEqual({ header: "Accept" });
+    expect(() => decode({ pointer: 1 })).toThrow();
+  });
+
+  it("keeps other links in the open links schemas, and rejects a member that isn't a link", () => {
+    const resource = Schema.decodeUnknownSync(Document.ResourceLinksOpen);
+    expect(resource({ self: "/a/1", describedby: "/schema", gone: null })).toEqual({
+      self: "/a/1",
+      describedby: "/schema",
+      gone: null,
+    });
+    expect(() => resource({ self: "/a/1", count: 3 })).toThrow();
+    const top = Schema.decodeUnknownSync(Document.TopLevelLinksOpen);
+    expect(top({ next: null, profile: "/p" })).toEqual({ next: null, profile: "/p" });
+  });
+});
+
 describe("Document.pointer", () => {
   it("builds an attribute pointer", () => {
     expect(Document.pointer.attribute("title")).toBe("/data/attributes/title");
