@@ -90,7 +90,7 @@ import type {
 import { includePathsFor } from "./internal/includeGraph.js";
 import type { IncludeArgument } from "./internal/sparse.js";
 import { fieldsetResources } from "./internal/sparse.js";
-import { vocabularyAnnotation, vocabularyAnnotations } from "./internal/vocabulary.js";
+import { isFamily, vocabularyAnnotation, vocabularyAnnotations } from "./internal/vocabulary.js";
 import type {
   Any,
   AttributeKeys,
@@ -1540,6 +1540,21 @@ export interface Options<Res extends Any> {
    * an empty map — is a 400 naming it.
    */
   readonly filter?: FilterOption;
+  /**
+   * Implementation-specific query parameters beside the specification's
+   * families: each key is a bare parameter name (`includeDeleted`,
+   * `x-trace`) and its schema must decode from a string, as a `page` or
+   * `filter` member's does. Declared on both sides of the flat / nested
+   * transformation, so the handler receives the decoded value and the
+   * reserved-parameter check sees the name as declared.
+   *
+   * A key with a bracket, or one naming a specification family (`include`,
+   * `fields`, `sort`, `page`, `filter`), is a programmer error and throws.
+   * {@link extend} adds parameters to a query schema already built.
+   *
+   * @since 0.23.0
+   */
+  readonly parameters?: Schema.Struct.Fields;
 }
 
 /**
@@ -1623,6 +1638,12 @@ type PageOf<O extends { readonly page?: unknown }> = [O["page"]] extends [never]
 type FilterOf<O extends { readonly filter?: unknown }> = [O["filter"]] extends [never]
   ? false
   : O["filter"];
+// A query's implementation-specific `parameters`, none when omitted.
+type ParametersOf<O extends { readonly parameters?: unknown }> = [O["parameters"]] extends [never]
+  ? Record<never, never>
+  : O["parameters"] extends Schema.Struct.Fields
+    ? O["parameters"]
+    : Record<never, never>;
 
 /**
  * The nested (decoded) struct fields of a query schema.
@@ -1647,7 +1668,8 @@ export type NestedFields<Res extends Any, O extends Options<Res>> = Types.Simpli
       ? { readonly filter: Schema.optionalKey<FilterAstSchema<Res>> }
       : FilterOf<O> extends Schema.Struct.Fields
         ? { readonly filter: Schema.optionalKey<Schema.Struct<FilterOf<O>>> }
-        : Record<never, never>)
+        : Record<never, never>) &
+    ParametersOf<O>
 >;
 
 /**
@@ -1684,7 +1706,9 @@ export type FlatFields<Res extends Any, O extends Options<Res>> = Types.Simplify
               K in keyof FilterOf<O> & string as `filter[${K}]`
             ]: Schema.optionalKey<Schema.String>;
           }
-        : Record<never, never>)
+        : Record<never, never>) & {
+      readonly [K in keyof ParametersOf<O> & string]: Schema.optionalKey<Schema.String>;
+    }
 >;
 
 // Resolves to `T` for every concrete query configuration; needed because the
@@ -1738,6 +1762,24 @@ const fieldsetTargetsOf = (
   }
   return targets.filter((target) => fields.includes(target.type));
 };
+
+// Declares each implementation-specific parameter on both sides: decoded
+// through its own schema, carried as a string on the wire.
+const addParameters = (
+  { parameters = {} }: { readonly parameters?: Schema.Struct.Fields },
+  nestedFields: Record<string, Schema.Top>,
+  flatFields: Record<string, Schema.Top>,
+): void =>
+  Arr.forEach(R.toEntries(parameters), ([key, field]) => {
+    if (/[[\]]/.test(key) || isFamily(key) || R.has(nestedFields, key)) {
+      throw declarationError(
+        `Query.schema: implementation-specific parameter "${key}" must be a bare name ` +
+          "that is not one of the specification's families (include, fields, sort, page, filter)",
+      );
+    }
+    nestedFields[key] = field as Schema.Top;
+    flatFields[key] = Schema.optionalKey(Schema.String);
+  });
 
 /**
  * Builds the query schema for a resource (or, for heterogeneous endpoints,
@@ -1878,6 +1920,8 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
     });
   }
 
+  addParameters(options, nestedFields, flatFields);
+
   const flatStruct = Schema.Struct(flatFields);
   const flat = Option.isNone(filterFields)
     ? flatStruct
@@ -1893,7 +1937,7 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
   // fields it is a no-op, the struct having dropped the rest already.
   const declaredOnly = (values: Values): Values =>
     R.filter(values, (_, key) => R.has(flatFields, key));
-  return flat.pipe(
+  const result = flat.pipe(
     Schema.decodeTo(
       nested,
       Option.match(filterFields, {
@@ -1941,6 +1985,64 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
       }),
     ),
   ) as QuerySchema<Res, O>;
+  built.set(result, { resources, options });
+  return result;
+};
+
+// What each `schema` result was built from, so `extend` can rebuild it with
+// more parameters rather than wrapping its transformation.
+const built = new WeakMap<
+  object,
+  { readonly resources: ReadonlyArray<Any>; readonly options: Options<Any> }
+>();
+
+/**
+ * Adds implementation-specific query parameters to a query schema
+ * {@link schema} built, keeping every family it derived: the way to step one
+ * parameter off a derived contract, as an endpoint's
+ * `query: (derived) => Query.extend(derived, { … })` does. Each key follows
+ * {@link Options.parameters}' rules, and one already declared is replaced.
+ *
+ * Throws for a schema {@link schema} did not build.
+ *
+ * @example
+ * ```ts
+ * import { deepStrictEqual } from "node:assert"
+ * import { Schema } from "effect"
+ * import { Query, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", { attributes: { title: Schema.String } })
+ *
+ * const query = Query.extend(Query.schema(Article, { sort: true }), {
+ *   includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"]))
+ * })
+ * deepStrictEqual(
+ *   Schema.decodeUnknownSync(query)({ sort: "-title", includeDeleted: "true" }),
+ *   { sort: [{ field: "title", direction: "desc" }], includeDeleted: "true" }
+ * )
+ * ```
+ *
+ * @since 0.23.0
+ * @category constructors
+ */
+export const extend = <
+  Res extends Any,
+  O extends Options<Res>,
+  const Parameters extends Schema.Struct.Fields,
+>(
+  derived: QuerySchema<Res, O>,
+  parameters: Parameters,
+): QuerySchema<Res, O & { readonly parameters: Parameters }> => {
+  const source = built.get(derived);
+  if (source === undefined) {
+    throw declarationError(
+      "Query.extend: the schema was not built by Query.schema, so its families can't be rebuilt",
+    );
+  }
+  return schema(source.resources, {
+    ...source.options,
+    parameters: { ...source.options.parameters, ...parameters },
+  }) as never;
 };
 
 // ---------------------------------------------------------------------------

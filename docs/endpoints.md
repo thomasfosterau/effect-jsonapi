@@ -161,6 +161,17 @@ const articles = Group.resource(Article, {
 });
 ```
 
+To change one top-level member and keep the derived `included` union and partial fieldsets, pass a function of the derived document. `Document.extend` sets `meta` and / or `links`:
+
+```ts
+Endpoint.list(Article, {
+  include: true,
+  success: (derived) => Document.extend(derived, { meta: Schema.Struct({ total: Schema.Int }) }),
+});
+```
+
+`payload` takes a function of its derived default the same way.
+
 ## Overriding the write status
 
 `Endpoint.create` answers `201 Created` and `Endpoint.update` `200 OK` — the spec's recommendation for a creation that returns the created resource, and the status `HttpApi` gives any success schema carrying a body. Some apis answer their whole write surface with 200, or accept a write for later application and answer `202`.
@@ -240,6 +251,22 @@ const articles = Group.resource(Article, {
 Some apis want a different one — a **flat** list input their operations layer consumes directly, with entity foreign keys and flags JSON:API has no query family for. Forcing such a flag through `filter` would put it on the wire as `filter[includeDeleted]`, which is not what those clients send.
 
 Pass `query` to supply the whole schema. It defaults to today's composition, so existing endpoints are unchanged; the feature options are simply ignored once `query` is given, and the success document, path, errors and middleware stay as they were.
+
+To add one parameter and keep the derived families, pass a function of the derived query instead. `Query.extend` declares the parameter on both sides of the flat / nested transformation, so the handler receives it decoded and the reserved-parameter check sees it as declared:
+
+```ts
+// GET /articles?sort=-title&include=author&includeDeleted=true
+Endpoint.list(Article, {
+  include: true,
+  sort: true,
+  query: (derived) =>
+    Query.extend(derived, {
+      includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"])),
+    }),
+});
+```
+
+Each added parameter's schema decodes from a string, and its name is a bare name that isn't one of the spec's families. `Query.schema(R, { parameters: { … } })` declares the same thing up front.
 
 ```ts
 // GET /articles?page[offset]=20&page[limit]=10&sort=-createdAt&authorId=9&includeDeleted=true

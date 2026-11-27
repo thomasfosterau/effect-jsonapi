@@ -23,6 +23,7 @@ import * as JsonPointer from "effect/JsonPointer";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
+import type * as Types from "effect/Types";
 
 // ---------------------------------------------------------------------------
 // Meta
@@ -671,6 +672,65 @@ export const DataDocument = <
     ...includedMember(options?.included),
     ...topLevelMembers(options?.meta),
   });
+
+/**
+ * The top-level members {@link extend} can set on a document schema: the
+ * document's `meta` and `links`, each optional on the wire.
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export interface TopLevelMembers {
+  readonly meta?: Schema.Top;
+  readonly links?: Schema.Top;
+}
+
+// The fields of a document `extend` set members on; the conditional
+// re-asserts `Struct.Fields`, which TypeScript can't prove while generic.
+type ExtendedFields<Fields extends Schema.Struct.Fields, Members> =
+  Types.Simplify<
+    Omit<Fields, keyof Members> & {
+      readonly [K in keyof Members]: Schema.optionalKey<Members[K] & Schema.Top>;
+    }
+  > extends infer T extends Schema.Struct.Fields
+    ? T
+    : never;
+
+/**
+ * Sets a document schema's top-level `meta` and / or `links`, keeping every
+ * other member as derived (`data`, `included` and its partial fieldsets) —
+ * what an endpoint's `success: (derived) => Document.extend(derived, { meta })`
+ * does to step one member off its default document. Each member stays
+ * optional, as the specification has it.
+ *
+ * @example
+ * ```ts
+ * import { strictEqual } from "node:assert"
+ * import { Schema } from "effect"
+ * import { Document, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", { attributes: { title: Schema.String } })
+ *
+ * const Paged = Document.extend(Article.collection(), {
+ *   meta: Schema.Struct({ total: Schema.Int })
+ * })
+ * const decoded = Schema.decodeUnknownSync(Paged)({ data: [], meta: { total: 0 } })
+ * strictEqual(decoded.meta?.total, 0)
+ * ```
+ *
+ * @since 0.23.0
+ * @category constructors
+ */
+export const extend = <Fields extends Schema.Struct.Fields, const Members extends TopLevelMembers>(
+  document: Schema.Struct<Fields>,
+  members: Members,
+): Schema.Struct<ExtendedFields<Fields, Members>> =>
+  document.mapFields((fields) => {
+    const set: Types.Mutable<Schema.Struct.Fields> = {};
+    if (members.meta !== undefined) set.meta = Schema.optionalKey(members.meta);
+    if (members.links !== undefined) set.links = Schema.optionalKey(members.links);
+    return { ...fields, ...set };
+  }) as never;
 
 /**
  * The decoded *value* type of a single-resource data document for `Res` — the

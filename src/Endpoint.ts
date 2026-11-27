@@ -164,6 +164,26 @@ export type Wires<Errors extends ReadonlyArray<ErrorClass>> = {
   readonly [K in keyof Errors]: Errors[K]["wire"];
 };
 
+/**
+ * An endpoint override: a schema replacing the derived default whole, or a
+ * function of the default that extends it (`(derived) => …`).
+ *
+ * @since 0.23.0
+ * @category models
+ */
+export type Override<Derived, S> = S | ((derived: Derived) => S);
+
+// Resolves an `Override`: the default when absent, a function of it, or the
+// replacement. A schema class is a function too, so a schema is checked first.
+const override = <Derived, S>(
+  option: Option.Option<Override<Derived, S>>,
+  derive: () => Derived,
+): Derived | S =>
+  Option.match(option, {
+    onNone: derive,
+    onSome: (value) => (!Schema.isSchema(value) && P.isFunction(value) ? value(derive()) : value),
+  });
+
 const wires = <const Errors extends ReadonlyArray<ErrorClass>>(errors?: Errors): Wires<Errors> =>
   ((errors ?? []) as Errors).map((error) => error.wire) as Wires<Errors>;
 
@@ -581,20 +601,31 @@ export const get = <
      * Override the whole query schema. Defaults to the `Query.schema`
      * composition of the `include` / `fields` options above (which those
      * options are then ignored by); pass any schema for a read contract of your
-     * own — the counterpart to `list`'s `query`.
+     * own — the counterpart to `list`'s `query`. A function of the derived
+     * query extends it instead (since 0.23.0): `(derived) =>
+     * Query.extend(derived, { includeDeleted: … })` adds one parameter and
+     * keeps the families the options declare.
      *
      * @since 0.11.0
      */
-    readonly query?: QuerySchema;
+    readonly query?: Override<
+      DefaultGetQuery<Type, Attributes, Rels, Meta, IdSchema, Include, Fields>,
+      QuerySchema
+    >;
     /**
      * Override the success document schema. Defaults to the resource's
      * `document()` (which `meta` then tunes); pass a wire variant of the
      * resource, or any schema of your own — it is served as
-     * `application/vnd.api+json`.
+     * `application/vnd.api+json`. A function of the derived document
+     * extends it instead (since 0.23.0), e.g. with
+     * `Document.extend(derived, { meta })`.
      *
      * @since 0.10.0
      */
-    readonly success?: Success;
+    readonly success?: Override<
+      DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta, Include, Fields>,
+      Success
+    >;
   },
 ) =>
   HttpApiEndpoint.get(
@@ -603,7 +634,7 @@ export const get = <
     {
       params: Schema.Struct({ id: resource.Id }),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
-      query: (options?.query ??
+      query: override(Option.fromUndefinedOr(options?.query), () =>
         Query.schema(
           resource,
           queryConfig(options) as {
@@ -613,9 +644,13 @@ export const get = <
             readonly page: never;
             readonly filter: never;
           },
-        )) as QuerySchema,
+        ),
+      ) as QuerySchema,
       success: asJsonApiProfiled(
-        (options?.success ?? defaultDocument(resource, "document", options)) as Success,
+        override(
+          Option.fromUndefinedOr(options?.success),
+          () => defaultDocument(resource, "document", options) as never,
+        ) as Success,
         profilesOf(options),
       ),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
@@ -818,18 +853,40 @@ export const list = <
      * composition of the `include` / `fields` / `sort` / `page` / `filter`
      * options above (which those options are then ignored by); pass any schema
      * for a list contract of your own — e.g. a flat struct whose page cursor is
-     * bracketed on the wire by `Query.bracketPageKeys` but decoded flat.
+     * bracketed on the wire by `Query.bracketPageKeys` but decoded flat. A
+     * function of the derived query extends it instead (since 0.23.0):
+     * `(derived) => Query.extend(derived, { includeDeleted: … })`.
      */
-    readonly query?: QuerySchema;
+    readonly query?: Override<
+      DefaultListQuery<
+        Type,
+        Attributes,
+        Rels,
+        Meta,
+        IdSchema,
+        Include,
+        Fields,
+        Sort,
+        PageFields,
+        FilterFields
+      >,
+      QuerySchema
+    >;
     /**
      * Override the success document schema. Defaults to the resource's
      * `collection()` (which `meta` then tunes); pass a collection document over
      * a wire variant of the resource, or any schema of your own — it is served
-     * as `application/vnd.api+json`.
+     * as `application/vnd.api+json`. A function of the derived document
+     * extends it instead (since 0.23.0), e.g.
+     * `(derived) => Document.extend(derived, { meta })`, keeping `included`
+     * and the partial fieldsets.
      *
      * @since 0.10.0
      */
-    readonly success?: Success;
+    readonly success?: Override<
+      DefaultCollection<Type, Attributes, Rels, Meta, IdSchema, DocMeta, Include, Fields>,
+      Success
+    >;
   },
 ) =>
   HttpApiEndpoint.get(
@@ -837,7 +894,7 @@ export const list = <
     (options?.path ?? `/${resource.type}`) as Path,
     {
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
-      query: (options?.query ??
+      query: override(Option.fromUndefinedOr(options?.query), () =>
         Query.schema(
           resource,
           queryConfig(options) as {
@@ -847,9 +904,13 @@ export const list = <
             readonly page: PageFields;
             readonly filter: FilterFields;
           },
-        )) as QuerySchema,
+        ),
+      ) as QuerySchema,
       success: asJsonApiProfiled(
-        (options?.success ?? defaultDocument(resource, "collection", options)) as Success,
+        override(
+          Option.fromUndefinedOr(options?.success),
+          () => defaultDocument(resource, "collection", options) as never,
+        ) as Success,
         profilesOf(options),
       ),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
@@ -994,9 +1055,13 @@ export const create = <
     /**
      * Override the request payload schema. Defaults to the resource's
      * `createPayload` (the JSON:API envelope); pass `resource.createInput` for
-     * the flat command-input shape, or any schema of your own.
+     * the flat command-input shape, or any schema of your own. A function of
+     * the derived payload extends it instead (since 0.23.0).
      */
-    readonly payload?: Payload;
+    readonly payload?: Override<
+      Resource<Type, Attributes, Rels, Meta, IdSchema>["createPayload"],
+      Payload
+    >;
     /**
      * The media type the request payload is registered under, which the router
      * matches a request's `Content-Type` against. Defaults to
@@ -1010,11 +1075,15 @@ export const create = <
      * Override the success document schema. Defaults to the resource's
      * `document()` (which `meta` then tunes); pass a wire variant of the
      * resource, or any schema of your own — it is served as
-     * `application/vnd.api+json`, at the same status as the default.
+     * `application/vnd.api+json`, at the same status as the default. A
+     * function of the derived document extends it instead (since 0.23.0).
      *
      * @since 0.10.0
      */
-    readonly success?: Success;
+    readonly success?: Override<
+      DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
+      Success
+    >;
     /**
      * The success status. Defaults to 201 — the spec's recommendation for a
      * creation answering with the created resource — whether or not `success`
@@ -1043,16 +1112,20 @@ export const create = <
           Idempotency.headersFor(options?.idempotency),
         ) as Idempotency.HeadersFor<Idem>,
         payload: asMediaType(
-          (options?.payload ?? resource.createPayload) as Payload,
+          override(
+            Option.fromUndefinedOr(options?.payload),
+            () => resource.createPayload,
+          ) as Payload,
           options?.payloadMediaType ?? MEDIA_TYPE,
         ),
         success: asJsonApiProfiled(
-          (options?.success ??
+          override(Option.fromUndefinedOr(options?.success), () =>
             resource.document(
               (options?.meta !== undefined ? { meta: options.meta } : {}) as {
                 readonly meta?: DocMeta;
               },
-            )) as Success,
+            ),
+          ) as Success,
           profilesOf(options),
           options?.status ?? 201,
         ),
@@ -1157,9 +1230,13 @@ export const update = <
     /**
      * Override the request payload schema. Defaults to the resource's
      * `updatePayload` (the JSON:API envelope); pass `resource.updateInput` for
-     * the flat command-input shape, or any schema of your own.
+     * the flat command-input shape, or any schema of your own. A function of
+     * the derived payload extends it instead (since 0.23.0).
      */
-    readonly payload?: Payload;
+    readonly payload?: Override<
+      Resource<Type, Attributes, Rels, Meta, IdSchema>["updatePayload"],
+      Payload
+    >;
     /**
      * The media type the request payload is registered under, which the router
      * matches a request's `Content-Type` against. Defaults to
@@ -1173,11 +1250,15 @@ export const update = <
      * Override the success document schema. Defaults to the resource's
      * `document()` (which `meta` then tunes); pass a wire variant of the
      * resource, or any schema of your own — it is served as
-     * `application/vnd.api+json`.
+     * `application/vnd.api+json`. A function of the derived document extends
+     * it instead (since 0.23.0).
      *
      * @since 0.10.0
      */
-    readonly success?: Success;
+    readonly success?: Override<
+      DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
+      Success
+    >;
     /**
      * The success status. Defaults to 200 — the status `HttpApi` gives a
      * success schema carrying a body — whether or not `success` is given.
@@ -1206,16 +1287,20 @@ export const update = <
           Idempotency.headersFor(options?.idempotency),
         ) as Idempotency.HeadersFor<Idem>,
         payload: asMediaType(
-          (options?.payload ?? resource.updatePayload) as Payload,
+          override(
+            Option.fromUndefinedOr(options?.payload),
+            () => resource.updatePayload,
+          ) as Payload,
           options?.payloadMediaType ?? MEDIA_TYPE,
         ),
         success: asJsonApiProfiled(
-          (options?.success ??
+          override(Option.fromUndefinedOr(options?.success), () =>
             resource.document(
               (options?.meta !== undefined ? { meta: options.meta } : {}) as {
                 readonly meta?: DocMeta;
               },
-            )) as Success,
+            ),
+          ) as Success,
           profilesOf(options),
           options?.status,
         ),
