@@ -94,6 +94,7 @@ import { isFamily, vocabularyAnnotation, vocabularyAnnotations } from "./interna
 import type {
   Any,
   AttributeKeys,
+  SortKeys,
   FieldKeys,
   Filterable,
   FilterableKeys,
@@ -1202,7 +1203,11 @@ export const FILTER_PROFILE_URI: typeof PROFILE_URI = PROFILE_URI;
  * @category type-level
  */
 export type FilterFields<Res extends Any> = {
-  readonly [K in FilterableKeys<Res>]: Filterable<Res>[K]["literal"]["Type"];
+  readonly [K in FilterableKeys<Res>]: Filterable<Res>[K] extends {
+    readonly literal: { readonly Type: infer Literal };
+  }
+    ? Literal
+    : never;
 };
 
 /**
@@ -1529,7 +1534,7 @@ export interface Options<Res extends Any> {
    * Both wire spellings are accepted — `?sort=-createdAt,title` and
    * `?sort=-createdAt&sort=title` — and decode to the same list.
    */
-  readonly sort?: boolean | ReadonlyArray<AttributeKeys<Res>>;
+  readonly sort?: boolean | ReadonlyArray<SortKeys<Res>>;
   /**
    * Enable `?page[*]=` pagination. Pass one of the {@link Page} strategies or
    * custom `Schema.Struct.Fields` (each key becomes `page[<key>]`). Under the

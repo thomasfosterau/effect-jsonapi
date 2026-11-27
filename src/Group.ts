@@ -42,7 +42,7 @@ import type * as Idempotency from "./Idempotency.js";
 import type { AnySurface } from "./Include.js";
 import * as Query from "./Query.js";
 import type { Relationships } from "./Relationship.js";
-import type { AttributeKeys, Id, Parameter, Resource } from "./Resource.js";
+import type { Id, Parameter, Resource, SortKeys } from "./Resource.js";
 
 /**
  * Creates an `HttpApiGroup` named after a resource's type — or after a plain
@@ -174,7 +174,7 @@ export const resource = <
   const Fields extends boolean = true,
   const Sort extends
     | boolean
-    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
+    | ReadonlyArray<SortKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
   const Page extends Schema.Struct.Fields = never,
   const Filter extends Schema.Struct.Fields = never,
   const GMeta extends Schema.Top = Meta,

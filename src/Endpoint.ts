@@ -127,7 +127,7 @@ import type {
 import { fieldsetTypes, sparseMember, sparseResource, sparseUnion } from "./internal/sparse.js";
 import type {
   Any,
-  AttributeKeys,
+  SortKeys,
   ClientIdPayload,
   ClientIdPresence,
   DefaultIncluded,
@@ -751,9 +751,7 @@ type DefaultListQuery<
   IdSchema extends Schema.Codec<unknown, string>,
   Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean,
-  Sort extends
-    | boolean
-    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
+  Sort extends boolean | ReadonlyArray<SortKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   PageFields extends Schema.Struct.Fields,
   FilterFields extends Query.FilterOption,
 > = Query.QuerySchema<
@@ -864,7 +862,7 @@ export const list = <
   const Fields extends boolean = false,
   const Sort extends
     | boolean
-    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = false,
+    | ReadonlyArray<SortKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = false,
   const PageFields extends Schema.Struct.Fields = never,
   const FilterFields extends Query.FilterOption = never,
   DocMeta extends Schema.Top = Meta,
@@ -1850,7 +1848,7 @@ export const collection = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Include extends Query.IncludeOption<Resources[number]> = false,
   const Fields extends boolean = false,
-  const Sort extends boolean | ReadonlyArray<AttributeKeys<Resources[number]>> = false,
+  const Sort extends boolean | ReadonlyArray<SortKeys<Resources[number]>> = false,
   const PageFields extends Schema.Struct.Fields = never,
   const FilterFields extends Schema.Struct.Fields = never,
   DocMeta extends Schema.Top = typeof AnyMeta,
@@ -2671,7 +2669,7 @@ export const related = <
   const Fields extends boolean = false,
   const Sort extends
     | boolean
-    | ReadonlyArray<AttributeKeys<Target<Resource<Type, Attributes, Rels, Meta, IdSchema>, Name>>> =
+    | ReadonlyArray<SortKeys<Target<Resource<Type, Attributes, Rels, Meta, IdSchema>, Name>>> =
     false,
   const PageFields extends Schema.Struct.Fields = never,
   const FilterFields extends Query.FilterOption = never,
@@ -3859,7 +3857,7 @@ export interface GetConfig<Meta extends Schema.Top, Res extends Any = Any> {
  * @category models
  */
 export interface ListConfig<Res extends Any, Meta extends Schema.Top> extends GetConfig<Meta, Res> {
-  readonly sort?: boolean | ReadonlyArray<AttributeKeys<Res>>;
+  readonly sort?: boolean | ReadonlyArray<SortKeys<Res>>;
   readonly page?: Schema.Struct.Fields;
   /** `true` for the filter grammar over the resource's declaration, or a per-key field map. */
   readonly filter?: Query.FilterOption;
@@ -4157,8 +4155,8 @@ type ListInclude<C, Res extends Any, GInclude extends Query.IncludeOption<Res>> 
     : GInclude;
 type ListFields<C, GFields extends boolean> =
   FieldOr<C, "fields", GFields> extends boolean ? FieldOr<C, "fields", GFields> : GFields;
-type ListSort<C, Res extends Any, GSort extends boolean | ReadonlyArray<AttributeKeys<Res>>> =
-  FieldOr<C, "sort", GSort> extends boolean | ReadonlyArray<AttributeKeys<Res>>
+type ListSort<C, Res extends Any, GSort extends boolean | ReadonlyArray<SortKeys<Res>>> =
+  FieldOr<C, "sort", GSort> extends boolean | ReadonlyArray<SortKeys<Res>>
     ? FieldOr<C, "sort", GSort>
     : GSort;
 type ListPage<C, GPage extends Schema.Struct.Fields> =
@@ -4240,9 +4238,7 @@ type GeneratedList<
   GErrors extends ReadonlyArray<ErrorClass>,
   GInclude extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   GFields extends boolean,
-  GSort extends
-    | boolean
-    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
+  GSort extends boolean | ReadonlyArray<SortKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   GPage extends Schema.Struct.Fields,
   GFilter extends Query.FilterOption,
   GMeta,
@@ -4618,9 +4614,7 @@ export type ResourceEndpoint<
   Errors extends ReadonlyArray<ErrorClass>,
   Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean,
-  Sort extends
-    | boolean
-    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
+  Sort extends boolean | ReadonlyArray<SortKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields,
   Filter extends Query.FilterOption,
   GMeta,
@@ -4680,9 +4674,7 @@ export type ResourceEndpoints<
   Errors extends ReadonlyArray<ErrorClass>,
   Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean,
-  Sort extends
-    | boolean
-    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
+  Sort extends boolean | ReadonlyArray<SortKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields,
   Filter extends Query.FilterOption,
   GMeta,
@@ -4735,9 +4727,7 @@ export interface ResourceOptions<
   Errors extends ReadonlyArray<ErrorClass>,
   Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean,
-  Sort extends
-    | boolean
-    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
+  Sort extends boolean | ReadonlyArray<SortKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields,
   Filter extends Query.FilterOption,
   GMeta extends Schema.Top,
@@ -4963,7 +4953,7 @@ export const resource = <
   const Fields extends boolean = true,
   const Sort extends
     | boolean
-    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
+    | ReadonlyArray<SortKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
   const Page extends Schema.Struct.Fields = never,
   const Filter extends Query.FilterOption = never,
   const GMeta extends Schema.Top = Meta,
